@@ -997,6 +997,37 @@ test_worker_account_pin_follows_the_relaunch() {
   pass "fm-control relaunch: the replacement follows the home's current worker account pin"
 }
 
+test_codex_worker_account_pin_follows_the_relaunch() {
+  local dir out rc id=rl-acct-codex
+  dir=$(new_case acct-codex "$id")
+  add_ship_task "$dir" "$id" codex
+  printf 'codex' > "$dir/fake/command"
+  printf 'codex' > "$dir/fake/becomes"
+  cat > "$dir/fakebin/codex" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-}" = login ] && [ "${2:-}" = status ] || exit 0
+[ -f "${CODEX_HOME:-$HOME/.codex}/auth.json" ]
+SH
+  chmod +x "$dir/fakebin/codex"
+  mkdir -p "$dir/home/config" "$dir/codex-b"
+  printf '%s\n' "$dir/codex-b" > "$dir/home/config/codex-account"
+  cp "$dir/home/state/$id.meta" "$dir/meta-before"
+  out=$(run_control "$dir" "$id" relaunch --note "codex account signed out"); rc=$?
+  expect_code 1 "$rc" "a relaunch under a signed-out Codex pin must refuse"
+  assert_contains "$out" "config/codex-account pins Codex workers to $dir/codex-b, which is not signed in" \
+    "the refusal should name the Codex pin and the signed-out root"
+  [ "$(cat "$dir/fake/command")" = codex ] || fail "a signed-out Codex pin must refuse before the running agent stops"
+  [ ! -s "$dir/fake/literal" ] || fail "a signed-out Codex pin must refuse before any lifecycle input is sent"
+  cmp -s "$dir/meta-before" "$dir/home/state/$id.meta" || fail "a refused relaunch must leave the task record untouched"
+  : > "$dir/codex-b/auth.json"
+  out=$(run_control "$dir" "$id" relaunch --note "codex account pinned"); rc=$?
+  expect_code 0 "$rc" "a relaunch under a signed-in Codex pin should succeed"$'\n'"$out"
+  [ "$(meta_field "$dir" "$id" account)" = "$dir/codex-b" ] || fail "the relaunched record should carry the pinned Codex account"
+  assert_contains "$(cat "$dir/fake/literal")" "-u CODEX_ACCESS_TOKEN" "the replacement should shed an ambient Codex token"
+  assert_contains "$(cat "$dir/fake/literal")" "CODEX_HOME='$dir/codex-b'" "the replacement should launch under the pinned Codex home"
+  pass "fm-control relaunch: a Codex pin refuses signed out before the old agent stops and carries into the replacement"
+}
+
 # add_listed_task <case-dir> <id> <recorded-account>: a live Claude ship
 # recorded on <recorded-account> in a home declaring two signed-in accounts,
 # first and second, plus a signed-out one.
@@ -3166,6 +3197,7 @@ test_same_harness_relaunch_keeps_the_profile_axes
 test_native_ultra_relaunch_preserves_profile_and_rejects_before_stop
 test_signed_out_worker_account_pin_refuses_before_stop
 test_worker_account_pin_follows_the_relaunch
+test_codex_worker_account_pin_follows_the_relaunch
 test_account_list_relaunch_reuses_the_recorded_account
 test_account_list_relaunch_moves_only_on_explicit_account
 test_account_list_relaunch_refusals_happen_before_stop

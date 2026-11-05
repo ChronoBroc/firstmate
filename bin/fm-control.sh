@@ -81,7 +81,7 @@
 #              already recorded for it.
 #              A prefixed raw-command basename cannot reconstruct its launch
 #              command, so relaunch requires an explicit --harness for it.
-#              A replacement Claude or Pi profile must also pass this home's
+#              A replacement Claude, Codex, or Pi profile must also pass this home's
 #              worker account pin (bin/fm-worker-account-lib.sh) here, so a pin
 #              that no longer resolves or is signed out refuses before the old
 #              agent stops. Under a declared config/claude-accounts list, a

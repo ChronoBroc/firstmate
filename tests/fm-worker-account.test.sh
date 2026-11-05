@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Behavior tests for the opt-in per-home worker account pin
-# (config/claude-account, config/pi-account; bin/fm-worker-account-lib.sh).
+# (config/claude-account, config/codex-account, config/pi-account;
+# bin/fm-worker-account-lib.sh).
 #
 # Each case drives the real fm-spawn.sh through the shared fake tmux, which
 # records the launch command, then runs that command in a synthetic pane whose
-# ambient environment carries a different account. The fake claude and pi
+# ambient environment carries a different account. The fake claude, codex, and pi
 # answer the sign-in checks the way the real runners do - an environment
 # credential counts as signed in, otherwise the selected root's stored login
 # decides - and record the account environment and arguments a launched worker
@@ -16,7 +17,8 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-worker-account)
-unset LAVISH_AXI_HOST ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN PI_CODING_AGENT_DIR OPENAI_API_KEY
+unset LAVISH_AXI_HOST ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN PI_CODING_AGENT_DIR OPENAI_API_KEY \
+  CODEX_HOME CODEX_ACCESS_TOKEN CODEX_API_KEY OPENAI_IDENTITY_TOKEN_FILE OPENAI_FEDERATION_RULE_ID
 
 # make_account_fakes <fakebin> <case-dir>
 # The fakes cannot read test variables during a sign-in check, which runs with
@@ -37,6 +39,20 @@ fi
   printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "\${CLAUDE_CODE_OAUTH_TOKEN-unset}"
   printf 'CLAUDE_CODE_USE_BEDROCK=%s\n' "\${CLAUDE_CODE_USE_BEDROCK-unset}"
 } > '$dir/claude-worker'
+SH
+  cat > "$fakebin/codex" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = login ] && [ "\${2:-}" = status ]; then
+  printf '%s\n' "\${CODEX_HOME-unset}" >> '$dir/codex-checks'
+  [ -z "\${CODEX_ACCESS_TOKEN:-}" ] || exit 0
+  [ -f "\${CODEX_HOME:-\$HOME/.codex}/auth.json" ]
+  exit
+fi
+{
+  for var in CODEX_HOME CODEX_ACCESS_TOKEN CODEX_API_KEY OPENAI_IDENTITY_TOKEN_FILE OPENAI_FEDERATION_RULE_ID OPENAI_API_KEY; do
+    printf '%s=%s\n' "\$var" "\${!var-unset}"
+  done
+} > '$dir/codex-worker'
 SH
   cat > "$fakebin/pi" <<SH
 #!/usr/bin/env bash
@@ -69,7 +85,7 @@ esac
   printf 'ARGS=%s\n' "\$*"
 } > '$dir/pi-worker'
 SH
-  chmod +x "$fakebin/claude" "$fakebin/pi"
+  chmod +x "$fakebin/claude" "$fakebin/codex" "$fakebin/pi"
   cp "$fakebin/pi" "$fakebin/pi-signed"
 }
 
@@ -113,6 +129,8 @@ run_pane() {
     CLAUDE_CONFIG_DIR="$CASE/ambient-claude" ANTHROPIC_API_KEY=ambient-pane-key \
     CLAUDE_CODE_OAUTH_TOKEN=ambient-pane-token CLAUDE_CODE_USE_BEDROCK=1 \
     PI_CODING_AGENT_DIR="$CASE/ambient-pi" OPENAI_API_KEY=ambient-pane-openai \
+    CODEX_HOME="$CASE/ambient-codex" CODEX_ACCESS_TOKEN=ambient-pane-codex-token CODEX_API_KEY=ambient-pane-codex-key \
+    OPENAI_IDENTITY_TOKEN_FILE="$CASE/ambient-identity" OPENAI_FEDERATION_RULE_ID=ambient-rule \
     bash -c "$(cat "$CASE/launch.log")" || fail "the recorded launch failed in the synthetic pane"
 }
 
@@ -360,6 +378,126 @@ test_raw_claude_account_override_is_kept_without_a_pin() {
   pass "an unpinned home keeps a raw Claude account override"
 }
 
+# signed_in_codex_root <dir>: a Codex home holding a stored login.
+signed_in_codex_root() {
+  mkdir -p "$1"
+  printf '{}\n' > "$1/auth.json"
+}
+
+test_codex_absent_pin_keeps_the_launch_unchanged() {
+  local out rc id=acct-codex-absent
+  new_case codex-absent codex
+  out=$(CODEX_HOME="$CASE/ambient-codex" CODEX_ACCESS_TOKEN=ambient-invoker-token spawn_ship "$id"); rc=$?
+  expect_code 0 "$rc" "an unpinned Codex spawn should succeed: $out"
+  assert_not_contains "$out" "account=" "an unpinned Codex spawn must not report an account"
+  assert_no_grep "account=" "$HOME_DIR/state/$id.meta" "an unpinned Codex task record must not carry an account"
+  assert_absent "$CASE/codex-checks" "an unpinned Codex spawn must not run a sign-in check"
+  assert_not_contains "$(cat "$CASE/launch.log")" "CODEX_" "an unpinned Codex launch must not name a Codex variable"
+  run_pane
+  assert_grep "CODEX_HOME=$CASE/ambient-codex" "$CASE/codex-worker" "an unpinned Codex launch must keep the pane's own CODEX_HOME"
+  assert_grep "CODEX_ACCESS_TOKEN=ambient-pane-codex-token" "$CASE/codex-worker" \
+    "an unpinned Codex launch must leave the pane's environment credentials alone"
+  pass "an absent Codex pin leaves the Codex launch exactly as it was"
+}
+
+test_codex_pin_selects_the_root_and_sheds_ambient_credentials() {
+  local out rc id=acct-codex
+  new_case codex-pin codex
+  signed_in_codex_root "$CASE/codex-b"
+  printf '%s\n' "$CASE/codex-b" > "$HOME_DIR/config/codex-account"
+  out=$(spawn_ship "$id"); rc=$?
+  expect_code 0 "$rc" "a Codex spawn pinned to a signed-in root should succeed: $out"
+  assert_contains "$out" "account=$CASE/codex-b" "the spawn should report the pinned Codex account"
+  assert_grep "account=$CASE/codex-b" "$HOME_DIR/state/$id.meta" "the task record should carry the pinned Codex account"
+  [ "$(cat "$CASE/codex-checks")" = "$CASE/codex-b" ] \
+    || fail "the Codex sign-in check should ask about the pinned root only: $(cat "$CASE/codex-checks")"
+  run_pane
+  assert_grep "CODEX_HOME=$CASE/codex-b" "$CASE/codex-worker" "the Codex worker should run under the pinned root, not the pane's"
+  assert_grep "CODEX_ACCESS_TOKEN=unset" "$CASE/codex-worker" "an ambient Codex access token must not outrank the pin"
+  assert_grep "CODEX_API_KEY=unset" "$CASE/codex-worker" "an ambient Codex API key must not outrank the pin"
+  assert_grep "OPENAI_IDENTITY_TOKEN_FILE=unset" "$CASE/codex-worker" "an ambient workload identity must not outrank the pin"
+  assert_grep "OPENAI_FEDERATION_RULE_ID=unset" "$CASE/codex-worker" "an ambient workload identity rule must not outrank the pin"
+  assert_grep "OPENAI_API_KEY=ambient-pane-openai" "$CASE/codex-worker" \
+    "a provider key Codex does not rank above its login must be left alone"
+  pass "a Codex pin selects its root over the pane's CODEX_HOME and sheds the credentials that would outrank it"
+}
+
+test_codex_pin_refuses_a_signed_out_root_despite_an_ambient_token() {
+  local out rc id=acct-codex-out
+  new_case codex-signed-out codex
+  mkdir -p "$CASE/codex-b"
+  printf '%s\n' "$CASE/codex-b" > "$HOME_DIR/config/codex-account"
+  out=$(CODEX_ACCESS_TOKEN=ambient-invoker-token spawn_ship "$id"); rc=$?
+  expect_code 1 "$rc" "a Codex pin to a signed-out root must refuse"
+  assert_refused_before_launch "$id" "$out" "config/codex-account pins Codex workers to $CASE/codex-b, which is not signed in (codex login status)"
+  assert_contains "$out" "CODEX_HOME=$CASE/codex-b codex login" "the refusal should name the login the pin needs"
+  pass "a Codex pin refuses a signed-out root even when the invoking process carries a Codex token"
+}
+
+test_codex_ordinary_pin_unsets_codex_home() {
+  local out rc id=acct-codex-ordinary
+  new_case codex-ordinary codex
+  printf 'ordinary' > "$HOME_DIR/config/codex-account"
+  out=$(CODEX_HOME="$CASE/ambient-codex" spawn_ship "$id"); rc=$?
+  expect_code 1 "$rc" "an ordinary Codex pin with no default login must refuse"
+  assert_refused_before_launch "$id" "$out" "pins Codex workers to the ordinary account, which is not signed in"
+  signed_in_codex_root "$HOME_DIR/user-home/.codex"
+  : > "$CASE/codex-checks"
+  out=$(CODEX_HOME="$CASE/ambient-codex" spawn_ship "$id"); rc=$?
+  expect_code 0 "$rc" "an ordinary Codex pin with a default login should succeed: $out"
+  assert_contains "$out" "account=ordinary" "the spawn should report the ordinary Codex account"
+  [ "$(cat "$CASE/codex-checks")" = unset ] \
+    || fail "the ordinary Codex check must run with CODEX_HOME unset: $(cat "$CASE/codex-checks")"
+  run_pane
+  assert_grep "CODEX_HOME=unset" "$CASE/codex-worker" "the ordinary Codex account must drop the pane's CODEX_HOME"
+  assert_grep "CODEX_ACCESS_TOKEN=unset" "$CASE/codex-worker" "an ambient Codex token must not outrank the ordinary pin"
+  pass "an ordinary Codex pin selects the default login and drops an ambient CODEX_HOME"
+}
+
+test_codex_malformed_and_unusable_pins_refuse_before_launch() {
+  local out rc id=acct-codex-bad n=0 body
+  new_case codex-malformed codex
+  signed_in_codex_root "$CASE/codex-b"
+  : > "$CASE/not-a-dir"
+  for body in 'relative/root' "$CASE/codex-b"$'\r' '' 'ordinary'$'\n''extra' "$CASE/missing-root" "$CASE/not-a-dir"; do
+    n=$((n + 1))
+    printf '%s' "$body" > "$HOME_DIR/config/codex-account"
+    out=$(spawn_ship "$id-$n"); rc=$?
+    expect_code 1 "$rc" "malformed or unusable Codex pin #$n must refuse"
+    assert_refused_before_launch "$id-$n" "$out" "config/codex-account"
+  done
+  assert_contains "$out" "ordinary means ~/.codex with CODEX_HOME unset" "an unusable root refusal should say what ordinary means"
+  rm "$HOME_DIR/config/codex-account"
+  mkdir "$HOME_DIR/config/codex-account"
+  out=$(spawn_ship "$id-dir"); rc=$?
+  expect_code 1 "$rc" "a directory in place of the Codex pin must refuse"
+  assert_refused_before_launch "$id-dir" "$out" "config/codex-account must be a readable regular file"
+  assert_absent "$CASE/codex-checks" "a malformed or unusable Codex pin must refuse before any sign-in check"
+  pass "malformed, relative, CR-terminated, empty, extra-line, missing-root, non-directory, and non-file Codex pins refuse"
+}
+
+test_raw_codex_command_under_a_pin() {
+  local out rc id=acct-codex-raw var
+  new_case codex-raw codex
+  signed_in_codex_root "$CASE/codex-b"
+  signed_in_codex_root "$CASE/other"
+  printf '%s\n' "$CASE/codex-b" > "$HOME_DIR/config/codex-account"
+  out=$(spawn_ship "$id" --harness "codex --print raw"); rc=$?
+  expect_code 0 "$rc" "a raw Codex spawn under a signed-in pin should succeed: $out"
+  assert_contains "$out" "account=$CASE/codex-b" "a raw Codex spawn should report the pin"
+  run_pane
+  assert_grep "CODEX_HOME=$CASE/codex-b" "$CASE/codex-worker" "a raw Codex worker should run under the pinned root"
+  assert_grep "CODEX_ACCESS_TOKEN=unset" "$CASE/codex-worker" "a raw Codex worker must not keep an ambient token"
+  for var in "CODEX_HOME=$CASE/other" CODEX_ACCESS_TOKEN=override-token; do
+    out=$(spawn_ship "$id-${var%%=*}" --harness "FOO=1 $var codex --print raw"); rc=$?
+    expect_code 1 "$rc" "a raw Codex command setting ${var%%=*} must refuse under a pin"
+    assert_refused_before_launch "$id-${var%%=*}" "$out" "the raw launch command sets ${var%%=*}"
+    assert_contains "$out" "remove ${var%%=*} from the raw command, or change or remove config/codex-account" \
+      "the refusal should say how to proceed"
+  done
+  pass "a raw Codex command receives the pin, and one that overrides the account refuses"
+}
+
 test_local_secondmate_reads_the_launching_home_pin() {
   local out rc id=acct-sm sm
   new_case secondmate claude
@@ -400,20 +538,23 @@ spawn_account_secondmate() {
 
 test_secondmate_account_override() {
   local out rc id=acct-sm-override harness file variable worker
-  for harness in claude pi pi-signed; do
+  for harness in claude codex pi pi-signed; do
     new_case "secondmate-override-$harness" "$harness"
     case "$harness" in
     claude) file=claude-account; variable=CLAUDE_CONFIG_DIR; worker=claude ;;
+    codex) file=codex-account; variable=CODEX_HOME; worker=codex ;;
     *) file=pi-account; variable=PI_CODING_AGENT_DIR; worker=pi ;;
     esac
     signed_in_claude_root "$CASE/primary"
     signed_in_claude_root "$CASE/mate"
+    signed_in_codex_root "$CASE/primary"
+    signed_in_codex_root "$CASE/mate"
     printf 'openai-codex\n' > "$CASE/primary/signed-in"
     printf 'openai-codex\n' > "$CASE/mate/signed-in"
     printf '%s\n' "$CASE/primary" > "$HOME_DIR/config/$file"
     mkdir -p "$HOME_DIR/config/secondmate-accounts/$id" "$HOME_DIR/config/secondmate-accounts/acct-ship"
     printf '%s\n' "$CASE/mate" > "$HOME_DIR/config/secondmate-accounts/$id/$file"
-    if [ "$harness" != claude ]; then
+    if [ "$file" = pi-account ]; then
       printf 'openai-codex\n' >> "$HOME_DIR/config/$file"
       printf 'openai-codex\n' >> "$HOME_DIR/config/secondmate-accounts/$id/$file"
     fi
@@ -423,7 +564,7 @@ test_secondmate_account_override() {
     assert_contains "$out" "account=$CASE/mate" "the per-mate pin must override the primary's pin"
     run_pane
     assert_grep "$variable=$CASE/mate" "$CASE/$worker-worker" "the mate must receive its own account"
-    if [ "$harness" != claude ]; then
+    if [ "$file" = pi-account ]; then
       assert_grep '--provider openai-codex' "$CASE/$worker-worker" "the mate must receive its pinned provider"
     fi
     out=$(spawn_account_secondmate acct-other --model openai-codex/gpt-5.5); rc=$?
@@ -435,7 +576,7 @@ test_secondmate_account_override() {
     run_pane
     assert_grep "$variable=$CASE/primary" "$CASE/$worker-worker" "per-mate configuration must not pin ordinary workers"
   done
-  pass "Claude, Pi, and pi-signed secondmates use their own pins without changing other launches"
+  pass "Claude, Codex, Pi, and pi-signed secondmates use their own pins without changing other launches"
 }
 
 test_secondmate_account_refusals() {
@@ -646,6 +787,12 @@ test_a_pin_governs_only_its_own_runner
 test_raw_claude_command_receives_the_pin
 test_raw_claude_account_override_refuses_under_a_pin
 test_raw_claude_account_override_is_kept_without_a_pin
+test_codex_absent_pin_keeps_the_launch_unchanged
+test_codex_pin_selects_the_root_and_sheds_ambient_credentials
+test_codex_pin_refuses_a_signed_out_root_despite_an_ambient_token
+test_codex_ordinary_pin_unsets_codex_home
+test_codex_malformed_and_unusable_pins_refuse_before_launch
+test_raw_codex_command_under_a_pin
 test_local_secondmate_reads_the_launching_home_pin
 test_no_account_list_keeps_today_and_refuses_account
 test_account_list_launches_the_named_entry

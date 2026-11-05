@@ -490,15 +490,18 @@
 #   docs/configuration.md "Worker tool exclusions" owns config/crew-exclude-tools
 #   and its operator contract. Resolve it with bin/fm-exclude-tools-lib.sh
 #   before provisioning; __PIEXCLUDE__ below owns the Pi launch substitution.
-# Worker account pin (config/claude-account, config/pi-account):
+# Worker account pin (config/claude-account, config/codex-account,
+# config/pi-account):
 #   Opt-in. docs/configuration.md's "Worker account pin" section owns unpinned
 #   account selection. A present file pins every supported launch of
-#   that runner from this home - ship, scout, local secondmate, raw Claude
-#   command, and relaunch - to the declared account root, and the spawn
+#   that runner from this home - ship, scout, local secondmate, raw Claude or
+#   Codex command, and relaunch - to the declared account root, and the spawn
 #   refuses before any endpoint, worktree, or record exists when the file is
 #   malformed, the root is unusable, or the runner's own check says it is not
-#   signed in. A pinned Claude launch sheds the environment credentials Claude
-#   ranks above the root's login; a pinned Pi launch needs --model
+#   signed in. A pinned Claude or Codex launch names its root explicitly
+#   (CLAUDE_CONFIG_DIR or CODEX_HOME, unset for ordinary) and sheds the
+#   environment credentials that runner ranks above the root's login; a raw
+#   command setting either refuses. A pinned Pi launch needs --model
 #   <provider>/<id> for a declared provider and also carries --provider, and a
 #   raw Pi command refuses. The pin is recorded as account= (and Pi's
 #   account_provider=) in the task record and on the spawned line. A local
@@ -7566,14 +7569,23 @@ esac
 # an unset value is the single-store default and needs no prefix.
 # A home's worker account pin replaces that forwarding: the launch names the
 # pinned root (or unsets the variable for the ordinary Claude account) and
-# sheds the environment credentials Claude ranks above the root's login.
+# sheds the environment credentials Claude ranks above the root's login. A
+# Codex pin does the same with CODEX_HOME, which also outranks a CODEX_HOME
+# the pane inherits from tmux's global environment.
 if [ -n "$WORKER_ACCOUNT" ]; then
   case "$HARNESS" in
   claude)
     if [ -n "$WORKER_ACCOUNT_ROOT" ]; then
-      LAUNCH="$(fm_worker_account_claude_shed) CLAUDE_CONFIG_DIR=$(shell_quote "$WORKER_ACCOUNT_ROOT") $LAUNCH"
+      LAUNCH="$(fm_worker_account_shed claude) CLAUDE_CONFIG_DIR=$(shell_quote "$WORKER_ACCOUNT_ROOT") $LAUNCH"
     else
-      LAUNCH="$(fm_worker_account_claude_shed) -u CLAUDE_CONFIG_DIR $LAUNCH"
+      LAUNCH="$(fm_worker_account_shed claude) -u CLAUDE_CONFIG_DIR $LAUNCH"
+    fi
+    ;;
+  codex)
+    if [ -n "$WORKER_ACCOUNT_ROOT" ]; then
+      LAUNCH="$(fm_worker_account_shed codex) CODEX_HOME=$(shell_quote "$WORKER_ACCOUNT_ROOT") $LAUNCH"
+    else
+      LAUNCH="$(fm_worker_account_shed codex) -u CODEX_HOME $LAUNCH"
     fi
     ;;
   pi | pi-signed)

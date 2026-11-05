@@ -667,13 +667,17 @@ None of these three runs ever answered its dialog (Escape only, never Enter), so
 
 ## Worker account pin sign-in check
 
-`bin/fm-worker-account-lib.sh` decides whether a pinned account is signed in from vendor output: the exit status of `claude auth status`, the JSON of `pi auth check`, and the provider column of `pi --list-models`.
+`bin/fm-worker-account-lib.sh` decides whether a pinned account is signed in from vendor output: the exit status of `claude auth status` and `codex login status`, the JSON of `pi auth check`, and the provider column of `pi --list-models`.
 `tests/fm-worker-account-live-e2e.test.sh` asks the real installed runners about synthetic roots that need no login and no network, under a throwaway `HOME`.
 A Claude root whose `settings.json` names an `apiKeyHelper` reports `loggedIn: true`, a Pi root holding a stored API key reports `ready`, and a provider registered by an extension in the Pi root's `extensions/` answers `pi auth check` with `not_ready`/`provider_not_found` while `pi --list-models` lists it.
 Each refusal is paired with the divergence it depends on: the same runner, given `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or the extension's key variable, answers signed in for the empty root, so the refusal proves the check's cleared environment.
-Replacing `env -i` with `env` in the check makes the guard fail on the Claude refusal.
+A Codex home whose `auth.json` holds an API key answers `codex login status` with exit 0, and an empty home exits 1 with `Not logged in`.
+Codex's divergence runs the other way: a synthetic `CODEX_ACCESS_TOKEN` cannot sign an empty home in, but it takes over from the stored login (`Error checking login status: invalid agent identity JWT format`, exit 1), which is why a pinned Codex launch unsets it.
+The guard therefore proves the Codex check still accepts the signed-in home while the caller carries that token, and that an `ordinary` check ignores the caller's `CODEX_HOME`.
+Replacing `env -i` with `env` in the check makes the guard fail on the Claude refusal, and on the Codex acceptance when run alone.
 
 Verified 2026-09-22 on Claude Code 2.1.278 and pi 0.86.1 on Linux; pi-signed was not installed.
+Codex verified 2026-11-05 on codex-cli 0.166.0 on macOS, alongside Claude Code 2.1.318 and pi 1.5.0.
 
 ```sh
 bash tests/fm-worker-account-live-e2e.test.sh
@@ -686,7 +690,11 @@ skip-runner: pi-signed is not installed, so its pin check was not exercised
 # worker account live guard checked: claude pi
 ```
 
-The guard submits no prompt and spends no tokens, so it runs by default wherever a runner is installed; rerun it after every Claude or Pi upgrade.
+```
+ok - codex-cli 0.166.0: the pin check accepts a signed-in Codex home and refuses an empty one, ignoring the caller's token and CODEX_HOME
+```
+
+The guard submits no prompt and spends no tokens, so it runs by default wherever a runner is installed; rerun it after every Claude, Codex, or Pi upgrade.
 
 ## Secondmate busy contract
 
