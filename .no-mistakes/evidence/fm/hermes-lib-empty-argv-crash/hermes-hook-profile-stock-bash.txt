@@ -1,0 +1,19 @@
+== tree=fixed  /bin/bash 3.2.57(1)-release
+$ fm-hermes-hook.sh <state> worker <gen> busy  (pre_llm_call payload)
+rc=0
+busy classification: busy hermes-hook
+$ fm_hermes_profile_home <fake-hermes> ""  (default profile)
+/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.ldz2K4/hp rc=0
+$ fm_hermes_process_matches "" $$  (no /proc)
+rc=1 (1 = non-match)
+== tree=base  /bin/bash 3.2.57(1)-release
+$ fm-hermes-hook.sh <state> worker <gen> busy  (pre_llm_call payload)
+/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.ldz2K4/base/bin/fm-hermes-hook.sh: line 26: args[@]: unbound variable
+rc=1
+busy classification: busy fm-spawn
+$ fm_hermes_profile_home <fake-hermes> ""  (default profile)
+/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.ldz2K4/base/bin/fm-hermes-lib.sh: line 25: args[@]: unbound variable
+ rc=1
+$ fm_hermes_process_matches "" $$  (no /proc)
+/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.ldz2K4/base/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+rc=127 (1 = non-match)

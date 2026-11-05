@@ -1,0 +1,13 @@
+== suite with head libs (macOS-only lines 67-69 disabled)
+ok - worker-only capability and anchored process identity
+ok - profile validation and read-only idle-gateway coexistence check
+ok - startup consent only confirms a complete native offer with No thanks already selected
+ok - native hook overlay preserves hooks and enforces session/generation binding
+ok - profile-prefixed composer requires native ready status and preserves drafts
+ok - scout spawn carries native profile, interactive brief, hook overlay and metadata
+ok - stalled Hermes launch stops its pane before the task record is removed
+ok - stalled Hermes launch whose pane cannot be closed keeps its task record
+rc=
+== suite with revert libs (macOS-only lines 67-69 disabled)
+not ok - empty argv under bash -u (fm_hermes_process_matches) exited 127: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.ldz2K4/suite-revert/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+rc=
