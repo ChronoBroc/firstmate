@@ -33,6 +33,27 @@ done
 for args in 'node /tmp/server.js /opt/hermes-agent/ui-tui/dist/entry.js' 'python3 -c tui_gateway.entry' 'node -e hermes' 'hermes-helper'; do
   ! fm_hermes_process_matches "$args" || fail "false identity: $args"
 done
+# An empty argv (a bare shell pane on a host without /proc) must be a plain
+# non-match under set -u on every installed bash, never an unbound-array abort.
+for test_bash in bash /bin/bash /opt/homebrew/bin/bash; do
+  command -v "$test_bash" >/dev/null 2>&1 || continue
+  for call in "fm_hermes_process_matches" "fm_hermes_process_matches '' \$\$"; do
+    err=$("$test_bash" -uc ". '$ROOT/bin/fm-hermes-process-lib.sh'; $call" 2>&1 >/dev/null)
+    rc=$?
+    [ "$rc" = 1 ] || fail "empty argv under $test_bash -u ($call) exited $rc: $err"
+    [ -z "$err" ] || fail "empty argv under $test_bash -u ($call) wrote stderr: $err"
+  done
+done
+# The default profile (empty name) must resolve under set -u on every
+# installed bash rather than abort on the empty native-argument array.
+mkdir -p "$TMP_ROOT/default-bin" "$TMP_ROOT/default-profile"
+printf '#!/bin/sh\n[ "$*" = "config path" ] || exit 1\nprintf "%%s\\n" "%s/config.yaml"\n' "$TMP_ROOT/default-profile" > "$TMP_ROOT/default-bin/hermes"
+chmod +x "$TMP_ROOT/default-bin/hermes"
+for test_bash in bash /bin/bash /opt/homebrew/bin/bash; do
+  command -v "$test_bash" >/dev/null 2>&1 || continue
+  out=$("$test_bash" -uc ". '$ROOT/bin/fm-hermes-lib.sh'; fm_hermes_profile_home '$TMP_ROOT/default-bin/hermes' ''" 2>&1)
+  [ "$out" = "$TMP_ROOT/default-profile" ] || fail "default profile under $test_bash -u: $out"
+done
 # Use a real interpreter process so kernel-name loss and argv loss are
 # independent regressions, not expectations encoded into a fake harness.
 mkdir -p "$TMP_ROOT/process/tui_gateway"
@@ -157,6 +178,18 @@ run_hook on_session_end main
 [ "$(fm_busy_classify tmux test:w hermes worker "$state")" = 'busy fm-spawn' ] || fail 'stale hook cleared replacement'
 assert_absent "$state/worker.turn-ended" 'stale hook emitted notification'
 ! HERMES_MANAGED_DIR=/existing fm_hermes_write_hooks "$TMP_ROOT/bin/hermes" "$TMP_ROOT/profile" "$state" worker "$gen" 2>/dev/null || fail 'managed scope replaced'
+# A busy verdict passes no extra flags; under set -u on every installed bash
+# that empty list must still reach the busy writer instead of aborting.
+for test_bash in bash /bin/bash /opt/homebrew/bin/bash; do
+  command -v "$test_bash" >/dev/null 2>&1 || continue
+  busy_state="$TMP_ROOT/busy-$(printf '%s' "$test_bash" | tr '/' '_')"
+  mkdir -p "$busy_state/worker.hermes-hooks"
+  busy_gen=$("$ROOT/bin/fm-busy-event.sh" arm "$busy_state" worker)
+  err=$(printf '{"extra":{"platform":"tui","turn_id":"main"}}\n' | "$test_bash" -u "$ROOT/bin/fm-hermes-hook.sh" "$busy_state" worker "$busy_gen" busy 2>&1 >/dev/null)
+  rc=$?
+  [ "$rc" = 0 ] || fail "busy hook under $test_bash -u exited $rc: $err"
+  [ "$(fm_busy_classify tmux test:w hermes worker "$busy_state")" = 'busy hermes-hook' ] || fail "busy hook under $test_bash -u not applied: $err"
+done
 pass 'native hook overlay preserves hooks and enforces session/generation binding'
 
 caps=$'styled=1\ncursor=0\nidentity=1'
