@@ -1,0 +1,9 @@
+# ordinary pin; lab tmux global env CODEX_HOME=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/decoy-codex CODEX_ACCESS_TOKEN=decoy-ambient-token HOME=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/fakehome
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+spawned codexord1 harness=codex kind=scout window=primary:fm-codexord1 worktree=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/treehouse/.treehouse/proj-72e4f1/3/proj account=ordinary
+SPAWN_RC=0
+codex pid 96119 env:
+HOME=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/fakehome
+(CODEX_HOME / CODEX_ACCESS_TOKEN absent above means unset)
+account=ordinary

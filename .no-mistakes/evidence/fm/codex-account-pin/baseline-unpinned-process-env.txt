@@ -1,0 +1,3 @@
+codex pid 75035
+CODEX_ACCESS_TOKEN=decoy-ambient-token
+CODEX_HOME=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/decoy-codex

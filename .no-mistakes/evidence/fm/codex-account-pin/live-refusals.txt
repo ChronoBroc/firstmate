@@ -1,0 +1,45 @@
+### signed-out pinned store (empty CODEX_HOME), real codex login status
+config/codex-account: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/work/codex-empty
+args: --harness codex
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: config/codex-account pins Codex workers to /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/work/codex-empty, which is not signed in (codex login status); sign in with CODEX_HOME=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/work/codex-empty codex login, or change the pin
+SPAWN_RC=1
+task record exists: no
+window exists: no
+
+### relative path pin
+config/codex-account: work/codex-pinned
+args: --harness codex
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: config/codex-account must hold 'ordinary' or one absolute path on a single line with no control characters: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/config/codex-account
+SPAWN_RC=1
+task record exists: no
+window exists: no
+
+### pin names a missing directory
+config/codex-account: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/work/nope
+args: --harness codex
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: config/codex-account must name a readable, searchable existing directory (ordinary means ~/.codex with CODEX_HOME unset): /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/config/codex-account -> /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/work/nope
+SPAWN_RC=1
+task record exists: no
+window exists: no
+
+### raw codex command overriding CODEX_HOME under a pin
+config/codex-account: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/work/codex-pinned
+args: --harness 'CODEX_HOME=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/decoy-codex codex'
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: config/codex-account pins Codex workers, but the raw launch command sets CODEX_HOME, which would override the pinned account; remove CODEX_HOME from the raw command, or change or remove config/codex-account
+SPAWN_RC=1
+task record exists: no
+window exists: no
+
+### raw codex command setting CODEX_ACCESS_TOKEN under a pin
+config/codex-account: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/work/codex-pinned
+args: --harness 'CODEX_ACCESS_TOKEN=x codex'
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: config/codex-account pins Codex workers, but the raw launch command sets CODEX_ACCESS_TOKEN, which would override the pinned account; remove CODEX_ACCESS_TOKEN from the raw command, or change or remove config/codex-account
+SPAWN_RC=1
+task record exists: no
+window exists: no
+

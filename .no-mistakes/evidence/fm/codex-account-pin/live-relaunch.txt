@@ -1,0 +1,15 @@
+/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M6P055ZCVFMA155P26NK0G6G/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M6P055ZCVFMA155P26NK0G6G/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M6P055ZCVFMA155P26NK0G6G/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M6P055ZCVFMA155P26NK0G6G/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M6P055ZCVFMA155P26NK0G6G/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M6P055ZCVFMA155P26NK0G6G/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M6P055ZCVFMA155P26NK0G6G/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M6P055ZCVFMA155P26NK0G6G/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M6P055ZCVFMA155P26NK0G6G/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M6P055ZCVFMA155P26NK0G6G/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M6P055ZCVFMA155P26NK0G6G/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M6P055ZCVFMA155P26NK0G6G/bin/fm-hermes-process-lib.sh: line 6: words[@]: unbound variable
+error: exit-delivered codexpin1 interrupt=not-needed exit-command=delivered agent-state= exit=unconfirmed; the agent did not stop within 30s
+error: relaunch of codexpin1 failed while stopping the old agent and its state is '', so it was not proven stopped; its original instructions were restored and the durable record was retained for recovery
+RC=1

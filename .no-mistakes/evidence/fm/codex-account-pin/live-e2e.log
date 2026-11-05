@@ -1,0 +1,5 @@
+ok - claude 2.1.318 (Claude Code): the pin check accepts a signed-in root and refuses an empty one despite an ambient API key
+ok - codex-cli 0.166.0: the pin check accepts a signed-in Codex home and refuses an empty one, ignoring the caller's token and CODEX_HOME
+ok - pi 1.5.0: the pin check reads auth check and the model listing, and refuses what only an ambient credential signs in
+skip-runner: pi-signed is not installed, so its pin check was not exercised
+# worker account live guard checked: claude codex pi

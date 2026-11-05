@@ -1,0 +1,8 @@
+# process tree under pane primary:fm-codexpin1 (lab tmux global env: CODEX_HOME=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/decoy-codex, CODEX_ACCESS_TOKEN=decoy-ambient-token)
+== pid 51222: -zsh
+== pid 51320: treehouse get
+CODEX_ACCESS_TOKEN=decoy-ambient-token
+CODEX_HOME=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/decoy-codex
+== pid 52274: /bin/zsh -i -l
+== pid 61259: codex --dangerously-bypass-approvals-and-sandbox --disable hooks -c notify=["bash","-c","touch '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.
+CODEX_HOME=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.fXnRxA/work/codex-pinned

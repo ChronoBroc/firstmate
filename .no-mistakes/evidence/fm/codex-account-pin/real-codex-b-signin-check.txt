@@ -1,0 +1,3 @@
+resolved (declared<TAB>root): /Users/broc-macmini/.crew/accounts.d/codex-codex-b	/Users/broc-macmini/.crew/accounts.d/codex-codex-b	
+sign-in check: PASS (real codex login status under CODEX_HOME=/Users/broc-macmini/.crew/accounts.d/codex-codex-b, caller carried CODEX_ACCESS_TOKEN=junk CODEX_HOME=/nonexistent)
+auth.json sha256 prefix before=b533b9f2c65ad39f after=b533b9f2c65ad39f (unchanged: yes)
