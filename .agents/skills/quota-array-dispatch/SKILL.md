@@ -90,6 +90,9 @@ A provider-level or `all_models`/`all_products` scope bounds every model you est
 A named-model or named-product scope is an additional bound for that model alone.
 A scope the vendor reports outside those names, such as an Antigravity tier, bounds a candidate only when its profile declares that exact scope as `quota_scope`; never infer the tier from the model name.
 Match the candidate to its `quota[]` row by that established provider, its `accountKey` when the snapshot is schema 6 (a Pi lane's auth provider id such as `openai-codex-work`, or `codex-home` for native Codex including Pi's `codex-native/` adapter, then the `default` row, else unmeasured; never a row picked by position, never rows summed across accounts), and scope; a stale, auth-required, or unmeasurable scope is named in `attention[]` instead of a fabricated number.
+The `codex-home` row reads the default `~/.codex` login, and the `default` row reads the ambient Claude account, so neither measures a store named by `config/codex-account` or `config/claude-account`.
+When the home pins a non-default Codex home or a Claude config directory, treat that pinned candidate's quota as unmeasured rather than matching it to those rows.
+Per `AGENTS.md` section 4, unmeasured quota is disclosed uncertainty that keeps the candidate eligible, never a reason to drop it; name it in the rationale.
 
 A candidate authenticates through its own tuple's surface; another harness's CLI can never gate it, and `harness=pi` with `model=xai/grok-*` is Pi using xAI rather than the standalone Grok CLI.
 `quota-axi auth --json` lists each provider's credential sources independently, so read the one source the candidate actually uses rather than collapsing a provider to a single status.

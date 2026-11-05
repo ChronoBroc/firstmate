@@ -1557,6 +1557,11 @@ A home that authenticates Claude or Codex through environment credentials on pur
 A malformed file, a root that is not a readable directory, or a signed-out account refuses the launch and names the file to fix; Firstmate never falls back to the ambient account and never changes a global login or copies a credential.
 The spawn prints the pin as `account=` (plus `account_provider=` for Pi) and records the same fields in the task record, so the session-start digest shows which account each worker launched on.
 
+Quota-array dispatch does not measure a pinned account store.
+A `config/claude-account` pin naming a Claude config directory is still scored against the `default` row, and a `config/codex-account` pin naming a non-default Codex home is still scored against the `codex-home` row, which reads the default `~/.codex` login.
+Treat that pinned store's quota as unmeasured.
+Per [`AGENTS.md` section 4](../AGENTS.md#4-harness-and-runtime-dispatch), unmeasured quota is disclosed uncertainty that keeps the candidate eligible, never a reason to drop it.
+
 Pins are not inherited into secondmate homes: the secondmate's own workers read that home's `config/claude-account`, `config/codex-account`, and `config/pi-account` files independently.
 A remote secondmate is launched on its host from its own home's configuration, so create the file in that remote home.
 
