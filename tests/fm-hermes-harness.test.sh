@@ -178,6 +178,18 @@ run_hook on_session_end main
 [ "$(fm_busy_classify tmux test:w hermes worker "$state")" = 'busy fm-spawn' ] || fail 'stale hook cleared replacement'
 assert_absent "$state/worker.turn-ended" 'stale hook emitted notification'
 ! HERMES_MANAGED_DIR=/existing fm_hermes_write_hooks "$TMP_ROOT/bin/hermes" "$TMP_ROOT/profile" "$state" worker "$gen" 2>/dev/null || fail 'managed scope replaced'
+# A busy verdict passes no extra flags; under set -u on every installed bash
+# that empty list must still reach the busy writer instead of aborting.
+for test_bash in bash /bin/bash /opt/homebrew/bin/bash; do
+  command -v "$test_bash" >/dev/null 2>&1 || continue
+  busy_state="$TMP_ROOT/busy-$(printf '%s' "$test_bash" | tr '/' '_')"
+  mkdir -p "$busy_state/worker.hermes-hooks"
+  busy_gen=$("$ROOT/bin/fm-busy-event.sh" arm "$busy_state" worker)
+  err=$(printf '{"extra":{"platform":"tui","turn_id":"main"}}\n' | "$test_bash" -u "$ROOT/bin/fm-hermes-hook.sh" "$busy_state" worker "$busy_gen" busy 2>&1 >/dev/null)
+  rc=$?
+  [ "$rc" = 0 ] || fail "busy hook under $test_bash -u exited $rc: $err"
+  [ "$(fm_busy_classify tmux test:w hermes worker "$busy_state")" = 'busy hermes-hook' ] || fail "busy hook under $test_bash -u not applied: $err"
+done
 pass 'native hook overlay preserves hooks and enforces session/generation binding'
 
 caps=$'styled=1\ncursor=0\nidentity=1'
