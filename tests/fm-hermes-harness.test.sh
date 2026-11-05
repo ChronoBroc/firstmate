@@ -33,6 +33,17 @@ done
 for args in 'node /tmp/server.js /opt/hermes-agent/ui-tui/dist/entry.js' 'python3 -c tui_gateway.entry' 'node -e hermes' 'hermes-helper'; do
   ! fm_hermes_process_matches "$args" || fail "false identity: $args"
 done
+# An empty argv (a bare shell pane on a host without /proc) must be a plain
+# non-match under set -u on every installed bash, never an unbound-array abort.
+for test_bash in bash /opt/homebrew/bin/bash; do
+  command -v "$test_bash" >/dev/null 2>&1 || continue
+  for call in "fm_hermes_process_matches" "fm_hermes_process_matches '' \$\$"; do
+    err=$("$test_bash" -uc ". '$ROOT/bin/fm-hermes-process-lib.sh'; $call" 2>&1 >/dev/null)
+    rc=$?
+    [ "$rc" = 1 ] || fail "empty argv under $test_bash -u ($call) exited $rc: $err"
+    [ -z "$err" ] || fail "empty argv under $test_bash -u ($call) wrote stderr: $err"
+  done
+done
 # Use a real interpreter process so kernel-name loss and argv loss are
 # independent regressions, not expectations encoded into a fake harness.
 mkdir -p "$TMP_ROOT/process/tui_gateway"
