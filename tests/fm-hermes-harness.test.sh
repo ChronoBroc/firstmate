@@ -35,7 +35,7 @@ for args in 'node /tmp/server.js /opt/hermes-agent/ui-tui/dist/entry.js' 'python
 done
 # An empty argv (a bare shell pane on a host without /proc) must be a plain
 # non-match under set -u on every installed bash, never an unbound-array abort.
-for test_bash in bash /opt/homebrew/bin/bash; do
+for test_bash in bash /bin/bash /opt/homebrew/bin/bash; do
   command -v "$test_bash" >/dev/null 2>&1 || continue
   for call in "fm_hermes_process_matches" "fm_hermes_process_matches '' \$\$"; do
     err=$("$test_bash" -uc ". '$ROOT/bin/fm-hermes-process-lib.sh'; $call" 2>&1 >/dev/null)
@@ -49,7 +49,7 @@ done
 mkdir -p "$TMP_ROOT/default-bin" "$TMP_ROOT/default-profile"
 printf '#!/bin/sh\n[ "$*" = "config path" ] || exit 1\nprintf "%%s\\n" "%s/config.yaml"\n' "$TMP_ROOT/default-profile" > "$TMP_ROOT/default-bin/hermes"
 chmod +x "$TMP_ROOT/default-bin/hermes"
-for test_bash in bash /opt/homebrew/bin/bash; do
+for test_bash in bash /bin/bash /opt/homebrew/bin/bash; do
   command -v "$test_bash" >/dev/null 2>&1 || continue
   out=$("$test_bash" -uc ". '$ROOT/bin/fm-hermes-lib.sh'; fm_hermes_profile_home '$TMP_ROOT/default-bin/hermes' ''" 2>&1)
   [ "$out" = "$TMP_ROOT/default-profile" ] || fail "default profile under $test_bash -u: $out"
