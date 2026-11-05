@@ -44,6 +44,16 @@ for test_bash in bash /opt/homebrew/bin/bash; do
     [ -z "$err" ] || fail "empty argv under $test_bash -u ($call) wrote stderr: $err"
   done
 done
+# The default profile (empty name) must resolve under set -u on every
+# installed bash rather than abort on the empty native-argument array.
+mkdir -p "$TMP_ROOT/default-bin" "$TMP_ROOT/default-profile"
+printf '#!/bin/sh\n[ "$*" = "config path" ] || exit 1\nprintf "%%s\\n" "%s/config.yaml"\n' "$TMP_ROOT/default-profile" > "$TMP_ROOT/default-bin/hermes"
+chmod +x "$TMP_ROOT/default-bin/hermes"
+for test_bash in bash /opt/homebrew/bin/bash; do
+  command -v "$test_bash" >/dev/null 2>&1 || continue
+  out=$("$test_bash" -uc ". '$ROOT/bin/fm-hermes-lib.sh'; fm_hermes_profile_home '$TMP_ROOT/default-bin/hermes' ''" 2>&1)
+  [ "$out" = "$TMP_ROOT/default-profile" ] || fail "default profile under $test_bash -u: $out"
+done
 # Use a real interpreter process so kernel-name loss and argv loss are
 # independent regressions, not expectations encoded into a fake harness.
 mkdir -p "$TMP_ROOT/process/tui_gateway"
