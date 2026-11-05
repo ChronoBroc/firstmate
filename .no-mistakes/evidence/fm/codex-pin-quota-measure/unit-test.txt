@@ -1,0 +1,14 @@
+ok - config/codex-account selects the measured store over an inherited CODEX_HOME
+ok - an ordinary pin is measured from the default ~/.codex store
+ok - with no tmux server, an unpinned home measures the caller's CODEX_HOME store
+ok - an unpinned tmux home measures the global tmux CODEX_HOME store
+ok - a tmux session's CODEX_HOME answers before the global one
+ok - a tmux environment with no CODEX_HOME measures the default store
+ok - a non-tmux backend measures the caller's CODEX_HOME store
+ok - a profile's declared quota_scope is printed beside the provider-wide scope
+ok - an unpinned home with no CODEX_HOME measures the default ~/.codex store
+ok - a store quota-axi cannot read is disclosed uncertainty
+ok - a nonzero quota-axi exit that prints a snapshot keeps the vendor's reason
+ok - a malformed or missing pin refuses before any quota read
+ok - a missing quota-axi is reported in the block
+# all fm-codex-account-quota tests passed

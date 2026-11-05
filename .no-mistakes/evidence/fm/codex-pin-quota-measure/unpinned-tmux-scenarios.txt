@@ -1,0 +1,30 @@
+$ # S8 unpinned, private tmux server: global CODEX_HOME=codex-b, the calling process has CODEX_HOME unset
+$ tmux show-environment -g CODEX_HOME -> CODEX_HOME=/Users/broc-macmini/.crew/accounts.d/codex-codex-b
+codex-account-quota:
+  row: ambient  root=/Users/broc-macmini/.crew/accounts.d/codex-codex-b  scope=all_models  status=known  remaining=98%  spendPriority=1.0626  runway=through_reset  confidence=established
+exit=0
+
+$ # S9 session env overrides global (session CODEX_HOME=~/.codex)
+$ tmux show-environment -t primary CODEX_HOME -> CODEX_HOME=/Users/broc-macmini/.codex
+codex-account-quota:
+  row: ambient  root=/Users/broc-macmini/.codex  scope=all_models  status=known  remaining=7%  spendPriority=-3.0802  runway=projected_exhaustion  usableRunwaySeconds=13317  confidence=established
+exit=0
+
+$ # S10 session marks CODEX_HOME removed (-r) -> no CODEX_HOME -> default ~/.codex
+$ tmux show-environment -t primary CODEX_HOME -> -CODEX_HOME
+codex-account-quota:
+  row: default  root=/Users/broc-macmini/.codex  scope=all_models  status=known  remaining=7%  spendPriority=-3.0801  runway=projected_exhaustion  usableRunwaySeconds=13317  confidence=established
+exit=0
+
+$ # S11 pin wins over tmux env (session entry cleared, global=codex-b, pin=ordinary)
+codex-account-quota:
+  row: ordinary  root=/Users/broc-macmini/.codex  scope=all_models  status=known  remaining=7%  spendPriority=-3.0801  runway=projected_exhaustion  usableRunwaySeconds=13317  confidence=established
+exit=0
+
+$ # S12 caller env CODEX_HOME is NOT used under tmux (caller=~/.codex, global=codex-b, no pin)
+codex-account-quota:
+  row: ambient  root=/Users/broc-macmini/.crew/accounts.d/codex-codex-b  scope=all_models  status=known  remaining=98%  spendPriority=1.0626  runway=through_reset  confidence=established
+exit=0
+
+$ # S13 launch parity: a new window on this server (as fm-spawn opens a worker) sees CODEX_HOME=
+/Users/broc-macmini/.crew/accounts.d/codex-codex-b

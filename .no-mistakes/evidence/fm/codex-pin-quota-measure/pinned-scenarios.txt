@@ -1,0 +1,37 @@
+$ # S1 baseline: default quota-axi codex-home row (what dispatch used before)
+  codex,all_models,7,-3.0867,projected_exhaustion,established,weekly,"2026-11-10T17:28:38.000Z"
+  codex,all_models,13290,"2026-11-05T22:12:53.055Z",weekly
+
+$ # S2 pin config/codex-account = codex-b store
+$ cat config/codex-account -> /Users/broc-macmini/.crew/accounts.d/codex-codex-b
+$ fm-codex-account-quota.sh --model gpt-6-astra
+codex-account-quota:
+  row: /Users/broc-macmini/.crew/accounts.d/codex-codex-b  root=/Users/broc-macmini/.crew/accounts.d/codex-codex-b  scope=all_models  status=known  remaining=98%  spendPriority=1.0613  runway=through_reset  confidence=established
+exit=0
+
+$ # S3 pin ordinary -> ~/.codex
+codex-account-quota:
+  row: ordinary  root=/Users/broc-macmini/.codex  scope=all_models  status=known  remaining=7%  spendPriority=-3.0867  runway=projected_exhaustion  usableRunwaySeconds=13290  confidence=established
+exit=0
+
+$ # S4 adversarial: pin to nonexistent/relative path
+error: config/codex-account must hold 'ordinary' or one absolute path on a single line with no control characters: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.f2El7P/config/codex-account
+exit=2
+
+$ # S5 adversarial: pin to a store with no login
+codex-account-quota:
+  row: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.f2El7P/emptystore  root=/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.f2El7P/emptystore  uncertainty: quota unknown (unavailable: Codex profile credentials missing)
+  row: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.f2El7P/emptystore  root=/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.f2El7P/emptystore  uncertainty: no applicable quota scope
+exit=0
+
+$ # S6 adversarial: shared QUOTA_AXI_SNAPSHOT fixture cannot answer for the store
+codex-account-quota:
+  row: /Users/broc-macmini/.crew/accounts.d/codex-codex-b  root=/Users/broc-macmini/.crew/accounts.d/codex-codex-b  scope=all_models  status=known  remaining=98%  spendPriority=1.0613  runway=through_reset  confidence=established
+exit=0
+
+$ # S7 --quota-scope extra bound (+ usage error)
+codex-account-quota:
+  row: /Users/broc-macmini/.crew/accounts.d/codex-codex-b  root=/Users/broc-macmini/.crew/accounts.d/codex-codex-b  scope=all_models  status=known  remaining=98%  spendPriority=1.0614  runway=through_reset  confidence=established
+exit=0
+error: --quota-scope needs a value
+exit=2
