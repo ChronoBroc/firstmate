@@ -1552,6 +1552,12 @@ Pi ranks a root's stored logins above environment variables, so a pinned Pi laun
 
 A home that authenticates Claude or Codex through environment credentials on purpose should leave that pin absent.
 
+Codex keeps project trust and hook trust in `CODEX_HOME`, so a pinned Codex store carries its own trust decisions, separate from `~/.codex`.
+A Codex secondmate launches with hooks on, so its pinned store must already trust the secondmate home and that home's `.codex/hooks.json`.
+That trust is the operator's one-time interactive consent: run Codex once in the secondmate home with `CODEX_HOME` set to the pinned store and accept the trust prompts.
+Firstmate never writes Codex's trust store, and an untrusted store parks the secondmate on a trust prompt that Firstmate cannot answer.
+Crewmates and scouts are unaffected, because they launch with hooks disabled.
+
 ### Failures, reporting, and inheritance
 
 A malformed file, a root that is not a readable directory, or a signed-out account refuses the launch and names the file to fix; Firstmate never falls back to the ambient account and never changes a global login or copies a credential.
@@ -1615,6 +1621,7 @@ Removing that file restores the primary home's account selection on the next lau
 Every spawn, control-plane relaunch, and automatic recovery reads the durable setting again, never a previous task record or ambient account choice.
 After changing a live mate's pin, use `bin/fm-control.sh <id> relaunch` to apply it.
 The relaunch checks the selected pin before stopping the current agent.
+A `codex-account` pin for a secondmate needs that store to trust the secondmate home and its hooks first, as [launch scope and sign-in checks](#launch-scope-and-sign-in-checks) describes.
 
 Per-secondmate pins stay in the primary home and are not inherited or copied into the secondmate's home.
 A matching primary-side per-secondmate pin for a remote route refuses before remote launch, because its account must be configured on that host instead.
