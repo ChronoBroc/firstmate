@@ -1563,7 +1563,7 @@ Crewmates and scouts are unaffected, because they launch with hooks disabled.
 A malformed file, a root that is not a readable directory, or a signed-out account refuses the launch and names the file to fix; Firstmate never falls back to the ambient account and never changes a global login or copies a credential.
 The spawn prints the pin as `account=` (plus `account_provider=` for Pi) and records the same fields in the task record, so the session-start digest shows which account each worker launched on.
 
-Quota-array dispatch measures a native Codex candidate on the store its worker would launch on: [`bin/fm-codex-account-quota.sh`](../bin/fm-codex-account-quota.sh) runs `quota-axi --provider codex --profile-only` with `CODEX_HOME` set to the `config/codex-account` store (`~/.codex` for `ordinary`), else the ambient `CODEX_HOME`, else `~/.codex`.
+Quota-array dispatch measures a native Codex candidate on the store its worker would launch on: [`bin/fm-codex-account-quota.sh`](../bin/fm-codex-account-quota.sh) runs `quota-axi --provider codex --profile-only` with `CODEX_HOME` set to the `config/codex-account` store (`~/.codex` for `ordinary`), else the `CODEX_HOME` the worker's pane inherits (on tmux, the destination session's then the global tmux environment, not the caller's own), else `~/.codex`.
 It does not measure a pinned Claude store: a `config/claude-account` pin naming a Claude config directory is still scored against the `default` row.
 Treat that pinned store's quota as unmeasured.
 Per [`AGENTS.md` section 4](../AGENTS.md#4-harness-and-runtime-dispatch), unmeasured quota is disclosed uncertainty that keeps the candidate eligible, never a reason to drop it.
