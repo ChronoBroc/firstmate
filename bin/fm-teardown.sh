@@ -120,9 +120,8 @@
 # - or a version 1 attempt whose workspace is still present or unreadable - may
 # name a live quarantined space and is retained for that sweep.
 # data/<id>/ is deliberately left in place: a successor spawn reads brief.md
-# from it. Teardown adds the checksum of the brief this task ran to it, so a new
-# item that reuses the id cannot launch that brief (FINISHED BRIEFS in
-# bin/fm-backlog-transition-lib.sh).
+# from it. Finished-brief recording and successor-spawn safeguards are owned
+# by FINISHED BRIEFS in bin/fm-backlog-transition-lib.sh.
 # Worktree-slot ownership (teardown-slot-collision): a treehouse pool slot is
 # reused across tasks, so a stale, duplicated, or drifted worktree= record can
 # name a slot a DIFFERENT live task now holds. Cleanup kills every process under

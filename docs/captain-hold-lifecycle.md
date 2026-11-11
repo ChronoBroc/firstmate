@@ -173,6 +173,7 @@ After cleanup, and still under the task's own lock, teardown does three things:
 
 The row returns to Queued with its hold intact.
 It remains on the appropriate Captain's Call or Charted Next decision surface instead of reading as work still under way.
+For continuation after release, follow the finished-brief guard and confirmed-continuation remedy in [`fm-backlog-transition-lib.sh`](../bin/fm-backlog-transition-lib.sh) (`FINISHED BRIEFS`).
 
 ### Interrupted cleanup
 

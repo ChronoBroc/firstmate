@@ -1238,16 +1238,20 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
   return 1
 }
 
-# FINISHED BRIEFS. data/<id>/ outlives its task on purpose: it holds the
-# finished task's proof. A pruned Done row, though, lets `tasks-axi add` accept
-# the same id again for unrelated work, and bin/fm-brief.sh then refuses to
-# scaffold only because the old brief.md exists. So a supervisor who skips or
-# overlooks that refusal would launch the OLD instructions for the new item.
-# Teardown therefore appends the sha256 of the brief each finished ship or
-# scout ran to data/<id>/finished-briefs, and a fresh spawn refuses while
-# brief.md still matches one of them. A relaunch is exempt: it re-launches the
-# same live task. Nothing here deletes, moves, or overwrites the finished
-# task's files; the remedy is a new brief or a new id.
+# FINISHED BRIEFS. data/<id>/ preserves task proof after backlog pruning.
+# Closing teardown for a ship or scout records the SHA-256 of its current
+# brief.md in finished-briefs; retain teardown does not record completion.
+# Fresh ship/scout spawn refuses a matching checksum. Without that record or
+# task metadata, it also refuses a brief matching the start of launch-brief.md,
+# either directly or after the current worker role contract is stripped.
+# This fallback covers old task directories without completion checksums.
+# A captain-hold release alone does not prove the directory belongs to the
+# same task. For a confirmed retained continuation, or a failed spawn of the
+# same item before any worker ran, remove only launch-brief.md and retry.
+# For finished work, preserve the directory by moving it aside and scaffold
+# a new brief, or use a fresh id. The guard never alters the task's files.
+# --relaunch is exempt because it requires an existing task record.
+# Regression coverage: tests/fm-backlog-atomicity.test.sh.
 
 # Set by the finished-brief helpers when they return non-zero.
 FM_FINISHED_BRIEF_ERROR=
