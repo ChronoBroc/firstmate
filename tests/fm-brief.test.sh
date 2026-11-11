@@ -393,7 +393,7 @@ test_ship_mode_is_explicit_not_registry() {
   brief="$home/data/brief-explicit-a5/brief.md"
   grep -qx "Delivery contract: mode=no-mistakes" "$brief" \
     || fail "registered direct-PR posture overrode the explicit --mode"
-  assert_grep "Firstmate will then instruct you to run /no-mistakes" "$brief" \
+  assert_grep "start no-mistakes yourself in the same turn" "$brief" \
     "explicit no-mistakes brief did not render the pipeline definition of done"
 
   # An unregistered project is not a blocker either, because nothing is looked up.
@@ -535,6 +535,40 @@ test_no_mistakes_dod_wording() {
   assert_no_grep "no-mistakes refuses" "$brief" \
     "no-mistakes DOD must not claim the tool itself refuses --yes"
   pass "fm-brief.sh: no-mistakes DOD keeps its apostrophe prose and bans --yes outright"
+}
+
+# A no-mistakes worker starts its own pipeline in the same turn as its commit.
+# A Definition of done that said "report done and stop; firstmate will then
+# instruct you to run /no-mistakes" read as completion, so workers ended their
+# turn after committing and idled until told to validate. Every no-mistakes
+# variant (default, Gerrit, pr=manual) must hand the commit straight to the
+# pipeline and must not ask for a stop or a pre-validation done.
+test_no_mistakes_commit_hands_off_to_pipeline() {
+  local home id brief args
+  home="$TMP_ROOT/handoff-home"
+  mkdir -p "$home/data"
+  while IFS='|' read -r id args; do
+    [ -n "$id" ] || continue
+    # shellcheck disable=SC2086  # args is an intentional word-split arg list
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" some-proj --mode no-mistakes $args >/dev/null 2>&1 \
+      || fail "$id: no-mistakes brief should scaffold"
+    brief="$home/data/$id/brief.md"
+    assert_grep "that commit is a handoff to the pipeline, not the end of your turn" "$brief" \
+      "$id: the commit is not framed as a handoff to the pipeline"
+    assert_grep "As soon as the work is implemented and committed, start no-mistakes yourself in the same turn" "$brief" \
+      "$id: the worker is not told to start the pipeline itself after committing"
+    assert_grep "Do not append \`done:\` or stop after the commit, and do not wait for firstmate to tell you to validate." "$brief" \
+      "$id: the worker may still stop after committing"
+    assert_no_grep "Firstmate will then instruct you to run /no-mistakes" "$brief" \
+      "$id: the worker is still told to wait for firstmate to start validation"
+    assert_no_grep "append \`done [at=<epoch>]: {summary}\` to the status file and stop" "$brief" \
+      "$id: the worker is still told to report done and stop before validation"
+  done <<'ROWS'
+handoff-default|
+handoff-gerrit|--forge gerrit --shape squash
+handoff-manual|--pr manual
+ROWS
+  pass "fm-brief.sh: every no-mistakes DOD starts the pipeline in the commit's turn"
 }
 
 # The green-PR report must not depend on a status poll: `axi status` never
@@ -1702,6 +1736,7 @@ test_ship_mode_is_explicit_not_registry
 test_delivery_flags_are_refused_where_they_do_not_apply
 test_faster_paths_use_configured_authority_without_stacked_review
 test_no_mistakes_dod_wording
+test_no_mistakes_commit_hands_off_to_pipeline
 test_no_mistakes_dod_green_detection
 test_pr_based_dod_requires_non_draft
 test_ask_user_escalation_format
