@@ -106,7 +106,8 @@ Switching harness is therefore one ordinary relaunch rather than a separate mech
 A Herdr pane or workspace, a Rex block, or a tmux window can be destroyed out from under a live task by churn, a session restart, a stopped Rex server, or a lost tmux server or machine restart.
 The task's worktree, branch, commits, and uncommitted changes all survive that; only its terminal does not.
 
-**Reclaim covers Herdr, Rex, and tmux.** A tmux task whose record does not name its server - one spawned before spawn recorded it - still refuses a `missing` endpoint on both verbs, deliberately and with the reason stated rather than guessed past; any later relaunch that adopts its window records the identity.
+**Reclaim covers Herdr, Rex, and tmux.**
+For tmux, the recorded-server requirements below govern whether either verb can prove a missing endpoint gone.
 
 Two endpoint verdicts are agent-free, and both license a relaunch:
 
@@ -128,7 +129,8 @@ An unreachable endpoint can still hold the live agent a rebind would duplicate, 
   A block that is still there is classified from its process view, so `dead` is adopted and `alive` refuses ([`docs/rex-backend.md`](rex-backend.md) "Cleanup and the absence proof").
   Rex's passive reads never start a server, so a stopped Rex server reads `unreadable` rather than `missing`; a Rex `unreadable` therefore goes through this recheck too, and still refuses unless the recheck settles it.
 - **tmux can prove it when the record names its server.** A server-wide read describes only the tmux server the *current process* addresses (its `TMUX_TMPDIR`/socket), so a different but running server would answer "not anywhere" about a window it was never able to see.
-  Spawn therefore records the server holding the task's window - `tmux_socket=` and `tmux_server=<pid>:<start-time>`, both read from that server - and every relaunch rewrites them for the window it binds.
+  Spawn and relaunch record the server holding the task's window as `tmux_socket=` and `tmux_server=<pid>:<start-time>` when that server returns a valid identity.
+  If the identity read fails, the new record omits both fields, including any previous values; like older records without these fields, it cannot authorize reclaim of a missing endpoint.
   The recorded server has exited, with every window it held, when its pid is free or now belongs to a program that is not tmux, or when the server answering at the recorded socket holds that pid under a different start time.
   When the recorded server is still running and answers at its socket as itself, an absent session or window stays unproven because a renamed session or moved window may still hold the agent.
   A present window is classified normally only if it is also the server this process addresses.
