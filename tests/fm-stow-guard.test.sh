@@ -323,6 +323,7 @@ test_bad_payloads_and_missing_jq_are_silent() {
     ln -s "$entry" "$fakebin/$name" 2>/dev/null || true
   done
   rm -f "$fakebin/jq"
+  hash -r
   PATH="$fakebin" command -v dirname >/dev/null 2>&1 || fail "fixture PATH lost dirname"
   PATH="$fakebin" command -v jq >/dev/null 2>&1 && fail "fixture PATH still finds jq"
   rc=0
