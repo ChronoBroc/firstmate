@@ -1335,15 +1335,22 @@ test_dispatch_refuses_a_closed_item() {
 }
 
 test_reused_id_refuses_a_finished_brief() {
-  local case_dir home id out rc=0
+  local case_dir home id out rc=0 legacy=${1:-no}
   id=atomic-reused-id-b1
-  case_dir=$(make_home reused-id "$id")
+  case_dir=$(make_home "reused-id-$legacy" "$id")
   home=$(home_of "$case_dir")
   printf '%s\n' 'OLD-INSTRUCTIONS for the finished task.' >> "$home/data/$id/brief.md"
   add_item "$case_dir" "$id"
   out=$(run_ship_spawn "$case_dir" "$id") || fail "first spawn failed: $out"
   out=$(run_teardown "$case_dir" "$id" --force) || fail "teardown of the finished task failed: $out"
   [ "$(row_state "$case_dir" "$id")" = "done" ] || fail "teardown did not close the finished item"
+  if [ "$legacy" != no ]; then
+    rm "$home/data/$id/finished-briefs"
+  fi
+  if [ "$legacy" = brief-first ]; then
+    cat "$home/data/$id/brief.md" > "$home/data/$id/launch-brief.md"
+    printf '\nLaunch overlay\n' >> "$home/data/$id/launch-brief.md"
+  fi
   ( cd "$home" && tasks-axi prune --keep 0 --file "$home/data/backlog.md" >/dev/null ) \
     || fail "could not prune the finished item"
   add_item "$case_dir" "$id"
@@ -1351,8 +1358,13 @@ test_reused_id_refuses_a_finished_brief() {
 
   out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
   [ "$rc" -ne 0 ] || fail "spawn launched a finished task's brief for a new item that reuses its id"
-  assert_contains "$out" "brief of a finished task" \
-    "the refusal did not say the brief belongs to a finished task"
+  if [ "$legacy" = no ]; then
+    assert_contains "$out" "brief of a finished task" \
+      "the refusal did not say the brief belongs to a finished task"
+  else
+    assert_contains "$out" "remove only $home/data/$id/launch-brief.md" \
+      "the refusal did not explain how to retry a spawn that never ran"
+  fi
   assert_contains "$out" "scaffold a new brief" "the refusal did not name the remedy"
   assert_absent "$home/state/$id.meta" "the refused spawn left a task record behind"
   [ "$(row_state "$case_dir" "$id")" = queued ] || fail "the refused spawn moved the new item"
@@ -1366,6 +1378,22 @@ test_reused_id_refuses_a_finished_brief() {
   assert_grep 'NEW-INSTRUCTIONS' "$home/data/$id/launch-brief.md" \
     "the new item did not launch its own brief"
   pass "a reused id cannot launch the finished task's brief, and launches once it has its own"
+}
+
+test_unrun_launch_brief_can_be_retried() {
+  local case_dir home id out rc=0
+  id=atomic-unrun-brief
+  case_dir=$(make_home unrun-brief "$id")
+  home=$(home_of "$case_dir")
+  add_item "$case_dir" "$id"
+  cp "$home/data/$id/brief.md" "$home/data/$id/launch-brief.md"
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "ambiguous unrun launch was accepted"
+  assert_contains "$out" "before any worker ran" "retry remedy omitted its safety condition"
+  rm "$home/data/$id/launch-brief.md"
+  out=$(run_ship_spawn "$case_dir" "$id") || fail "retry after removing unrun launch failed: $out"
+  [ "$(row_state "$case_dir" "$id")" = in_flight ] || fail "retry did not start the item"
+  pass "an unrun launch can be retried using the stated remedy"
 }
 
 test_dispatch_refuses_to_commit_without_a_published_record() {
@@ -3170,6 +3198,9 @@ test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_reports_a_backlog_read_failure
 test_dispatch_refuses_a_closed_item
 test_reused_id_refuses_a_finished_brief
+test_reused_id_refuses_a_finished_brief role-first
+test_reused_id_refuses_a_finished_brief brief-first
+test_unrun_launch_brief_can_be_retried
 test_dispatch_refuses_to_commit_without_a_published_record
 test_dispatch_leaves_no_record_when_the_transition_fails
 test_dispatch_reports_an_incomplete_record_rollback

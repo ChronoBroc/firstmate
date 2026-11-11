@@ -1279,12 +1279,28 @@ fm_finished_brief_record() {  # <data-dir> <id>
 # Returns 0 when <data>/<id>/brief.md is not a brief a finished task already
 # ran, and 1 with FM_FINISHED_BRIEF_ERROR naming the remedy when it is or when
 # that cannot be decided.
-fm_finished_brief_check() {  # <data-dir> <id>
-  local data=$1 id=$2 brief record sum
+fm_finished_brief_check() {  # <data-dir> <id> <state-dir>
+  local data=$1 id=$2 state=$3 brief record sum
   FM_FINISHED_BRIEF_ERROR=
   brief="$data/$id/brief.md"
   record="$data/$id/finished-briefs"
-  [ -e "$record" ] || [ -L "$record" ] || return 0
+  if [ ! -e "$record" ] && [ ! -L "$record" ]; then
+    if [ ! -e "$state/$id.meta" ] && [ ! -L "$state/$id.meta" ] &&
+      [ -f "$data/$id/launch-brief.md" ] &&
+      perl -0777 -e '
+        open my $brief_file, "<:raw", $ARGV[0] or exit 1;
+        my $brief = <$brief_file>;
+        open my $launch_file, "<:raw", $ARGV[1] or exit 1;
+        my $launch = <$launch_file>;
+        exit 0 if index($launch, $brief) == 0;
+        $launch =~ s/\A# Current worker role contract\n[^\n]*(?:\n[^\n]+)*\n\n//;
+        exit(index($launch, $brief) == 0 ? 0 : 1);
+      ' "$brief" "$data/$id/launch-brief.md"; then
+      FM_FINISHED_BRIEF_ERROR="$brief matches a previous launch without a finished-brief record; if a finished task ran this brief, keep $data/$id/ and move it aside and scaffold a new brief, or use a fresh id; if an earlier spawn of this same item failed before any worker ran, remove only $data/$id/launch-brief.md and spawn again"
+      return 1
+    fi
+    return 0
+  fi
   if [ -L "$record" ] || [ ! -f "$record" ]; then
     FM_FINISHED_BRIEF_ERROR="finished-brief record is not a regular file at $record"
     return 1

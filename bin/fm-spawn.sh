@@ -4326,7 +4326,7 @@ fi
   exit 1
 }
 if [ "$RELAUNCH" -eq 0 ] && { [ "$KIND" = ship ] || [ "$KIND" = scout ]; } &&
-  ! fm_finished_brief_check "$DATA" "$ID"; then
+  ! fm_finished_brief_check "$DATA" "$ID" "$STATE"; then
   echo "error: spawn refused: $FM_FINISHED_BRIEF_ERROR" >&2
   exit 1
 fi
