@@ -1,0 +1,2 @@
+Private tmux server stopped. list-sessions returned 1: no server running on {run-worktree}/.validation/s
+Disposable project, worktree pool, lab home, and drivers removed from the validation worktree. No task metadata remained before cleanup.

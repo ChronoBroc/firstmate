@@ -1,0 +1,10 @@
+{
+  "replacement_launch_excerpt": "## Captain's intent\nNEW task: report the literal NEW-TASK token and await further instructions.\n\n## Firstmate spec\nRead no other files and make no changes. This is a disposable launch check.\n\n# Herdr lifecycle declaration - NOT ENABLED\n**HARD SAFETY GATE:** this scaffold cannot inspect the task text filled in above.\nIf the task will start, stop, delete, restart, profile, or otherwise drive Herdr lifecycle behavior, stop and regenerate the brief with `--herdr-lab` before dispatch.\nDo not add Herd",
+  "replacement_brief_sha256": "3462b13c3d5827ff30fca52f412d0a61f669a9d6b45d6192a2572509fcb23e62",
+  "finished_brief_checksums": [
+    "19ec41f49b7ca80f9e41ad388d93f1e22707164042d0c58bec2cdce49ad92837",
+    "3462b13c3d5827ff30fca52f412d0a61f669a9d6b45d6192a2572509fcb23e62"
+  ],
+  "remaining_task_metadata": [],
+  "scope": "Real CLI and tmux lifecycle against synthetic local tasks. Codex reached folder-trust prompt; no task execution or global trust acceptance claimed."
+}

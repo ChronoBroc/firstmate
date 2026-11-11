@@ -1,0 +1,2 @@
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.validation/home
+error: spawn refused: {run-worktree}/.validation/home/data/reuse/brief.md is the brief of a finished task that already ran under the id reuse, so launching it would run the old instructions for a new item; keep {run-worktree}/.validation/home/data/reuse/ (it holds that task's proof) and either move it aside and scaffold a new brief with bin/fm-brief.sh, or file the new item under a fresh id
