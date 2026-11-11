@@ -152,7 +152,7 @@ What a reclaim is not:
 - It does **not** cover a secondmate. A secondmate whose endpoint is gone already has one recovery path - `bin/fm-spawn.sh <id> --secondmate`, driven by the session-start sweep or the watcher's liveness tick - so control-plane reclaim refuses and names it rather than becoming a second path to the same outcome.
 
 A tmux reclaim opens the new window in the recorded session when the server this process addresses still has it, and otherwise where an ordinary spawn from this seat would put it, since a lost server usually takes the session with it.
-A bare-shell window already carrying the task's name there - typically left by an earlier reclaim that refused before the record was republished - is adopted rather than blocking the retry; one holding anything else refuses.
+A window already carrying the task's name at the replacement address refuses the reclaim, including a bare shell left by an earlier failed attempt.
 
 A Rex reclaim opens the new tab in the exact Rex session the record names, focus-safe, and falls back to the ordinary placement only when that session is itself gone.
 A bare-shell tab left behind by an earlier reclaim that refused before the record was republished carries the same block label, and the next Rex reclaim closes it before opening the new tab, whether that tab lands in the recorded session or the fallback placement; a non-shell program in such a tab refuses the reclaim instead.

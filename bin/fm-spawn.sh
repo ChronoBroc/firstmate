@@ -4993,25 +4993,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # after a server loss the recorded session usually died with it. The record
     # published below writes window= and the new server identity from these
     # values, which is the whole rebind.
-    #
-    # A window already carrying the task's name there is not the recorded one,
-    # which was just proven gone. A bare shell - typically what a rebind that
-    # refused before publishing the record left behind - is adopted rather
-    # than blocking every retry; anything else refuses.
     SES=${RELAUNCH_TARGET%%:*}
     tmux has-session -t "=$SES" 2>/dev/null || SES=$(fm_backend_tmux_container_ensure) || exit 1
     T="$SES:$W"
-    if fm_backend_tmux_target_exists "$T"; then
-      TMUX_HUSK_STATE=$(fm_backend_tmux_agent_state "$T")
-      [ "$TMUX_HUSK_STATE" = dead ] || {
-        echo "error: task $ID's recorded window is gone, but a window named $T on this tmux server reads '$TMUX_HUSK_STATE' rather than an empty shell; refusing to rebind the task onto it" >&2
-        exit 1
-      }
-      WT_TARGET=$T
-    else
-      WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
-      WT_TARGET="$WID"
-    fi
+    WID=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
+    WT_TARGET="$WID"
   elif [ "$BACKEND" = rex ]; then
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh endpoint for the same task, opened directly in the

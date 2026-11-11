@@ -2881,29 +2881,38 @@ test_tmux_refuses_a_window_alive_on_a_server_this_seat_does_not_address() {
   pass "tmux: a window still alive on its recorded server is never duplicated from another server"
 }
 
-test_tmux_reclaim_adopts_a_bare_shell_left_by_a_refused_rebind() {
-  local dir out rc
-  dir=$(new_case tmux-husk rl69)
-  add_ship_task "$dir" rl69 claude
-  exited_pid
-  record_tmux_server "$dir" rl69 "$EXITED_PID:1700000000"
-  serve_tmux_from "$dir" 4242:1800000000
-  # The recorded session died with the server, and an earlier rebind that
-  # refused before publishing the record left a bare shell carrying the task's
-  # name where an ordinary spawn from this seat places windows.
-  printf '%s\n' fmses > "$dir/fake/missing-sessions"
-  printf 'zsh' > "$dir/fake/command"
+test_tmux_reclaim_refuses_an_existing_replacement_window() {
+  local dir out rc placement before
+  for placement in recorded fallback; do
+    dir=$(new_case "tmux-collision-$placement" rl69)
+    add_ship_task "$dir" rl69 claude
+    exited_pid
+    record_tmux_server "$dir" rl69 "$EXITED_PID:1700000000"
+    serve_tmux_from "$dir" 4242:1800000000
+    if [ "$placement" = fallback ]; then
+      printf '%s\n' fmses > "$dir/fake/missing-sessions"
+    else
+      sed 's/^window=.*/window=fmses:old-rl69/' "$dir/home/state/rl69.meta" > "$dir/meta.new"
+      mv "$dir/meta.new" "$dir/home/state/rl69.meta"
+    fi
+    printf 'zsh' > "$dir/fake/command"
+    before=$(cat "$dir/home/state/rl69.meta")
 
-  out=$(run_spawn "$dir" rl69 --relaunch --harness claude); rc=$?
-  expect_code 0 "$rc" "a bare shell carrying the task's name should be adopted"$'\n'"$out"
-  assert_absent "$dir/fake/created-windows" "adopting the bare shell must not open a second window"
-  case "$(meta_field "$dir" rl69 window)" in
-    fmses:*|'') fail "the record should move off the dead session, got $(meta_field "$dir" rl69 window)" ;;
-    *:fm-rl69) ;;
-    *) fail "the record should name the task's window, got $(meta_field "$dir" rl69 window)" ;;
-  esac
-  assert_tmux_reclaimed "$dir" rl69 "$(meta_field "$dir" rl69 window)"
-  pass "tmux: a retry adopts the bare shell an earlier refused rebind left, instead of blocking"
+    out=$(run_spawn "$dir" rl69 --relaunch --harness claude); rc=$?
+    expect_code 1 "$rc" "reclaim must refuse a replacement-address collision ($placement)"$'\n'"$out"
+    assert_contains "$out" "already exists" "the refusal must identify the collision"
+    assert_absent "$dir/fake/created-windows" "a collision must not create another window"
+    [ ! -s "$dir/fake/literal" ] || fail "a collision must not launch an agent"
+    [ "$(cat "$dir/home/state/rl69.meta")" = "$before" ] || fail "a collision must preserve the task binding"
+
+    out=$(run_control "$dir" rl69 relaunch --note "resume after server loss"); rc=$?
+    expect_code 1 "$rc" "control relaunch must refuse a replacement-address collision ($placement)"$'\n'"$out"
+    assert_contains "$out" "already exists" "control must report the collision"
+    assert_absent "$dir/fake/created-windows" "a refused transaction must not create another window"
+    [ ! -s "$dir/fake/literal" ] || fail "a refused transaction must not launch an agent"
+    [ "$(meta_field "$dir" rl69 tmux_server)" = "$EXITED_PID:1700000000" ] || fail "a refused transaction must retain the recorded server"
+  done
+  pass "tmux: reclaim refuses replacement collisions in recorded and fallback sessions"
 }
 
 # The same proof against real tmux on a private socket: the identity spawn
@@ -3622,7 +3631,7 @@ test_tmux_reclaims_a_task_whose_server_was_lost
 test_tmux_refuses_a_window_missing_from_its_still_running_server
 test_tmux_refuses_a_recorded_pid_still_held_by_an_unconfirmed_tmux
 test_tmux_refuses_a_window_alive_on_a_server_this_seat_does_not_address
-test_tmux_reclaim_adopts_a_bare_shell_left_by_a_refused_rebind
+test_tmux_reclaim_refuses_an_existing_replacement_window
 test_tmux_absence_proof_against_a_real_private_server
 test_reclaim_refuses_an_unreadable_endpoint
 test_herdr_relaunch_resumes_only_the_registered_pi_session
