@@ -458,8 +458,7 @@ fm_control_absence_recheck_applies() {  # <backend> <raw-state>
 #     judged against the identity spawn recorded instead (tmux_socket, and
 #     tmux_server's pid and start time): a recorded server whose pid is free
 #     or now held by another program has exited and taken every window with
-#     it, and a recorded server still answering at its socket is authoritative
-#     about its own windows (fm_backend_tmux_endpoint_absence_recheck). A
+#     it (fm_backend_tmux_endpoint_absence_recheck). A
 #     record with no identity, a pid still held by a tmux that cannot be
 #     confirmed or excluded, and a window still alive on a server this
 #     process does not address all return `unproven`.

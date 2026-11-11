@@ -239,9 +239,7 @@ fm_backend_tmux_server_process() {  # <pid>
 # carries (tmux_socket, tmux_server), never against whichever server this
 # process happens to address. Prints one word:
 #   missing    - PROVEN gone: the recorded server process no longer exists
-#                (its pid is free or now another program), or that exact
-#                server is still running, answers at its recorded socket, and
-#                has no such window.
+#                (its pid is free, now another program, or a later server).
 #   dead/alive - the window is on the recorded server, which is also the one
 #                this process addresses, and the ordinary classifier re-read it.
 #   foreign    - the window is still on the recorded server, but this process
@@ -284,12 +282,11 @@ fm_backend_tmux_endpoint_absence_recheck() {  # <target> <socket> <server-id>
   windows=$(fm_backend_tmux_window_inventory "=$session" "$socket")
   inventory_status=$?
   case "$inventory_status" in
-    2) printf 'missing'; return 0 ;;
     0) ;;
     *) printf 'unreadable'; return 0 ;;
   esac
   if ! printf '%s\n' "$windows" | grep -Fqx -- "$window"; then
-    printf 'missing'
+    printf 'unreadable'
     return 0
   fi
   current=$(LC_ALL=C tmux display-message -p '#{pid}:#{start_time}' 2>/dev/null) || current=

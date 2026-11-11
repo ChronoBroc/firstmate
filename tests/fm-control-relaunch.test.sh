@@ -2748,8 +2748,7 @@ test_tmux_refuses_when_the_server_is_gone() {
 # tmux_server as <pid>:<start-time>). That identity is what lets a relaunch
 # prove a window gone after the server is lost, rather than refusing every
 # missing window: a recorded server whose pid is free has exited with all of
-# its windows, and a recorded server still answering at its socket is
-# authoritative about its own windows. The pids below are real processes, so
+# its windows. The pids below are real processes, so
 # the process-table half of the proof runs for real.
 
 TMUX_NAMED_PIDS=()
@@ -2834,24 +2833,19 @@ test_tmux_reclaims_a_task_whose_server_was_lost() {
   pass "tmux: a task whose recorded server exited is reclaimed into a fresh window in its worktree"
 }
 
-test_tmux_reclaims_a_window_gone_from_its_still_running_server() {
-  local dir out rc
+test_tmux_refuses_a_window_missing_from_its_still_running_server() {
+  local dir
   dir=$(new_case tmux-window-gone rl65)
   add_ship_task "$dir" rl65 claude
   start_tmux_named_process "$dir"
   record_tmux_server "$dir" rl65 "$TMUX_NAMED_PID:1700000000"
-  # The recorded server is still running, answers at its socket as itself, and
-  # is the one this process addresses - and the window is not on it.
   printf '%s' "$TMUX_NAMED_PID:1700000000" > "$dir/fake/socket-server"
   serve_tmux_from "$dir" "$TMUX_NAMED_PID:1700000000"
   strand_endpoint "$dir" rl65
-  printf 'zsh' > "$dir/fake/command"
-
-  out=$(run_spawn "$dir" rl65 --relaunch --harness claude); rc=$?
-  expect_code 0 "$rc" "a window its own still-running server no longer has is provably gone"$'\n'"$out"
-  assert_grep "fm-rl65" "$dir/fake/created-windows" "the reclaim should create one fresh window"
-  assert_tmux_reclaimed "$dir" rl65 fmses:fm-rl65
-  pass "tmux: a window absent from its still-running recorded server is reclaimed"
+  assert_tmux_missing_refuses "$dir" rl65 "window missing on the surviving recorded server"
+  : > "$dir/fake/session-missing"
+  assert_tmux_missing_refuses "$dir" rl65 "session missing on the surviving recorded server"
+  pass "tmux: a missing window or session on the surviving recorded server refuses both verbs"
 }
 
 test_tmux_refuses_a_recorded_pid_still_held_by_an_unconfirmed_tmux() {
@@ -2948,9 +2942,19 @@ test_tmux_absence_proof_against_a_real_private_server() {
 
     [ "$(verdict_of fmses:fm-r1)" = dead ] \
       || fail "a bare-shell window on its recorded server should read dead, got $(verdict_of fmses:fm-r1)"
-    tmux kill-window -t =fmses:=fm-r1
-    [ "$(verdict_of fmses:fm-r1)" = gone ] \
-      || fail "a window its still-running recorded server lacks should be proven gone, got $(verdict_of fmses:fm-r1)"
+    tmux rename-session -t =fmses renamed || fail "the session must be renamed"
+    [ "$(verdict_of fmses:fm-r1)" = unproven ] \
+      || fail "a renamed session must not prove its surviving window gone"
+    tmux rename-session -t =renamed fmses || fail "the session name must be restored"
+    tmux new-session -d -s other
+    pane_pid=$(tmux display-message -p -t =fmses:=fm-r1 '#{pane_pid}')
+    tmux move-window -s =fmses:=fm-r1 -t other: || fail "the window must move to another session"
+    kill -0 "$pane_pid" || fail "the moved window's process must still be alive"
+    [ "$(verdict_of fmses:fm-r1)" = unproven ] \
+      || fail "a moved window must not be proven gone"
+    tmux kill-window -t =other:=fm-r1
+    [ "$(verdict_of fmses:fm-r1)" = unproven ] \
+      || fail "a missing window on a surviving server must stay unproven"
 
     : > "$meta"
     [ "$(verdict_of fmses:fm-r1)" = unproven ] \
@@ -2968,7 +2972,7 @@ test_tmux_absence_proof_against_a_real_private_server() {
       || fail "a later server at the recorded socket must not stand in for the lost one, got $(verdict_of fmses:fm-r2)"
     tmux -S "$sock" kill-server
   ) || fail "the real-tmux absence proof failed"
-  pass "tmux: against a real private server, a lost server or window is proven gone and an unrecorded one is not"
+  pass "tmux: against a real private server, only a lost recorded server proves a missing window gone"
 }
 
 test_reclaim_refuses_an_unreadable_endpoint() {
@@ -3615,7 +3619,7 @@ test_tmux_refuses_a_window_missing_from_its_session
 test_tmux_refuses_a_session_that_cannot_be_found
 test_tmux_refuses_when_the_server_is_gone
 test_tmux_reclaims_a_task_whose_server_was_lost
-test_tmux_reclaims_a_window_gone_from_its_still_running_server
+test_tmux_refuses_a_window_missing_from_its_still_running_server
 test_tmux_refuses_a_recorded_pid_still_held_by_an_unconfirmed_tmux
 test_tmux_refuses_a_window_alive_on_a_server_this_seat_does_not_address
 test_tmux_reclaim_adopts_a_bare_shell_left_by_a_refused_rebind

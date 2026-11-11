@@ -2531,9 +2531,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
   #           (fm_control_absence_recheck_applies owns that rule).
   #   tmux  - the record's tmux_socket/tmux_server name the server the window
   #           lived on. That server's pid being free or held by another
-  #           program proves it exited with every window; that server still
-  #           answering at its socket without the window proves the window
-  #           gone. A record without that identity still refuses, because a
+  #           program proves it exited with every window.
+  #           A record without that identity still refuses, because a
   #           server-wide inventory describes only the server this process
   #           addresses.
   # Every transient or self-contradicting read stays `unreadable`/`ambiguous`
@@ -4986,8 +4985,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     WT_TARGET=$T
     SES=${T%%:*}
   elif [ "$BACKEND" = tmux ]; then
-    # The recorded window is authoritatively gone: its recorded server exited,
-    # or that server is still running without it
+    # The recorded window is authoritatively gone: its recorded server exited
     # (fm_control_endpoint_absence_verdict owns that proof). Create ONE fresh
     # window for the same task, opened directly in the recorded worktree, in
     # the recorded session when the server this process addresses still has
