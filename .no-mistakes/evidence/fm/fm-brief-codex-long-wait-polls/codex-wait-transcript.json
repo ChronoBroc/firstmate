@@ -1,0 +1,57 @@
+{
+  "scope": "Development-only tool execution, not an autonomous worker-model evaluation. Synthetic local commands are the external work being awaited; real Codex functions.exec, exec_command, write_stdin and wait are used.",
+  "direct_long_poll": {
+    "scenario": "Execute emitted Codex long-wait pattern against a real local synthetic 80-second command",
+    "launch": {
+      "start": 1794438912097,
+      "result": {
+        "chunk_id": "5c2cab",
+        "wall_time_seconds": 1.000296791,
+        "session_id": 91081,
+        "original_token_count": 0,
+        "output": ""
+      }
+    },
+    "poll": {
+      "first_line": "// @exec: {\"yield_time_ms\": 300000}",
+      "chars": "",
+      "yield_time_ms": 300000,
+      "elapsed_ms": 75235,
+      "result": {
+        "chunk_id": "e5a210",
+        "wall_time_seconds": 75.23282075,
+        "exit_code": 0,
+        "original_token_count": 10,
+        "output": "synthetic external command completed\n"
+      }
+    }
+  },
+  "yielded_cell": {
+    "launch": {
+      "chunk_id": "989a3e",
+      "wall_time_seconds": 1.001747417,
+      "session_id": 30191,
+      "original_token_count": 0,
+      "output": ""
+    },
+    "initial_call": "plain functions.exec cell awaiting empty write_stdin with yield_time_ms 300000",
+    "initial_result": "Script running with cell ID 9 after 31.0 seconds",
+    "resume": {
+      "tool": "functions.wait",
+      "cell_id": "9",
+      "yield_time_ms": 300000,
+      "wall_time_seconds": 40.5
+    },
+    "completion": {
+      "elapsed_ms": 76091,
+      "result": {
+        "chunk_id": "eb65f8",
+        "wall_time_seconds": 76.088723833,
+        "exit_code": 0,
+        "original_token_count": 10,
+        "output": "yielded-cell external command completed\n"
+      }
+    }
+  },
+  "conclusion": "The pragma-bearing call remained blocked beyond 30 seconds and returned early on command completion. The plain cell reproduced the early yield; an explicit 300000 ms wait resumed it until completion. Both command exits were 0. No claim of a full 300-second hold or model-compliance rate."
+}

@@ -1,0 +1,130 @@
+[
+  {
+    "revision": "base",
+    "variant": "ship-no-mistakes",
+    "wait_no_turns": true,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> .brief-live-hoa34cuo/base-bin/fm-brief.sh ship-no-mistakes synthetic-project --mode no-mistakes",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/base-ship-no-mistakes-True/data/ship-no-mistakes/brief.md (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "target",
+    "variant": "ship-no-mistakes",
+    "wait_no_turns": true,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> bin/fm-brief.sh ship-no-mistakes synthetic-project --mode no-mistakes",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/target-ship-no-mistakes-True/data/ship-no-mistakes/brief.md (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "base",
+    "variant": "ship-direct-PR",
+    "wait_no_turns": true,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> .brief-live-hoa34cuo/base-bin/fm-brief.sh ship-direct-PR synthetic-project --mode direct-PR",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/base-ship-direct-PR-True/data/ship-direct-PR/brief.md (ship, mode=direct-PR; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "target",
+    "variant": "ship-direct-PR",
+    "wait_no_turns": true,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> bin/fm-brief.sh ship-direct-PR synthetic-project --mode direct-PR",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/target-ship-direct-PR-True/data/ship-direct-PR/brief.md (ship, mode=direct-PR; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "base",
+    "variant": "ship-local-only",
+    "wait_no_turns": true,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> .brief-live-hoa34cuo/base-bin/fm-brief.sh ship-local-only synthetic-project --mode local-only",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/base-ship-local-only-True/data/ship-local-only/brief.md (ship, mode=local-only; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "target",
+    "variant": "ship-local-only",
+    "wait_no_turns": true,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> bin/fm-brief.sh ship-local-only synthetic-project --mode local-only",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/target-ship-local-only-True/data/ship-local-only/brief.md (ship, mode=local-only; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "base",
+    "variant": "scout",
+    "wait_no_turns": true,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> .brief-live-hoa34cuo/base-bin/fm-brief.sh scout synthetic-project --scout",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/base-scout-True/data/scout/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "target",
+    "variant": "scout",
+    "wait_no_turns": true,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> bin/fm-brief.sh scout synthetic-project --scout",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/target-scout-True/data/scout/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "base",
+    "variant": "ship-no-mistakes",
+    "wait_no_turns": false,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> .brief-live-hoa34cuo/base-bin/fm-brief.sh ship-no-mistakes synthetic-project --mode no-mistakes",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/base-ship-no-mistakes-False/data/ship-no-mistakes/brief.md (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "target",
+    "variant": "ship-no-mistakes",
+    "wait_no_turns": false,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> bin/fm-brief.sh ship-no-mistakes synthetic-project --mode no-mistakes",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/target-ship-no-mistakes-False/data/ship-no-mistakes/brief.md (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "base",
+    "variant": "ship-direct-PR",
+    "wait_no_turns": false,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> .brief-live-hoa34cuo/base-bin/fm-brief.sh ship-direct-PR synthetic-project --mode direct-PR",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/base-ship-direct-PR-False/data/ship-direct-PR/brief.md (ship, mode=direct-PR; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "target",
+    "variant": "ship-direct-PR",
+    "wait_no_turns": false,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> bin/fm-brief.sh ship-direct-PR synthetic-project --mode direct-PR",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/target-ship-direct-PR-False/data/ship-direct-PR/brief.md (ship, mode=direct-PR; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "base",
+    "variant": "ship-local-only",
+    "wait_no_turns": false,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> .brief-live-hoa34cuo/base-bin/fm-brief.sh ship-local-only synthetic-project --mode local-only",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/base-ship-local-only-False/data/ship-local-only/brief.md (ship, mode=local-only; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "target",
+    "variant": "ship-local-only",
+    "wait_no_turns": false,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> bin/fm-brief.sh ship-local-only synthetic-project --mode local-only",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/target-ship-local-only-False/data/ship-local-only/brief.md (ship, mode=local-only; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "base",
+    "variant": "scout",
+    "wait_no_turns": false,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> .brief-live-hoa34cuo/base-bin/fm-brief.sh scout synthetic-project --scout",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/base-scout-False/data/scout/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  },
+  {
+    "revision": "target",
+    "variant": "scout",
+    "wait_no_turns": false,
+    "command": "FM_HOME=<isolated-home> FM_ROOT_OVERRIDE=<worktree> bin/fm-brief.sh scout synthetic-project --scout",
+    "exit_code": 0,
+    "stdout": "scaffolded: {run-worktree}/.brief-live-hoa34cuo/target-scout-False/data/scout/brief.md (scout; replace {TASK} and {FIRSTMATE_SPEC})\n"
+  }
+]
