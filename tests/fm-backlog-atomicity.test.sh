@@ -1334,6 +1334,123 @@ test_dispatch_refuses_a_closed_item() {
   pass "dispatch refuses a closed item instead of silently reopening it"
 }
 
+test_reused_id_refuses_a_finished_brief() {
+  local case_dir home id out rc=0 legacy=${1:-no}
+  id=atomic-reused-id-b1
+  case_dir=$(make_home "reused-id-$legacy" "$id")
+  home=$(home_of "$case_dir")
+  printf '%s\n' 'OLD-INSTRUCTIONS for the finished task.' >> "$home/data/$id/brief.md"
+  add_item "$case_dir" "$id"
+  out=$(run_ship_spawn "$case_dir" "$id") || fail "first spawn failed: $out"
+  out=$(run_teardown "$case_dir" "$id" --force) || fail "teardown of the finished task failed: $out"
+  [ "$(row_state "$case_dir" "$id")" = "done" ] || fail "teardown did not close the finished item"
+  if [ "$legacy" != no ]; then
+    rm "$home/data/$id/finished-briefs"
+  fi
+  if [ "$legacy" = brief-first ]; then
+    cat "$home/data/$id/brief.md" > "$home/data/$id/launch-brief.md"
+    printf '\nLaunch overlay\n' >> "$home/data/$id/launch-brief.md"
+  fi
+  ( cd "$home" && tasks-axi prune --keep 0 --file "$home/data/backlog.md" >/dev/null ) \
+    || fail "could not prune the finished item"
+  add_item "$case_dir" "$id"
+  [ "$(row_state "$case_dir" "$id")" = queued ] || fail "the reused id was not filed as a new item"
+
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "spawn launched a finished task's brief for a new item that reuses its id"
+  if [ "$legacy" = no ]; then
+    assert_contains "$out" "brief of a finished task" \
+      "the refusal did not say the brief belongs to a finished task"
+  else
+    assert_contains "$out" "remove only $home/data/$id/launch-brief.md" \
+      "the refusal did not explain how to retry a spawn that never ran"
+  fi
+  assert_contains "$out" "scaffold a new brief" "the refusal did not name the remedy"
+  assert_absent "$home/state/$id.meta" "the refused spawn left a task record behind"
+  [ "$(row_state "$case_dir" "$id")" = queued ] || fail "the refused spawn moved the new item"
+  assert_grep 'OLD-INSTRUCTIONS' "$home/data/$id/brief.md" \
+    "the refusal changed the finished task's brief"
+
+  mv "$home/data/$id" "$home/data/$id.finished"
+  mkdir -p "$home/data/$id"
+  sed 's/OLD-INSTRUCTIONS/NEW-INSTRUCTIONS/' "$home/data/$id.finished/brief.md" > "$home/data/$id/brief.md"
+  out=$(run_ship_spawn "$case_dir" "$id") || fail "spawn refused a new brief for the reused id: $out"
+  assert_grep 'NEW-INSTRUCTIONS' "$home/data/$id/launch-brief.md" \
+    "the new item did not launch its own brief"
+  pass "a reused id cannot launch the finished task's brief, and launches once it has its own"
+}
+
+
+test_retained_task_requires_confirmed_continuation() {
+  local kind=$1 case_dir home id out
+  local -a flags=(--mode no-mistakes --yolo off)
+  id="atomic-retained-$kind"
+  case_dir=$(make_home "retained-$kind" "$id")
+  home=$(home_of "$case_dir")
+  [ "$kind" != scout ] || flags=(--scout)
+  add_item "$case_dir" "$id" "$kind"
+  out=$(run_spawn "$case_dir" "$id" "$case_dir/project" "${flags[@]}") || fail "initial spawn failed: $out"
+  cp "$home/data/$id/brief.md" "$case_dir/original-brief.md"
+  out=$(FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-captain-hold.sh" hold "$id" --reason 'Continue after approval') \
+    || fail "could not hold the task: $out"
+  out=$(run_teardown "$case_dir" "$id" --force) || fail "retain teardown failed: $out"
+  assert_absent "$home/state/$id.meta" "retain teardown left metadata"
+  assert_absent "$home/data/$id/finished-briefs" "retain teardown recorded an unfinished brief"
+  [ "$(row_state "$case_dir" "$id")" = queued ] || fail "retain did not keep the row queued"
+  printf 'Continue the same work.\n' > "$case_dir/answer.txt"
+  out=$(FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-captain-hold.sh" answer "$id" --release --decision-file "$case_dir/answer.txt") \
+    || fail "could not release the task: $out"
+  if out=$(run_spawn "$case_dir" "$id" "$case_dir/project" "${flags[@]}"); then
+    fail "release alone permitted an ambiguous previous launch"
+  fi
+  assert_contains "$out" "same retained task rather than a new item" "refusal omitted the continuation condition"
+  assert_contains "$out" "remove only $home/data/$id/launch-brief.md" "refusal omitted the continuation remedy"
+  assert_absent "$home/state/$id.meta" "refusal created metadata"
+  [ "$(row_state "$case_dir" "$id")" = queued ] || fail "refusal changed the queued row"
+  cmp -s "$case_dir/original-brief.md" "$home/data/$id/brief.md" || fail "refusal changed the brief"
+  rm "$home/data/$id/launch-brief.md"
+  out=$(run_spawn "$case_dir" "$id" "$case_dir/project" "${flags[@]}") || fail "confirmed continuation failed: $out"
+  cmp -s "$case_dir/original-brief.md" "$home/data/$id/brief.md" || fail "continuation changed the brief"
+  [ "$(row_state "$case_dir" "$id")" = in_flight ] || fail "continuation did not start the task"
+  out=$(run_teardown "$case_dir" "$id" --force) || fail "final teardown failed: $out"
+  assert_present "$home/data/$id/finished-briefs" "final close did not record the finished brief"
+  rm "$home/data/$id/finished-briefs"
+  ( cd "$home" && tasks-axi prune --keep 0 --file "$home/data/backlog.md" >/dev/null ) || fail "prune failed"
+  add_item "$case_dir" "$id" "$kind"
+  if out=$(run_spawn "$case_dir" "$id" "$case_dir/project" "${flags[@]}"); then
+    fail "a new row inherited the previous task's release"
+  fi
+  assert_contains "$out" "matches a previous launch" "new row was not refused by the legacy guard"
+  out=$(FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-captain-hold.sh" hold "$id" --reason 'Approve the new item') \
+    || fail "could not hold the new item: $out"
+  out=$(FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-captain-hold.sh" answer "$id" --release --decision-file "$case_dir/answer.txt") \
+    || fail "could not release the new item: $out"
+  if out=$(run_spawn "$case_dir" "$id" "$case_dir/project" "${flags[@]}"); then
+    fail "holding and releasing a new item allowed the old brief to launch"
+  fi
+  assert_contains "$out" "matches a previous launch" "released new item bypassed the legacy guard"
+  assert_absent "$home/state/$id.meta" "released new item created metadata"
+  [ "$(row_state "$case_dir" "$id")" = queued ] || fail "refusal moved the released new item"
+  cmp -s "$case_dir/original-brief.md" "$home/data/$id/brief.md" || fail "refusal changed the old brief"
+  pass "retained $kind needs confirmed continuation; releasing a new item cannot authorize an old brief"
+}
+
+test_unrun_launch_brief_can_be_retried() {
+  local case_dir home id out rc=0
+  id=atomic-unrun-brief
+  case_dir=$(make_home unrun-brief "$id")
+  home=$(home_of "$case_dir")
+  add_item "$case_dir" "$id"
+  cp "$home/data/$id/brief.md" "$home/data/$id/launch-brief.md"
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "ambiguous unrun launch was accepted"
+  assert_contains "$out" "before any worker ran" "retry remedy omitted its safety condition"
+  rm "$home/data/$id/launch-brief.md"
+  out=$(run_ship_spawn "$case_dir" "$id") || fail "retry after removing unrun launch failed: $out"
+  [ "$(row_state "$case_dir" "$id")" = in_flight ] || fail "retry did not start the item"
+  pass "an unrun launch can be retried using the stated remedy"
+}
+
 test_dispatch_refuses_to_commit_without_a_published_record() {
   local case_dir id meta out rc=0
   id=atomic-dispatch-publish-failure-b4
@@ -3135,6 +3252,12 @@ test_completion_refuses_an_unresolvable_data_directory
 test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_reports_a_backlog_read_failure
 test_dispatch_refuses_a_closed_item
+test_reused_id_refuses_a_finished_brief
+test_reused_id_refuses_a_finished_brief role-first
+test_reused_id_refuses_a_finished_brief brief-first
+test_unrun_launch_brief_can_be_retried
+test_retained_task_requires_confirmed_continuation ship
+test_retained_task_requires_confirmed_continuation scout
 test_dispatch_refuses_to_commit_without_a_published_record
 test_dispatch_leaves_no_record_when_the_transition_fails
 test_dispatch_reports_an_incomplete_record_rollback

@@ -1237,3 +1237,86 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
   fi
   return 1
 }
+
+# FINISHED BRIEFS. data/<id>/ preserves task proof after backlog pruning.
+# Closing teardown for a ship or scout records the SHA-256 of its current
+# brief.md in finished-briefs; retain teardown does not record completion.
+# Fresh ship/scout spawn refuses a matching checksum. Without that record or
+# task metadata, it also refuses a brief matching the start of launch-brief.md,
+# either directly or after the current worker role contract is stripped.
+# This fallback covers old task directories without completion checksums.
+# A captain-hold release alone does not prove the directory belongs to the
+# same task. For a confirmed retained continuation, or a failed spawn of the
+# same item before any worker ran, remove only launch-brief.md and retry.
+# For finished work, preserve the directory by moving it aside and scaffold
+# a new brief, or use a fresh id. The guard never alters the task's files.
+# --relaunch is exempt because it requires an existing task record.
+# Regression coverage: tests/fm-backlog-atomicity.test.sh.
+
+# Set by the finished-brief helpers when they return non-zero.
+FM_FINISHED_BRIEF_ERROR=
+
+fm_finished_brief_record() {  # <data-dir> <id>
+  local data=$1 id=$2 brief record sum
+  FM_FINISHED_BRIEF_ERROR=
+  brief="$data/$id/brief.md"
+  record="$data/$id/finished-briefs"
+  [ -e "$brief" ] || [ -L "$brief" ] || return 0
+  if [ -L "$record" ] || { [ -e "$record" ] && [ ! -f "$record" ]; }; then
+    FM_FINISHED_BRIEF_ERROR="finished-brief record is not a regular file at $record"
+    return 1
+  fi
+  sum=$(fm_pr_sha256 "$brief") || sum=
+  if [ -z "$sum" ]; then
+    FM_FINISHED_BRIEF_ERROR="could not checksum the finished brief at $brief"
+    return 1
+  fi
+  if [ -f "$record" ] && grep -Fqx -- "$sum" "$record"; then
+    return 0
+  fi
+  if ! printf '%s\n' "$sum" >> "$record" 2>/dev/null || ! grep -Fqx -- "$sum" "$record"; then
+    FM_FINISHED_BRIEF_ERROR="could not record the finished brief in $record"
+    return 1
+  fi
+}
+
+# Returns 0 when <data>/<id>/brief.md is not a brief a finished task already
+# ran, and 1 with FM_FINISHED_BRIEF_ERROR naming the remedy when it is or when
+# that cannot be decided.
+fm_finished_brief_check() {  # <data-dir> <id> <state-dir>
+  local data=$1 id=$2 state=$3 brief record sum
+  FM_FINISHED_BRIEF_ERROR=
+  brief="$data/$id/brief.md"
+  record="$data/$id/finished-briefs"
+  if [ ! -e "$record" ] && [ ! -L "$record" ]; then
+    if [ ! -e "$state/$id.meta" ] && [ ! -L "$state/$id.meta" ] &&
+      [ -f "$data/$id/launch-brief.md" ] &&
+      perl -0777 -e '
+        open my $brief_file, "<:raw", $ARGV[0] or exit 1;
+        my $brief = <$brief_file>;
+        open my $launch_file, "<:raw", $ARGV[1] or exit 1;
+        my $launch = <$launch_file>;
+        exit 0 if index($launch, $brief) == 0;
+        $launch =~ s/\A# Current worker role contract\n[^\n]*(?:\n[^\n]+)*\n\n//;
+        exit(index($launch, $brief) == 0 ? 0 : 1);
+      ' "$brief" "$data/$id/launch-brief.md"; then
+      FM_FINISHED_BRIEF_ERROR="$brief matches a previous launch without a finished-brief record; if a finished task ran this brief, keep $data/$id/ and move it aside and scaffold a new brief, or use a fresh id; if an earlier spawn of this same item failed before any worker ran, remove only $data/$id/launch-brief.md and spawn again; if continuing a captain-held task after retain teardown, first confirm this is the same retained task rather than a new item reusing its id, then remove only $data/$id/launch-brief.md and spawn again"
+      return 1
+    fi
+    return 0
+  fi
+  if [ -L "$record" ] || [ ! -f "$record" ]; then
+    FM_FINISHED_BRIEF_ERROR="finished-brief record is not a regular file at $record"
+    return 1
+  fi
+  sum=$(fm_pr_sha256 "$brief") || sum=
+  if [ -z "$sum" ]; then
+    FM_FINISHED_BRIEF_ERROR="could not checksum $brief to compare it with the finished briefs in $record"
+    return 1
+  fi
+  if grep -Fqx -- "$sum" "$record"; then
+    FM_FINISHED_BRIEF_ERROR="$brief is the brief of a finished task that already ran under the id $id, so launching it would run the old instructions for a new item; keep $data/$id/ (it holds that task's proof) and either move it aside and scaffold a new brief with bin/fm-brief.sh, or file the new item under a fresh id"
+    return 1
+  fi
+  return 0
+}
