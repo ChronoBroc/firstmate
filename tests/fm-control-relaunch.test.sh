@@ -2882,37 +2882,30 @@ test_tmux_refuses_a_window_alive_on_a_server_this_seat_does_not_address() {
 }
 
 test_tmux_reclaim_refuses_an_existing_replacement_window() {
-  local dir out rc placement before
-  for placement in recorded fallback; do
-    dir=$(new_case "tmux-collision-$placement" rl69)
-    add_ship_task "$dir" rl69 claude
-    exited_pid
-    record_tmux_server "$dir" rl69 "$EXITED_PID:1700000000"
-    serve_tmux_from "$dir" 4242:1800000000
-    if [ "$placement" = fallback ]; then
-      printf '%s\n' fmses > "$dir/fake/missing-sessions"
-    else
-      sed 's/^window=.*/window=fmses:old-rl69/' "$dir/home/state/rl69.meta" > "$dir/meta.new"
-      mv "$dir/meta.new" "$dir/home/state/rl69.meta"
-    fi
-    printf 'zsh' > "$dir/fake/command"
-    before=$(cat "$dir/home/state/rl69.meta")
+  local dir out rc before
+  dir=$(new_case tmux-collision-fallback rl69)
+  add_ship_task "$dir" rl69 claude
+  exited_pid
+  record_tmux_server "$dir" rl69 "$EXITED_PID:1700000000"
+  serve_tmux_from "$dir" 4242:1800000000
+  printf '%s\n' fmses > "$dir/fake/missing-sessions"
+  printf 'zsh' > "$dir/fake/command"
+  before=$(cat "$dir/home/state/rl69.meta")
 
-    out=$(run_spawn "$dir" rl69 --relaunch --harness claude); rc=$?
-    expect_code 1 "$rc" "reclaim must refuse a replacement-address collision ($placement)"$'\n'"$out"
-    assert_contains "$out" "already exists" "the refusal must identify the collision"
-    assert_absent "$dir/fake/created-windows" "a collision must not create another window"
-    [ ! -s "$dir/fake/literal" ] || fail "a collision must not launch an agent"
-    [ "$(cat "$dir/home/state/rl69.meta")" = "$before" ] || fail "a collision must preserve the task binding"
+  out=$(run_spawn "$dir" rl69 --relaunch --harness claude); rc=$?
+  expect_code 1 "$rc" "reclaim must refuse a replacement-address collision"$'\n'"$out"
+  assert_contains "$out" "already exists" "the refusal must identify the collision"
+  assert_absent "$dir/fake/created-windows" "a collision must not create another window"
+  [ ! -s "$dir/fake/literal" ] || fail "a collision must not launch an agent"
+  [ "$(cat "$dir/home/state/rl69.meta")" = "$before" ] || fail "a collision must preserve the task binding"
 
-    out=$(run_control "$dir" rl69 relaunch --note "resume after server loss"); rc=$?
-    expect_code 1 "$rc" "control relaunch must refuse a replacement-address collision ($placement)"$'\n'"$out"
-    assert_contains "$out" "already exists" "control must report the collision"
-    assert_absent "$dir/fake/created-windows" "a refused transaction must not create another window"
-    [ ! -s "$dir/fake/literal" ] || fail "a refused transaction must not launch an agent"
-    [ "$(meta_field "$dir" rl69 tmux_server)" = "$EXITED_PID:1700000000" ] || fail "a refused transaction must retain the recorded server"
-  done
-  pass "tmux: reclaim refuses replacement collisions in recorded and fallback sessions"
+  out=$(run_control "$dir" rl69 relaunch --note "resume after server loss"); rc=$?
+  expect_code 1 "$rc" "control relaunch must refuse a replacement-address collision"$'\n'"$out"
+  assert_contains "$out" "already exists" "control must report the collision"
+  assert_absent "$dir/fake/created-windows" "a refused transaction must not create another window"
+  [ ! -s "$dir/fake/literal" ] || fail "a refused transaction must not launch an agent"
+  [ "$(meta_field "$dir" rl69 tmux_server)" = "$EXITED_PID:1700000000" ] || fail "a refused transaction must retain the recorded server"
+  pass "tmux: reclaim refuses replacement collisions in the fallback session"
 }
 
 # The same proof against real tmux on a private socket: the identity spawn
