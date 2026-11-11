@@ -1,0 +1,287 @@
+[
+  {
+    "version": "base",
+    "args": [
+      "t1",
+      "--file"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\n\u25cf\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\u25cf  WATCHER DOWN - SUPERVISION IS OFF\n\u25cf  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).\n\u25cf  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.\n\u25cf  This is a supervision warning only; the requested message WILL still be sent.\n\u25cf  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.\n\u25cf\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
+  },
+  {
+    "version": "base",
+    "args": [
+      "t1",
+      "--help"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\n"
+  },
+  {
+    "baseline_record": "001.msg",
+    "content": "schema=fm-task-inbox.v1\nat=2026-11-11T05:10:05Z\nbody-terminator=1\n--\n--file\n"
+  },
+  {
+    "baseline_record": "002.msg",
+    "content": "schema=fm-task-inbox.v1\nat=2026-11-11T05:10:08Z\nbody-terminator=1\n--\n--help\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--file",
+      "/tmp/a b.md"
+    ],
+    "exit": 1,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\nerror: unknown flag '--file' after target 't1'; nothing was sent. fm-send takes --resolve-key, --fire-and-forget, and --key here; run fm-send.sh --help for usage.\n  to send it as the message text, end the flags with --:\n    FM_HOME=/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/bin/fm-send.sh t1 -- --file /tmp/a\\ b.md\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--help"
+    ],
+    "exit": 1,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\nerror: unknown flag '--help' after target 't1'; nothing was sent. fm-send takes --resolve-key, --fire-and-forget, and --key here; run fm-send.sh --help for usage.\n  to send it as the message text, end the flags with --:\n    FM_HOME=/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/bin/fm-send.sh t1 -- --help\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "-f"
+    ],
+    "exit": 1,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\nerror: unknown flag '-f' after target 't1'; nothing was sent. fm-send takes --resolve-key, --fire-and-forget, and --key here; run fm-send.sh --help for usage.\n  to send it as the message text, end the flags with --:\n    FM_HOME=/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/bin/fm-send.sh t1 -- -f\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--file=x"
+    ],
+    "exit": 1,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\nerror: unknown flag '--file=x' after target 't1'; nothing was sent. fm-send takes --resolve-key, --fire-and-forget, and --key here; run fm-send.sh --help for usage.\n  to send it as the message text, end the flags with --:\n    FM_HOME=/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/bin/fm-send.sh t1 -- --file=x\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--force",
+      "restart"
+    ],
+    "exit": 1,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\nerror: unknown flag '--force' after target 't1'; nothing was sent. fm-send takes --resolve-key, --fire-and-forget, and --key here; run fm-send.sh --help for usage.\n  to send it as the message text, end the flags with --:\n    FM_HOME=/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/bin/fm-send.sh t1 -- --force restart\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "lab:fm-t1",
+      "--help"
+    ],
+    "exit": 1,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\nerror: unknown flag '--help' after target 'lab:fm-t1'; nothing was sent. fm-send takes --resolve-key, --fire-and-forget, and --key here; run fm-send.sh --help for usage.\n  to send it as the message text, end the flags with --:\n    FM_HOME=/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/bin/fm-send.sh lab:fm-t1 -- --help\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--resolve-key",
+      "k",
+      "--help"
+    ],
+    "exit": 1,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\nerror: unknown flag '--help' after target 't1'; nothing was sent. fm-send takes --resolve-key, --fire-and-forget, and --key here; run fm-send.sh --help for usage.\n  to send it as the message text, end the flags with --:\n    FM_HOME=/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/bin/fm-send.sh t1 --resolve-key k -- --help\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--",
+      "--key",
+      "Enter"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\n"
+  },
+  {
+    "delivered_record": "003.msg",
+    "content": "schema=fm-task-inbox.v1\nat=2026-11-11T05:10:17Z\nbody-terminator=1\n--\n--key Enter\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--",
+      "--help"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\n"
+  },
+  {
+    "delivered_record": "004.msg",
+    "content": "schema=fm-task-inbox.v1\nat=2026-11-11T05:10:20Z\nbody-terminator=1\n--\n--help\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "- item\n- next"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\n"
+  },
+  {
+    "delivered_record": "005.msg",
+    "content": "schema=fm-task-inbox.v1\nat=2026-11-11T05:10:23Z\nbody-terminator=1\n--\n- item\n- next\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--- heading"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\n"
+  },
+  {
+    "delivered_record": "006.msg",
+    "content": "schema=fm-task-inbox.v1\nat=2026-11-11T05:10:27Z\nbody-terminator=1\n--\n--- heading\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "-1"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\n"
+  },
+  {
+    "delivered_record": "007.msg",
+    "content": "schema=fm-task-inbox.v1\nat=2026-11-11T05:10:31Z\nbody-terminator=1\n--\n-1\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--help me with this"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\n"
+  },
+  {
+    "delivered_record": "008.msg",
+    "content": "schema=fm-task-inbox.v1\nat=2026-11-11T05:10:35Z\nbody-terminator=1\n--\n--help me with this\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "normal",
+      "--file"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\n"
+  },
+  {
+    "delivered_record": "009.msg",
+    "content": "schema=fm-task-inbox.v1\nat=2026-11-11T05:10:39Z\nbody-terminator=1\n--\nnormal --file\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--"
+    ],
+    "exit": 1,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\nerror: a text steer requires a nonempty message; nothing was sent (an empty marked request would deliver only marker and correlation bytes and leave the parent waiting on a reply to nothing)\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--file",
+      "/tmp/a b.md"
+    ],
+    "exit": 1,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\nerror: unknown flag '--file' after target 't1'; nothing was sent. fm-send takes --resolve-key, --fire-and-forget, and --key here; run fm-send.sh --help for usage.\n  to send it as the message text, end the flags with --:\n    FM_HOME=/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/bin/fm-send.sh t1 -- --file /tmp/a\\ b.md\n"
+  },
+  {
+    "printed_resend": "FM_HOME=/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/bin/fm-send.sh t1 -- --file /tmp/a\\ b.md",
+    "exit": 0,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\n"
+  },
+  {
+    "resend_record": "schema=fm-task-inbox.v1\nat=2026-11-11T05:10:44Z\nbody-terminator=1\n--\n--file /tmp/a b.md\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--resolve-key",
+      "k",
+      "--",
+      "--help"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\n"
+  },
+  {
+    "resolved_status": "needs-decision [key=k]: choose\nresolved [key=k] [at=1794373848]: answered: --help\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "t1",
+      "--key",
+      "Enter"
+    ],
+    "exit": 0,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "mate",
+      "--fire-and-forget",
+      "0123456789abcdef",
+      "--help"
+    ],
+    "exit": 1,
+    "stdout": "",
+    "stderr": "fm-gate-refuse: gate agent lifecycle permitted only against lab home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home\nWARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.\nerror: unknown flag '--help' after target 'mate'; nothing was sent. fm-send takes --resolve-key, --fire-and-forget, and --key here; run fm-send.sh --help for usage.\n  to send it as the message text, end the flags with --:\n    FM_HOME=/Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/.live-send/home /Users/broc-macmini/.no-mistakes/worktrees/af987dfc3730/01M74G25HQQ2SVDP4FMZM7K11S/bin/fm-send.sh mate --fire-and-forget 0123456789abcdef -- --help\n"
+  },
+  {
+    "version": "target",
+    "args": [
+      "--help"
+    ],
+    "exit": 0,
+    "stdout": "Steer a task by durable record: write the message into the task's steering\ninbox and ring a constant doorbell through its backend endpoint, best-effort.\nUsage: fm-send.sh <target> [--resolve-key <key>]... [--fire-and-forget <delivery-id>] [--] <text...>\n  <target> may be an exact task id, a legacy fm-<id> task label resolved\n  through this home's state/<id>.meta, or an explicit well-formed backend\n  target. fm-send refuses unresolved guesses rather than falling back to a\n  tmux window search, because a \"successful\" send to the wrong endpoint is\n  worse than a loud failure.\nThe text must be nonempty: an empty or whitespace-only message is refused\nbefore anything is marked, recorded, or submitted, because an empty marked\nsecondmate request delivers only marker and correlation bytes and leaves the\nparent waiting on a reply to nothing.\nA first text argument shaped like an unknown flag (-x, --name, --name=value)\nis refused before anything is marked, recorded, or submitted, and the error\nprints the resend that carries it as text. \"--\" ends the flags, so everything\nafter it is the message, even \"--key\" or \"--help\". Text that only begins with\ndashes, such as \"- item\", \"--- heading\", \"-1\", or \"--help me with this\", is\nalready ordinary text and needs no \"--\".\nSpecial keys instead of text: fm-send.sh <target> --key Enter\nKey support is backend-specific: tmux/herdr support Escape, Enter, and C-c;\nOrca supports Enter and C-c only; T3 Code maps Escape and C-c to a native\nturn interrupt and treats Enter as a no-op.\n\nTwo data planes:\n\nINBOX - the default for text to a task recorded in this home, local and\nremote alike. The message is appended as a durable sequenced record under\nthe task's steering inbox (newlines are legal) - state/<id>.inbox/ for a\nlocal task, or the remote home's host-local inbox reached through fm-on.sh\nfor a remote secondmate - and the endpoint receives only one short constant\nself-describing doorbell, best-effort. Pane backends type its line plus Enter;\nT3 Code starts one native turn. The durable record IS\nthe delivery, so the record's fate alone governs the exit: 0 = the steer is\ndurably sent (recorded); nonzero = nothing was confirmed delivered and a\nresend is appropriate (unresolvable target, an endpoint that cannot be\nlocked and revalidated or that retired or changed, an unwritable record, a\nfailed or lost remote transport) or a decision-close append failed after\ndelivery (the error then carries the exact manual close). The remote enqueue\nis idempotent: the remote leg deduplicates an exact re-run of the same\nrequest onto the existing record (bin/fm-task-inbox-lib.sh), so after a lost\ntransport (ssh exit 255, completion unknown) fm-send retries the same leg\nonce itself. For an ordinary reply-bearing request, a later re-run is\nidempotent only through the printed FM_PENDING_REPLY_EXISTING_CORR=<corr>\ncommand: it preserves the same correlation, body, and record, while a plain\nre-run mints a new correlation and delivers a separate record. An explicit\nfire-and-forget request instead retries with its same caller-supplied delivery\nid. A still-unconfirmed reply-bearing request keeps its reply expectation\npreserved for the record that may have landed.\nPending-reply bookkeeping trouble after a durable enqueue NEVER exits\nnonzero: with the recovery marker stored the watcher reconciles it silently,\nand with both the commit and the marker lost the send prints a distinct\n\"reply-tracking-degraded (steer delivered, do not resend)\" warning instead,\nbecause a resend-inviting status there would duplicate a delivered\ninstruction. There is no delivered-unconfirmed\noutcome on this plane: \"did the doorbell land\" is no longer the question -\n\"was the message acted on\" is, and that is answered asynchronously for an\nordinary record by the worker's acknowledgement move into handled/.\nbin/fm-task-inbox-lib.sh owns the record format, doorbell line, and retry and\nescalation policy for ordinary and fire-and-forget records.\nOn pane backends, the composer pre-check before the ring is ADVISORY only: when\nthe composer visibly holds pending text the ring is skipped with a notice and\nthe watcher re-rings an ordinary record later; no composer verdict is\ndelivery proof on this plane, and a failed ring never fails the send.\n\nTYPED - the LOCAL text submitted directly instead of through the inbox. On a\npane backend, a harness-native invocation (a leading \"/\", or a leading \"$\" to\na codex target) must reach the harness's own parser. An explicit backend\ntarget names an endpoint, not a task, so it stays on this plane even when\nlocal metadata happens to match it (the same boundary that keeps it unmarked\nand outside --resolve-key). Pane backends type the literal text ONCE, then\nretry Enter without retyping; T3 Code starts one native turn. Typed-plane exit\ncontract: 0 = submit confirmed; 3 = the text reached the live endpoint and\nsubmission was attempted, but the read-back stayed unconfirmed, or an API\nbackend's outcome is unproven: a lost reply or an error that can follow a\ncommit (verify the endpoint\nbefore any resend, and never submit blindly; docs/t3code-backend.md owns\nT3 Code's request-id retention and retry policy; a marked request's\npending-reply expectation stays armed because this outcome is not a proven\nfailure); any other nonzero = the send failed and nothing may be assumed\ndelivered. Submission dispatches through the target's recorded backend; the\ntmux adapter shares its composer/submit core with the away-mode daemon via\nbin/fm-tmux-lib.sh. Tune with FM_SEND_RETRIES (default 3; agy typed targets\ndefault to 20 for agy's late busy render) / FM_SEND_SLEEP (0.4). Slash\ncommands, and codex `$...` skill invocations resolved through harness meta,\nget a longer pre-Enter settle so completion popups do not swallow Enter.\nA remote secondmate target has no typed text plane at all:\nevery remote text steer rides the inbox (a marked secondmate request already\nreaches the harness as marker-prefixed chat rather than a parser command, so\nrouting a remote \"/...\" or \"$...\" through the record changes nothing the\nparser would have seen); only --key still crosses to the remote endpoint.\n\nStage-1 compatibility boundary: classification uses the original pre-marker\ntext, but secondmate marking still precedes every typed submission. Therefore\na marked parser-native secondmate invocation intentionally reaches the harness\nas marker-prefixed chat rather than executing as a parser command. This is a\npre-existing interaction retained for byte compatibility in this local-inbox\nstage; do not move the marker behind the invocation or omit it here. Follow-up\nfm-send-secondmate-harness-invocation-r1 owns that behavior.\n\nFrom-firstmate marker: when the resolved target is a task selector whose meta\nrecords kind=secondmate, the message uses the live-charter-compatible\nfrom-firstmate carrier owned by bin/fm-operational-input.sh so the secondmate\nroutes its reply via its status file or a status-pointed doc instead of\nstranding it in chat the main firstmate never reads. On the inbox plane the\nmarker travels verbatim inside the recorded body. A crewmate/scout target,\nan explicit backend-target escape-hatch target, and the --key path are never\nmarked - their behavior is unchanged.\n\nParent-owned pending-reply expectation: every newly marked secondmate request\nexcept an explicit --fire-and-forget delivery receives a privacy-safe\ncorrelation id and a durable parent record under state/pending-replies/ before\ndelivery (bin/fm-pending-reply-lib.sh). Delivery\nsuccess and reply success are separate facts: delivery never resolves the\nexpectation. On the inbox plane the durable enqueue IS delivery to the task's\nrecord, so the expectation is marked delivered at enqueue time; when that\nbookkeeping commit fails after its durable recovery marker is stored, the\nsend remains successful and watcher reconciliation owns the repair, and when\nthe commit and marker are BOTH lost the send still remains successful with a\nreply-tracking-degraded warning naming the expectation an operator must\ninspect (it can no longer reconcile or escalate on its own). Only a\nfailed enqueue discards the expectation. On the typed plane an unconfirmed submit (exit 3) keeps\nit armed rather than dropping it, and only a proven send failure discards it.\nSet FM_PENDING_REPLY_EXISTING_CORR=<id> when re-sending a recovery request\nfor an already-open expectation so a second record is not created. Direct\nunmarked captain input never creates one. A marked secondmate instruction\nsent with --fire-and-forget <16-hex-delivery-id> uses the same inbox transport\nwithout creating a reply expectation; its delivery id makes uncertain retries\nidempotent while allowing a later identical instruction to be distinct.\n\nRemote secondmate delivery: the send crosses fm-on.sh to a host-local leg\n(bin/fm-remote-secondmate-control.sh cmd_send_stdin) that writes the message as a\ndurable record into the remote home's steering inbox and rings the remote\ndoorbell, best-effort. The message body travels on the leg's stdin, never as\nan SSH exec argument, so its size is not bounded by remote argv limits; the\ndistinct send-stdin verb makes an older remote code root reject the call\nwith a usage error instead of misreading the mode word as the body.\nThe remote record is the delivery, exactly as it is\nlocally: leg exit 0 means durably recorded (fm-send then exits 0, marks the\npending-reply expectation delivered, and closes any --resolve-key\ndecisions), and any real remote failure fails loudly with the remote leg's\nown stderr attached. Transport loss (ssh exit 255) means completion unknown,\nso fm-send retries the identical leg once - safe because the remote write\ndeduplicates the same request onto the same record - and a still-lost\ntransport exits nonzero while preserving a reply-bearing marked request's\nexpectation, since the record may have landed. Its error prints the exact\nFM_PENDING_REPLY_EXISTING_CORR=<id> resend command that preserves the body\nand makes a later remote enqueue deduplicate onto that same record. An\nunconfirmed fire-and-forget request exits 3 and names the same delivery id to\nretry. Every remote transport attempt is bounded by FM_SEND_REMOTE_BUDGET\nseconds (default 30, and any override must be a positive integer): a bound\nhit is completion-unknown and exits through this same unconfirmed contract\ninstead of waiting out a busy remote queue.\nThe remote host runs no re-ring ladder of its own: a swallowed ordinary\ndoorbell surfaces through the parent's pending-reply recovery and escalation,\nwhose recovery request re-rings the remote doorbell when it is enqueued;\nfire-and-forget delivery deliberately arms neither mechanism. Internal\nsemantic callers may set FM_SEND_EXPECTED_SPAWN_GEN or\nFM_SEND_EXPECTED_REMOTE_HOST to require that sampled identity to still match\nduring the final locked remote-route validation; unset or empty guards do not\nchange ordinary sends.\n\nDecision closure (answerer-closes): pass --resolve-key <key> (repeatable,\nbefore the message) when this send answers an open keyed needs-decision: or\nblocked: record in the target task's state/<id>.status. fm-send itself\nappends the closing resolved line to that status file, so the captain-facing\nOPEN DECISIONS record closes at answer time and never depends on the busy\nworker writing a matching resolved line. For ordinary keys the payload is\n\"resolved [key=<key>]: answered: <capped excerpt>\" before the emission-time\nhandling owned by bin/fm-classify-lib.sh. A reserved key\n(pending-reply-* today; bin/fm-classify-lib.sh's reserved-key guard) is\nclosed with the owning library's vocabulary note\n(fm_pending_reply_close_note_for_key / fm_pending_reply_resolved_note), so\nthe fold actually drops it; a bare answered: note is not a reserved-key\ntransition and is never written for those keys. If this send cannot produce\na note the guard will accept, or the structural key would be lost to the\nstatus-line cap, it refuses before sending and names the cause rather than\nexiting 0 on a silent no-op. A key nothing owns refuses the same way, for the\nsame reason: delivering an answer this send cannot close would leave the\ndecision open behind an answer the operator believes settled it. That refusal\nnever costs the message - it lists the keys the status log still holds open and\nprints the resend commands with the message quoted back verbatim. The keyed\nresend leaves an explicit <key> placeholder for the operator to replace, even\nwhen only one key is open, so an answer cannot be redirected to an unrelated\ndecision. Every named key is checked before refusing: the refusal names each\nrefused key, and the keyed resend keeps every accepted key in the operator's\norder with a placeholder in each refused key's position, so the corrected\nresend closes all of them. It is printed even when the status log holds\nnothing open, because a key transferred to a captain-held task is answerable\nthrough that other ledger alone; the status log's own emptiness is stated as\nthe emptiness of that FILE, never as a claim about the task. The plain resend\ndelivers the message without closing any decision. After a delivered close it\nalso re-folds and fails loudly if the named key is still open. On the inbox plane\nthe close happens at ENQUEUE time, because enqueue is durable delivery to\nthe task's record; the worker reading the answer late is covered by the\nacknowledgement re-ring ladder. On the typed plane it still waits for the\nconfirmed submit. The close is a LOCAL append for every target kind -\ncrewmate, scout, local secondmate, and remote secondmate alike - because the\nopen-decision ledger fm-wake-drain folds lives in this home's own state dir\n(a remote mate's escalations reach it through the parent-replies ingest);\nonly the answer message crosses the backend or remote transport.\n\nAnswering a decision is the gate-answer path and is main-owned while\nattended: when any named key is an open needs-decision or a captain-held task\n(a blocked: key is ordinary steering and stays lease-guarded only), the Pi\nsupervision branch is refused outright, exactly as its prompt promises. While\nthe away-posture record exists main is parked and that one refusal relocates\nto the branch (contract: bin/fm-lease-lib.sh); which findings firstmate may\ndecide at all remains ask-user-authority's judgment for either actor.\n\nChat is also a channel that carries keyed captain answers, so the same flag\nfeeds bin/fm-captain-hold.sh's one keyed-answer intake for any key that names\na captain-held task in this home - the key as a task id itself, or through\nthe legacy `<task>-decision-<key>` identity for pre-collapse rows. fm-send\ncloses nothing itself; it hands the intake `<task-id>\\t<answer>\\t<label>`\nexactly as every other channel does, and the intake owns what that means.\nThis is what lets an answer reach a decision that has already been\ntransferred from the live status log to its durable captain-held task, which\nthe status ledger alone can no longer close.\n\nEach named key must therefore currently be open in ONE of the two ledgers: open\nin this home's status log per status_open_decisions (bin/fm-classify-lib.sh), or\na still-open captain-held task resolved as above. A key in neither is refused\nbefore sending, so a mistyped key cannot deliver an answer while silently\norphaning the decision. A failed or unconfirmed send never closes a key; a\ndelivered answer whose closing append fails exits nonzero with the exact\nmanual close command, leaving the decision open to re-surface (the safe\ndirection). A send without the flag never closes anything: a routine steer,\nworking:, or done: event still cannot clear a captain decision. The flag is\nrefused with --key, with an explicit backend target (no task ledger in this\nhome), and with an empty message.\n\nAfter a successful TYPED-plane submit fm-send pauses FM_SEND_SETTLE seconds\n(default 1, 0 disables) before returning: submit confirmation only proves the\ntext was accepted, but the harness needs a beat to spin up the turn before its\nbusy footer appears, so an immediate peek would otherwise see the stale idle\npane. The pause is typed-plane-only; the inbox plane, the shared submit core\n(used by the away-mode daemon, which only needs \"submitted\"), and the --key\npath do not pay it.\n",
+    "stderr": ""
+  },
+  {
+    "tmux_pane": ": Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n: Firstmate instruction waiting: list \"$FM_TASK_INBOX\"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its han\ndled/.\n\n\n\n"
+  }
+]
