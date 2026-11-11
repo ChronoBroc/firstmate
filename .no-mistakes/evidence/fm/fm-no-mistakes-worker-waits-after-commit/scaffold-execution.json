@@ -1,0 +1,42 @@
+[
+  {
+    "scenario": "baseline-default",
+    "command": "{run-worktree}/.test-handoff/base/bin/fm-brief.sh check-baseline-default synthetic-project --mode no-mistakes",
+    "exit": 0,
+    "stdout": "scaffolded: {run-worktree}/.test-handoff/home-baseline-default/data/check-baseline-default/brief.md (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})\n",
+    "stderr": "",
+    "generated_contract_check": "passed (emission only, not model behavior)"
+  },
+  {
+    "scenario": "default",
+    "command": "{run-worktree}/bin/fm-brief.sh check-default synthetic-project --mode no-mistakes",
+    "exit": 0,
+    "stdout": "scaffolded: {run-worktree}/.test-handoff/home-default/data/check-default/brief.md (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})\n",
+    "stderr": "",
+    "generated_contract_check": "passed (emission only, not model behavior)"
+  },
+  {
+    "scenario": "gerrit",
+    "command": "{run-worktree}/bin/fm-brief.sh check-gerrit synthetic-project --mode no-mistakes --forge gerrit --shape squash",
+    "exit": 0,
+    "stdout": "scaffolded: {run-worktree}/.test-handoff/home-gerrit/data/check-gerrit/brief.md (ship, mode=no-mistakes forge=gerrit shape=squash; replace {TASK} and {FIRSTMATE_SPEC})\n",
+    "stderr": "",
+    "generated_contract_check": "passed (emission only, not model behavior)"
+  },
+  {
+    "scenario": "manual",
+    "command": "{run-worktree}/bin/fm-brief.sh check-manual synthetic-project --mode no-mistakes --pr manual",
+    "exit": 0,
+    "stdout": "scaffolded: {run-worktree}/.test-handoff/home-manual/data/check-manual/brief.md (ship, mode=no-mistakes pr=manual; replace {TASK} and {FIRSTMATE_SPEC})\n",
+    "stderr": "",
+    "generated_contract_check": "passed (emission only, not model behavior)"
+  },
+  {
+    "scenario": "local-only",
+    "command": "{run-worktree}/bin/fm-brief.sh check-local-only synthetic-project --mode local-only",
+    "exit": 0,
+    "stdout": "scaffolded: {run-worktree}/.test-handoff/home-local-only/data/check-local-only/brief.md (ship, mode=local-only; replace {TASK} and {FIRSTMATE_SPEC})\n",
+    "stderr": "",
+    "generated_contract_check": "passed (emission only, not model behavior)"
+  }
+]
