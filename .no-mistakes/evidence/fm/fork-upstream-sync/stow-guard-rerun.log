@@ -1,0 +1,13 @@
+1..11
+ok - absent config/stow-guard leaves the stop unchanged and writes no state
+ok - a context crossing blocks once, a continuation below two-thirds re-arms, and the next crossing blocks
+ok - a continuation stop at the token line blocks once and the next continuation above it does not
+ok - the age ask starts the clock, blocks once a day, and waits an hour before asking again
+ok - a Skill /stow sets the age clock and a later tail does not rewind it
+ok - a linked crew worktree stays silent even when the opt-in file and a high reading are present
+ok - a marked secondmate home stays silent even when the opt-in file and a high reading are present
+ok - missing python3 skips the age ask and still asks on a context crossing
+ok - bad json, an empty payload, a cursor payload, grok, and a missing jq all stay silent
+ok - a token line past integer range keeps the 300000 default and still asks
+ok - tracked Claude Stop settings run fm-stow-guard.sh once, synchronously, and inert under grok
+FM_TEST_COMPLETE

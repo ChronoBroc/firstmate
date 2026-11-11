@@ -1,0 +1,21 @@
+$ bin/fm-lab-home.sh create {run-worktree}/.test-phase/hermes
+{run-worktree}/.test-phase/hermes
+
+[exit 0]
+$ bin/fm-busy-event.sh arm {run-worktree}/.test-phase/hermes/state worker
+g1794403604.52897.26009
+
+[exit 0]
+$ /bin/bash -u bin/fm-hermes-hook.sh {run-worktree}/.test-phase/hermes/state worker g1794403604.52897.26009 busy
+
+[exit 0]
+persisted busy record: v1 gen=g1794403604.52897.26009 seq=2 state=busy source=hermes-hook event=busy ts=1794403604
+
+$ /bin/bash -u bin/fm-hermes-hook.sh {run-worktree}/.test-phase/hermes/state worker g1794403604.52897.26009 idle
+
+[exit 0]
+persisted idle record: v1 gen=g1794403604.52897.26009 seq=3 state=idle source=hermes-hook event=idle ts=1794403604
+
+$ /bin/bash -uc . bin/fm-hermes-process-lib.sh; fm_hermes_process_matches
+
+[exit 1]

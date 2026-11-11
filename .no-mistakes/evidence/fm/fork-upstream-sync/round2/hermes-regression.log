@@ -1,0 +1,11 @@
+headroom: record ~/.crew/headroom/runs/h20261111-073636-9a43.json
+headroom: waiting: suite slots 0 of 3 free (restart-stale-account-pin, pipeline-short-cache, one-sampler-3)
+ok - worker-only capability and anchored process identity
+ok - profile validation and read-only idle-gateway coexistence check
+ok - startup consent only confirms a complete native offer with No thanks already selected
+error: stale busy-state gen for worker (event rejected)
+ok - native hook overlay preserves hooks and enforces session/generation binding
+ok - profile-prefixed composer requires native ready status and preserves drafts
+ok - scout spawn carries native profile, interactive brief, hook overlay and metadata
+ok - stalled Hermes launch stops its pane before the task record is removed
+ok - stalled Hermes launch whose pane cannot be closed keeps its task record

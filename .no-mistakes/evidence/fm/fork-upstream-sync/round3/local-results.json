@@ -1,0 +1,30 @@
+[
+  {
+    "name": "repeat-sync",
+    "result": "pass"
+  },
+  {
+    "name": "send-guard",
+    "result": "pass"
+  },
+  {
+    "name": "codex-pin",
+    "result": "pass"
+  },
+  {
+    "name": "codex-quota",
+    "result": "pass"
+  },
+  {
+    "name": "hermes-bash32-hook",
+    "result": "pass"
+  },
+  {
+    "name": "capacity-real-host",
+    "result": "pass"
+  },
+  {
+    "name": "stow-hook",
+    "result": "pass"
+  }
+]

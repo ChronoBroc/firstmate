@@ -1,0 +1,449 @@
+$ bin/fm-lab-home.sh create {run-worktree}/.test-phase/capacity
+{run-worktree}/.test-phase/capacity
+
+[exit 0]
+$ bin/fm-capacity.sh --json
+{
+  "schema": "fm-lane-capacity.v1",
+  "generated_epoch": 1794404192,
+  "home": "main",
+  "machine": "Brocs-Mac-mini",
+  "lanes": {
+    "count": 0,
+    "pr_ready": 0,
+    "ids": []
+  },
+  "cap": {
+    "target": 2,
+    "status": "ok",
+    "mode": "auto"
+  },
+  "projects": [],
+  "pressure": {
+    "level": "warn",
+    "why": [
+      "load 19.32 on 10 cores"
+    ],
+    "basis": "probe",
+    "beat_age_s": null,
+    "avail_gb": 17.52,
+    "total_gb": 24,
+    "runq_per_core": 1.93,
+    "swap_rate_pps_1m": null,
+    "mem_stall_pct": null,
+    "load1": 19.32,
+    "on_battery": null,
+    "disks": [
+      {
+        "label": "home",
+        "free_gb": 49.7
+      }
+    ]
+  },
+  "uptime_s": 27241,
+  "boot_id": "1794376951",
+  "boots": [
+    1794376951
+  ],
+  "watcher_beat_age_s": null,
+  "reserve": {
+    "flag": "not-configured",
+    "label": null
+  },
+  "captain": "not-configured",
+  "quota": null,
+  "limits": {
+    "min_avail_gb": null,
+    "min_disk_gb": null,
+    "max_load1": null
+  },
+  "verdict": {
+    "admit": false,
+    "free_lanes": 0,
+    "reasons": [
+      "cpu: load 19.32 on 10 cores"
+    ]
+  },
+  "budget": {
+    "lanes": 0,
+    "open": 0,
+    "raw": 0,
+    "machine_lanes": 0,
+    "by": {
+      "memory": 7,
+      "cpu": -15,
+      "disk": 13,
+      "ceiling": 2
+    },
+    "binding": "gate",
+    "young": 0,
+    "damped": false,
+    "notes": []
+  },
+  "footprint": {
+    "mem_gb": 2,
+    "cpu_cores": 1,
+    "disk_gb": 3,
+    "source": "default",
+    "samples": 0
+  },
+  "vitals": {
+    "load5": 22.61,
+    "psi": {
+      "cpu_some10": null,
+      "mem_some10": null,
+      "mem_some60": null,
+      "mem_full10": null,
+      "io_full10": null,
+      "io_full60": null
+    },
+    "swapin_total": 0,
+    "swap_in_pps": null,
+    "vm_pressure_level": 1,
+    "thermal": "ok",
+    "battery_pct": null,
+    "on_ac": true,
+    "wsl": false,
+    "windows": false,
+    "host": null,
+    "gpu": [
+      {
+        "name": "Apple M4",
+        "util_pct": 0,
+        "mem_used_gb": null,
+        "mem_total_gb": null
+      }
+    ]
+  },
+  "gates": [
+    {
+      "name": "cpu",
+      "state": "closed",
+      "since_epoch": 1794404192,
+      "clear_count": 0
+    },
+    {
+      "name": "memory-pressure",
+      "state": "open",
+      "since_epoch": null,
+      "clear_count": 0
+    },
+    {
+      "name": "thermal",
+      "state": "open",
+      "since_epoch": null,
+      "clear_count": 0
+    },
+    {
+      "name": "battery",
+      "state": "open",
+      "since_epoch": null,
+      "clear_count": 0
+    }
+  ],
+  "reclaim": []
+}
+
+[exit 0]
+$ bin/fm-capacity.sh --publish
+
+[exit 0]
+persisted capacity: {
+  "schema": "fm-lane-capacity.v1",
+  "generated_epoch": 1794404192,
+  "home": "main",
+  "machine": "Brocs-Mac-mini",
+  "lanes": {
+    "count": 0,
+    "pr_ready": 0,
+    "ids": []
+  },
+  "cap": {
+    "target": 2,
+    "status": "ok",
+    "mode": "auto"
+  },
+  "projects": [],
+  "pressure": {
+    "level": "warn",
+    "why": [
+      "load 19.32 on 10 cores"
+    ],
+    "basis": "probe",
+    "beat_age_s": null,
+    "avail_gb": 17.52,
+    "total_gb": 24,
+    "runq_per_core": 1.93,
+    "swap_rate_pps_1m": null,
+    "mem_stall_pct": null,
+    "load1": 19.32,
+    "on_battery": null,
+    "disks": [
+      {
+        "label": "home",
+        "free_gb": 49.7
+      }
+    ]
+  },
+  "uptime_s": 27241,
+  "boot_id": "1794376951",
+  "boots": [
+    1794376951
+  ],
+  "watcher_beat_age_s": null,
+  "reserve": {
+    "flag": "not-configured",
+    "label": null
+  },
+  "captain": "not-configured",
+  "quota": null,
+  "limits": {
+    "min_avail_gb": null,
+    "min_disk_gb": null,
+    "max_load1": null
+  },
+  "verdict": {
+    "admit": false,
+    "free_lanes": 0,
+    "reasons": [
+      "cpu: load 19.32 on 10 cores"
+    ]
+  },
+  "budget": {
+    "lanes": 0,
+    "open": 0,
+    "raw": 0,
+    "machine_lanes": 0,
+    "by": {
+      "memory": 7,
+      "cpu": -15,
+      "disk": 13,
+      "ceiling": 2
+    },
+    "binding": "gate",
+    "young": 0,
+    "damped": false,
+    "notes": []
+  },
+  "footprint": {
+    "mem_gb": 2,
+    "cpu_cores": 1,
+    "disk_gb": 3,
+    "source": "default",
+    "samples": 0
+  },
+  "vitals": {
+    "load5": 22.61,
+    "psi": {
+      "cpu_some10": null,
+      "mem_some10": null,
+      "mem_some60": null,
+      "mem_full10": null,
+      "io_full10": null,
+      "io_full60": null
+    },
+    "swapin_total": 0,
+    "swap_in_pps": null,
+    "vm_pressure_level": 1,
+    "thermal": "ok",
+    "battery_pct": null,
+    "on_ac": true,
+    "wsl": false,
+    "windows": false,
+    "host": null,
+    "gpu": [
+      {
+        "name": "Apple M4",
+        "util_pct": 0,
+        "mem_used_gb": null,
+        "mem_total_gb": null
+      }
+    ]
+  },
+  "gates": [
+    {
+      "name": "cpu",
+      "state": "closed",
+      "since_epoch": 1794404192,
+      "clear_count": 0
+    },
+    {
+      "name": "memory-pressure",
+      "state": "open",
+      "since_epoch": null,
+      "clear_count": 0
+    },
+    {
+      "name": "thermal",
+      "state": "open",
+      "since_epoch": null,
+      "clear_count": 0
+    },
+    {
+      "name": "battery",
+      "state": "open",
+      "since_epoch": null,
+      "clear_count": 0
+    }
+  ],
+  "reclaim": []
+}
+
+$ bin/fm-capacity.sh --spawn-gate
+deferred: lane capacity of this home ({run-worktree}/.test-phase/capacity/config/lane-capacity) does not admit another lane: cpu: load 19.32 on 10 cores
+
+[exit 75]
+$ bin/fm-capacity.sh --json
+{
+  "schema": "fm-lane-capacity.v1",
+  "generated_epoch": 1794404193,
+  "home": "main",
+  "machine": "Brocs-Mac-mini",
+  "lanes": {
+    "count": 2,
+    "pr_ready": 0,
+    "ids": [
+      "lane0",
+      "lane1"
+    ]
+  },
+  "cap": {
+    "target": 2,
+    "status": "ok",
+    "mode": "auto"
+  },
+  "projects": [],
+  "pressure": {
+    "level": "warn",
+    "why": [
+      "load 19.32 on 10 cores"
+    ],
+    "basis": "probe",
+    "beat_age_s": null,
+    "avail_gb": 17.52,
+    "total_gb": 24,
+    "runq_per_core": 1.93,
+    "swap_rate_pps_1m": null,
+    "mem_stall_pct": null,
+    "load1": 19.32,
+    "on_battery": null,
+    "disks": [
+      {
+        "label": "home",
+        "free_gb": 49.7
+      }
+    ]
+  },
+  "uptime_s": 27242,
+  "boot_id": "1794376951",
+  "boots": [
+    1794376951
+  ],
+  "watcher_beat_age_s": null,
+  "reserve": {
+    "flag": "not-configured",
+    "label": null
+  },
+  "captain": "not-configured",
+  "quota": null,
+  "limits": {
+    "min_avail_gb": null,
+    "min_disk_gb": null,
+    "max_load1": null
+  },
+  "verdict": {
+    "admit": false,
+    "free_lanes": 0,
+    "reasons": [
+      "cpu: load 19.32 on 10 cores"
+    ]
+  },
+  "budget": {
+    "lanes": 2,
+    "open": 0,
+    "raw": 0,
+    "machine_lanes": 2,
+    "by": {
+      "memory": 5,
+      "cpu": -17,
+      "disk": 11,
+      "ceiling": 0
+    },
+    "binding": "gate",
+    "young": 2,
+    "damped": false,
+    "notes": [
+      "2 of 2 lanes have no attributed process"
+    ]
+  },
+  "footprint": {
+    "mem_gb": 2,
+    "cpu_cores": 1,
+    "disk_gb": 3,
+    "source": "default",
+    "samples": 0
+  },
+  "vitals": {
+    "load5": 22.61,
+    "psi": {
+      "cpu_some10": null,
+      "mem_some10": null,
+      "mem_some60": null,
+      "mem_full10": null,
+      "io_full10": null,
+      "io_full60": null
+    },
+    "swapin_total": 0,
+    "swap_in_pps": 0,
+    "vm_pressure_level": 1,
+    "thermal": "ok",
+    "battery_pct": null,
+    "on_ac": true,
+    "wsl": false,
+    "windows": false,
+    "host": null,
+    "gpu": [
+      {
+        "name": "Apple M4",
+        "util_pct": 0,
+        "mem_used_gb": null,
+        "mem_total_gb": null
+      }
+    ]
+  },
+  "gates": [
+    {
+      "name": "cpu",
+      "state": "closed",
+      "since_epoch": 1794404192,
+      "clear_count": 0
+    },
+    {
+      "name": "memory-pressure",
+      "state": "open",
+      "since_epoch": null,
+      "clear_count": 0
+    },
+    {
+      "name": "swap",
+      "state": "open",
+      "since_epoch": null,
+      "clear_count": 0
+    },
+    {
+      "name": "thermal",
+      "state": "open",
+      "since_epoch": null,
+      "clear_count": 0
+    },
+    {
+      "name": "battery",
+      "state": "open",
+      "since_epoch": null,
+      "clear_count": 0
+    }
+  ],
+  "reclaim": []
+}
+
+[exit 0]

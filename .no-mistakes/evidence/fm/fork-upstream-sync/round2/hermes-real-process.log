@@ -1,0 +1,6 @@
+Real macOS process argv: /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m tui_gateway.entry
+before: executable process matcher exit=1, expected=1
+after: executable process matcher exit=0, expected=0
+classify exact module: exit=0 output=agent expected=agent
+classify no argv: exit=0 output=other expected=other
+classify lookalike payload: exit=0 output=other expected=other

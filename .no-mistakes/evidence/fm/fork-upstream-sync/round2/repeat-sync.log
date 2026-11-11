@@ -1,0 +1,115 @@
+$ git merge-base --is-ancestor 734321ddc0a8d3f8488ea7dd4cdee0900bd7ed7f ab95cbc7994632224e74df9d06249ff5c7caec76
+
+[exit 0]
+$ git merge-base --is-ancestor 64254de47a2989add6412949e98c36e3964b24aa ab95cbc7994632224e74df9d06249ff5c7caec76
+
+[exit 0]
+$ git merge-base --is-ancestor b1e5da8d ab95cbc7994632224e74df9d06249ff5c7caec76
+
+[exit 0]
+$ git merge-base --is-ancestor 1fadd20b ab95cbc7994632224e74df9d06249ff5c7caec76
+
+[exit 0]
+$ git merge-base --is-ancestor 15a419a9 ab95cbc7994632224e74df9d06249ff5c7caec76
+
+[exit 0]
+$ git init -b main
+Initialized empty Git repository in {run-worktree}/.test-phase/sync/.git/
+
+[exit 0]
+$ git add .
+
+[exit 0]
+$ git commit -m base
+[main (root-commit) 36770a0] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 parent.txt
+
+[exit 0]
+$ git branch parent
+
+[exit 0]
+$ git add .
+
+[exit 0]
+$ git commit -m fork fix
+[main eebd4bf] fork fix
+ 1 file changed, 1 insertion(+)
+ create mode 100644 fork-fix.txt
+
+[exit 0]
+$ git rev-parse HEAD
+eebd4bf6dcf7e6a5f9f71780ffe5940c854993a5
+
+[exit 0]
+$ git switch parent
+Switched to branch 'parent'
+
+[exit 0]
+$ git commit -am upstream one
+[parent 6124189] upstream one
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+[exit 0]
+$ git rev-parse HEAD
+6124189da743137e9c5aedc7d2089e0eabb89894
+
+[exit 0]
+$ git switch main
+Switched to branch 'main'
+
+[exit 0]
+$ git merge parent -m sync one
+Merge made by the 'ort' strategy.
+ parent.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+[exit 0]
+$ git merge-base --is-ancestor eebd4bf6dcf7e6a5f9f71780ffe5940c854993a5 HEAD
+
+[exit 0]
+$ git merge-base --is-ancestor 6124189da743137e9c5aedc7d2089e0eabb89894 HEAD
+
+[exit 0]
+$ git switch parent
+Switched to branch 'parent'
+
+[exit 0]
+$ git commit -am upstream two
+[parent e33314d] upstream two
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+[exit 0]
+$ git rev-parse HEAD
+e33314db324cdd47ee85d76883d39ca5342fc59a
+
+[exit 0]
+$ git switch main
+Switched to branch 'main'
+
+[exit 0]
+$ git merge parent -m sync two
+Merge made by the 'ort' strategy.
+ parent.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+[exit 0]
+$ git merge-base --is-ancestor eebd4bf6dcf7e6a5f9f71780ffe5940c854993a5 HEAD
+
+[exit 0]
+$ git merge-base --is-ancestor e33314db324cdd47ee85d76883d39ca5342fc59a HEAD
+
+[exit 0]
+$ git log --graph --oneline --all
+*   d021cc4 sync two
+|\  
+| * e33314d upstream two
+* | 16cdc5b sync one
+|\| 
+| * 6124189 upstream one
+* | eebd4bf fork fix
+|/  
+* 36770a0 base
+
+[exit 0]
+Observed files after second sync: fork fix survives; upstream update two. Both histories remain ancestors.

@@ -1,0 +1,24 @@
+$ bin/fm-lab-home.sh create {run-worktree}/.test-phase/pin
+{run-worktree}/.test-phase/pin
+
+[exit 0]
+$ codex login status
+API key configured - sk-fm-li***hetic
+Authentication is checked when you send a request.
+
+[exit 0]
+$ /bin/bash -c . bin/fm-worker-account-lib.sh; fm_worker_account_check codex "$1" "$1" codex _ {run-worktree}/.test-phase/codex-stored
+
+[exit 0]
+$ /bin/bash -c . bin/fm-worker-account-lib.sh; fm_worker_account_check codex "$1" "$1" codex _ {run-worktree}/.test-phase/codex-empty
+error: config/codex-account pins Codex workers to {run-worktree}/.test-phase/codex-empty, which is not signed in (codex login status); sign in with CODEX_HOME={run-worktree}/.test-phase/codex-empty codex login, or change the pin
+
+[exit 1]
+$ /bin/bash -c . bin/fm-worker-account-lib.sh; fm_worker_account_resolve codex "$1" config/codex-account _ {run-worktree}/.test-phase/pin/config
+{run-worktree}/.test-phase/codex-stored	{run-worktree}/.test-phase/codex-stored	
+
+[exit 0]
+$ /bin/bash -c . bin/fm-worker-account-lib.sh; fm_worker_account_resolve codex "$1" config/codex-account _ {run-worktree}/.test-phase/pin/config
+error: config/codex-account must hold 'ordinary' or one absolute path on a single line with no control characters: {run-worktree}/.test-phase/pin/config/codex-account
+
+[exit 1]

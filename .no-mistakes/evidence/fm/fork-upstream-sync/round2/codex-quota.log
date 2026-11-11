@@ -1,0 +1,14 @@
+$ bin/fm-lab-home.sh create {run-worktree}/.test-phase/quota
+{run-worktree}/.test-phase/quota
+
+[exit 0]
+$ bin/fm-codex-account-quota.sh --model gpt-6-astra
+codex-account-quota:
+  row: {run-worktree}/.test-phase/quota-empty  root={run-worktree}/.test-phase/quota-empty  uncertainty: quota unknown (unavailable: Codex profile credentials missing)
+  row: {run-worktree}/.test-phase/quota-empty  root={run-worktree}/.test-phase/quota-empty  uncertainty: no applicable quota scope
+
+[exit 0]
+$ bin/fm-codex-account-quota.sh
+error: config/codex-account must hold 'ordinary' or one absolute path on a single line with no control characters: {run-worktree}/.test-phase/quota/config/codex-account
+
+[exit 2]

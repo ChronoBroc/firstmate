@@ -1,0 +1,103 @@
+$ bin/fm-lab-home.sh create {run-worktree}/.test-phase/lavish
+{run-worktree}/.test-phase/lavish
+
+[exit 0]
+$ bin/fm-lavish-url.sh snapshot http://127.0.0.1:50390/index.html
+snapshot: {run-worktree}/.test-phase/lavish/.lavish/snapshots/127-0-0-1-50390-index-html-20261111T134844Z.html
+url: http://127.0.0.1:50390/index.html
+viewport: desktop 1440x900
+enhancers: default
+session-url: http://127.0.0.1:50391/session/71d83beed8769c71
+source-id: lavish-71d83beed8769c71
+armed: lavish-71d83beed8769c71
+route: project
+host: 127.0.0.1
+project: storefront
+basis: domain map config/lavish-url-domains
+
+[exit 0]
+$ bin/fm-lavish-url.sh path http://127.0.0.1:50390/index.html
+{run-worktree}/.test-phase/lavish/.lavish/snapshots/127-0-0-1-50390-index-html-20261111T134844Z.html
+
+[exit 0]
+$ chrome-devtools-axi open file://{run-worktree}/.test-phase/lavish/.lavish/snapshots/127-0-0-1-50390-index-html-20261111T134844Z.html
+page:
+  title: Disposable storefront
+  url: "file://{run-worktree}/.test-phase/lavish/.lavish/snapshots/127-0-0-1-50390-index-html-20261111T134844Z.html"
+  refs: 17
+snapshot:
+uid=g1:1_0 RootWebArea "Disposable storefront" url="file://{run-worktree}/.test-phase/lavish/.lavish/snapshots/127-0-0-1-50390-index-html-20261111T134844Z.html"
+  uid=g1:1_1 main
+    uid=g1:1_2 heading "Harbor supply" level="1"
+    uid=g1:1_3 "A disposable local page for the fork sync validation."
+    uid=g1:1_4 heading "Weekend kit" level="2"
+    uid=g1:1_5 "Ready for your next outing."
+    uid=g1:1_6 button "View kit"
+    uid=g1:1_7 "Rendered content captured"
+  uid=g1:1_8 complementary "Lavish URL review"
+    uid=g1:1_9 DisclosureTriangle "Review · 127.0.0.1" expandable expanded
+    uid=g1:1_10 "Target: whole page (point at an element to target it)"
+    uid=g1:1_11 button "[Fix Layout]"
+    uid=g1:1_12 button "[Update Text]"
+    uid=g1:1_13 button "[Mobile Bug]"
+    uid=g1:1_14 textbox "Optional note sent with the next chip" multiline
+    uid=g1:1_15 button "Unpin"
+    uid=g1:1_16 status atomic live="polite" relevant="additions text"
+help[4]:
+  Run `chrome-devtools-axi fill @g1:1_14 "text"` to fill the "Optional note sent with the next chip" field
+  Run `chrome-devtools-axi click @g1:1_6` to click the "View kit" button
+  Run `chrome-devtools-axi scroll down` to scroll down
+  Use `chrome-devtools-axi eval <expr>` for JS expressions. For multi-statement code, pass a function: `eval "() => { ...; return result }"`
+
+[exit 0]
+$ chrome-devtools-axi screenshot ~/.no-mistakes/evidence/01M75C1WF7H81D8WFBKR8YBNJK/round3/lavish-desktop.png
+screenshot: ~/.no-mistakes/evidence/01M75C1WF7H81D8WFBKR8YBNJK/round3/lavish-desktop.png
+
+[exit 0]
+$ chrome-devtools-axi eval () => {document.querySelector('#buy').click();return JSON.stringify({text:document.querySelector('#dynamic').textContent,unsafe:document.body.dataset.unsafe||null,border:getComputedStyle(document.querySelector('.card')).borderTopWidth,reviewLayer:!!document.querySelector('[data-fm-lavish-url]')});}
+result: "\"{\\\"text\\\":\\\"Rendered content captured\\\",\\\"unsafe\\\":null,\\\"border\\\":\\\"3px\\\",\\\"reviewLayer\\\":true}\""
+help[1]:
+  Run `chrome-devtools-axi snapshot` to see current page state
+
+[exit 0]
+$ chrome-devtools-axi emulate --viewport 390x844x1
+emulated:
+  viewport: 390x844x1
+
+[exit 0]
+$ chrome-devtools-axi screenshot ~/.no-mistakes/evidence/01M75C1WF7H81D8WFBKR8YBNJK/round3/lavish-mobile-render.png
+screenshot: ~/.no-mistakes/evidence/01M75C1WF7H81D8WFBKR8YBNJK/round3/lavish-mobile-render.png
+
+[exit 0]
+$ chrome-devtools-axi stop
+status: stopped
+
+[exit 0]
+$ bin/fm-procevent.sh retire lavish-71d83beed8769c71
+retired: lavish-71d83beed8769c71
+
+[exit 0]
+$ lavish-axi end {run-worktree}/.test-phase/lavish/.lavish/snapshots/127-0-0-1-50390-index-html-20261111T134844Z.html
+session:
+  file: {run-worktree}/.test-phase/lavish/.lavish/snapshots/127-0-0-1-50390-index-html-20261111T134844Z.html
+  status: ended
+
+[exit 0]
+$ bin/fm-lavish-url.sh snapshot file:///etc/passwd
+error: only http and https URLs with a host and no credentials can be captured: file:///etc/passwd
+
+[exit 1]
+$ chrome-devtools-axi stop
+status: stopped (no-op)
+
+[exit 0]
+$ chrome-devtools-axi stop
+status: stopped (no-op)
+
+[exit 0]
+$ lavish-axi stop
+server:
+  status: not-running
+  port: 50391
+
+[exit 0]

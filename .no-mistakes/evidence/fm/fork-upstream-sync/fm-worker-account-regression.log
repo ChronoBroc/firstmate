@@ -1,0 +1,1 @@
+not ok - a claude secondmate with its own account should launch: error: secondmate home cannot be inside the firstmate repo: {run-worktree}/.test-phase/tmp/fm-worker-account.FHK15Z/secondmate-override-claude/acct-sm-override-home: expected exit 0, got 1

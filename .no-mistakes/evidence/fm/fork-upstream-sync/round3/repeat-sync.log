@@ -1,0 +1,115 @@
+$ git merge-base --is-ancestor 734321ddc0a8d3f8488ea7dd4cdee0900bd7ed7f HEAD
+
+[exit 0]
+$ git merge-base --is-ancestor 64254de47a2989add6412949e98c36e3964b24aa HEAD
+
+[exit 0]
+$ git merge-base --is-ancestor b1e5da8d HEAD
+
+[exit 0]
+$ git merge-base --is-ancestor 1fadd20b HEAD
+
+[exit 0]
+$ git merge-base --is-ancestor 15a419a9 HEAD
+
+[exit 0]
+$ git init -b main
+Initialized empty Git repository in {run-worktree}/.test-phase/sync/.git/
+
+[exit 0]
+$ git add .
+
+[exit 0]
+$ git commit -m base
+[main (root-commit) a33a50c] base
+ 1 file changed, 1 insertion(+)
+ create mode 100644 parent.txt
+
+[exit 0]
+$ git branch parent
+
+[exit 0]
+$ git add .
+
+[exit 0]
+$ git commit -m fork fix
+[main d43709f] fork fix
+ 1 file changed, 1 insertion(+)
+ create mode 100644 fork-fix.txt
+
+[exit 0]
+$ git rev-parse HEAD
+d43709f23105ced65035be7bcc210330b78fbbe8
+
+[exit 0]
+$ git switch parent
+Switched to branch 'parent'
+
+[exit 0]
+$ git commit -am upstream one
+[parent edd191d] upstream one
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+[exit 0]
+$ git rev-parse HEAD
+edd191d19f3eefb6fdf4051e59d3d5c4ad644359
+
+[exit 0]
+$ git switch main
+Switched to branch 'main'
+
+[exit 0]
+$ git merge parent -m sync one
+Merge made by the 'ort' strategy.
+ parent.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+[exit 0]
+$ git merge-base --is-ancestor d43709f23105ced65035be7bcc210330b78fbbe8 HEAD
+
+[exit 0]
+$ git merge-base --is-ancestor edd191d19f3eefb6fdf4051e59d3d5c4ad644359 HEAD
+
+[exit 0]
+$ git switch parent
+Switched to branch 'parent'
+
+[exit 0]
+$ git commit -am upstream two
+[parent 5021155] upstream two
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+[exit 0]
+$ git rev-parse HEAD
+5021155d18b83bd507e8c97dfdbcee29150aa78f
+
+[exit 0]
+$ git switch main
+Switched to branch 'main'
+
+[exit 0]
+$ git merge parent -m sync two
+Merge made by the 'ort' strategy.
+ parent.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+[exit 0]
+$ git merge-base --is-ancestor d43709f23105ced65035be7bcc210330b78fbbe8 HEAD
+
+[exit 0]
+$ git merge-base --is-ancestor 5021155d18b83bd507e8c97dfdbcee29150aa78f HEAD
+
+[exit 0]
+$ git log --graph --oneline --all
+*   21e18b8 sync two
+|\  
+| * 5021155 upstream two
+* | 4bff1c5 sync one
+|\| 
+| * edd191d upstream one
+* | d43709f fork fix
+|/  
+* a33a50c base
+
+[exit 0]
+Observed files after second sync: fork fix survives; upstream update two. Both histories remain ancestors.

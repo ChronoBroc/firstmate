@@ -1,0 +1,19 @@
+ok - an integer first line keeps fixed mode and its document unchanged
+ok - the auto budget is the smallest of memory, cpu, and disk, each after its floor, and a beat never adds memory
+ok - max-lanes is an optional ceiling and a young lane reserves a full lane
+ok - gates close at once, reopen after three clean publishes, and growth is damped
+ok - memory-pressure, thermal, and battery gates close admission, and unknown power is never judged
+ok - unmeasurable memory never admits on cpu alone: the budget is the static max-lanes ceiling, or nothing, and the verdict says so
+ok - the per-lane footprint is learned at p90 after five lanes
+ok - auto --publish keeps a 0600 footprint ledger, moves measured lanes into its history, and never learns from unmeasured ones
+ok - idle lanes are ranked for reclaim with their evidence, and nothing is removed
+ok - inside WSL the Windows host view can only close admission, including on battery, --publish reads it live, and the cache serves the other modes
+ok - an unknown reading never counts as clean: a closed or clearing gate holds until a real reading clears it, including a gate that is otherwise omitted, and an open gate stays unjudged
+ok - closed gates outlive the budget's freshness window, so only a clean reading reopens admission
+ok - a native Windows home reads memory, cores, load, and power from the PowerShell host view, and falls back to the ceiling without it
+ok - admission counts lanes started since the last publish against the damped budget, so a burst cannot exceed it
+ok - --admit and --spawn-gate skip process attribution and the GPU probe their verdict does not read
+ok - --spawn-gate applies the verdict only when config/lane-capacity declares admit-spawns, and refuses when the file cannot be read
+ok - auto-only keys need auto, flags take no value, removed keys are unknown, and malformed values are refused
+ok - auto mode runs against this real host
+# all fm-capacity-auto tests passed

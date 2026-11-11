@@ -1,0 +1,7 @@
+{
+  "local_driver": 0,
+  "browser_driver": 0,
+  "suite_admission": 75,
+  "suite_admission_detail": "No free slot within 3 minutes; no suite started. Lightweight CLI driver subsequently ran directly and exited 0.",
+  "browser_cleanup": "Both named Chrome sessions stopped, Lavish session ended and server stopped, process-event source retired, HTTP thread joined."
+}

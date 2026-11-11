@@ -1,0 +1,16 @@
+{
+  "schema": "fm-lavish-url.v1",
+  "url": "http://127.0.0.1:60776/index.html",
+  "host": "127.0.0.1",
+  "viewport": "desktop",
+  "viewport_size": "1440x900",
+  "captured_at": "2026-11-11T13:28:59Z",
+  "enhancers": [
+    "default"
+  ],
+  "inaccessible_stylesheets": [],
+  "title": "Disposable storefront",
+  "reported_url": "http://127.0.0.1:60776/index.html",
+  "snapshot": "{run-worktree}/.test-phase/lavish/.lavish/snapshots/127-0-0-1-60776-index-html-20261111T132851Z.html",
+  "source_id": "lavish-236ea9cb2e72193b"
+}

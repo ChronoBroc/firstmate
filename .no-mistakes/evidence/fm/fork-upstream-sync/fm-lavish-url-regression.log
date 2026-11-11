@@ -1,0 +1,11 @@
+1..9
+ok - snapshot reservation errors fail promptly before capture or arming
+ok - overlapping captures isolate browser state and reserve unique snapshot identities
+ok - CSSOM styles are rewritten safely and reserved page markup is stripped
+ok - generic URL capture sanitizes the page, injects the universal layer, proves the session, and arms it
+ok - project URLs resolve to their matching enhancer layers by host and page markers
+ok - routes resolve by domain map, then registry, then docs evidence, and refuse to guess
+ok - a captured Lavish feedback notification routes to exactly one queued item in the mapped project's backlog
+ok - route --file refuses inferred and ambiguous domain mappings and files nothing
+ok - snapshot refuses unsupported URLs, malformed domain maps, failed or truncated captures, and sessions that are not open
+FM_TEST_COMPLETE

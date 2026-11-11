@@ -1,0 +1,46 @@
+$ bin/fm-lab-home.sh create {run-worktree}/.test-phase/stow
+{run-worktree}/.test-phase/stow
+
+[exit 0]
+$ git init
+hint: Using 'master' as the name for the initial branch. This default branch name
+hint: will change to "main" in Git 3.0. To configure the initial branch name
+hint: to use in all of your new repositories, which will suppress this warning,
+hint: call:
+hint:
+hint: 	git config --global init.defaultBranch <name>
+hint:
+hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+hint: 'development'. The just-created branch can be renamed via this command:
+hint:
+hint: 	git branch -m <name>
+hint:
+hint: Disable this message with "git config set advice.defaultBranchName false"
+Initialized empty Git repository in {run-worktree}/.test-phase/stow/.git/
+
+[exit 0]
+$ bin/fm-stow-guard.sh
+
+[exit 0]
+$ bin/fm-stow-guard.sh
+{"decision":"block","reason":"fm-stow-guard: context is 1500 tokens, near auto-compaction. Run the /stow skill now (full pass), then continue the turn you were in."}
+
+[exit 0]
+$ bin/fm-stow-guard.sh
+
+[exit 0]
+$ bin/fm-stow-guard.sh
+
+[exit 0]
+$ bin/fm-stow-guard.sh
+{"decision":"block","reason":"fm-stow-guard: context is 1500 tokens, near auto-compaction. Run the /stow skill now (full pass), then continue the turn you were in."}
+
+[exit 0]
+persisted hook state: {
+  "last_stow": 1794403563,
+  "asked": 1794403564,
+  "fired": {
+    "synthetic-stop": true
+  }
+}
+

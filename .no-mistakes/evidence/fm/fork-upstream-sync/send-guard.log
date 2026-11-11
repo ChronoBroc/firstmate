@@ -1,0 +1,30 @@
+$ bin/fm-lab-home.sh create {run-worktree}/.test-phase/send
+{run-worktree}/.test-phase/send
+
+[exit 0]
+$ bin/fm-send.sh t1 --typo hello
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-phase/send
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: unknown flag '--typo' after target 't1'; nothing was sent. fm-send takes --resolve-key, --fire-and-forget, and --key here; run fm-send.sh --help for usage.
+  to send it as the message text, end the flags with --:
+    FM_HOME={run-worktree}/.test-phase/send {run-worktree}/bin/fm-send.sh t1 -- --typo hello
+
+[exit 1]
+$ bin/fm-send.sh t1 -- --typo hello
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-phase/send
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+fm-send: doorbell did not reach lab:fm-t1; the steer is durably recorded at {run-worktree}/.test-phase/send/state/t1.inbox/001.msg and the watcher will re-ring
+
+[exit 0]
+state/t1.inbox/001.msg: schema=fm-task-inbox.v1
+at=2026-11-11T13:26:43Z
+body-terminator=1
+--
+--typo hello
+

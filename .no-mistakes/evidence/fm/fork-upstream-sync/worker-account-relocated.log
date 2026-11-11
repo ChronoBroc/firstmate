@@ -1,0 +1,40 @@
+ok - Claude, Codex, Pi, and pi-signed secondmates use their own pins without changing other launches
+warning: re-init: ignored --initial-branch=main
+warning: re-init: ignored --initial-branch=main
+warning: re-init: ignored --initial-branch=main
+warning: re-init: ignored --initial-branch=main
+warning: re-init: ignored --initial-branch=main
+warning: re-init: ignored --initial-branch=main
+warning: re-init: ignored --initial-branch=main
+warning: re-init: ignored --initial-branch=main
+warning: re-init: ignored --initial-branch=main
+warning: re-init: ignored --initial-branch=main
+ok - unusable per-mate pins name the setting and refuse rather than use the primary's usable account
+ok - a remote route refuses a primary-side account override instead of silently ignoring it
+ok - a remote secondmate refuses --account instead of launching on the remote home's account
+ok - an absent pin leaves Claude and Pi launches exactly as they were
+ok - a Claude pin selects its root and sheds the credentials that would outrank it
+ok - a Claude pin refuses a signed-out root even when the invoking process has a usable login and API key
+ok - an ordinary Claude pin selects the default login and drops an ambient root
+ok - malformed, relative, CR-terminated, empty, extra-line, missing-root, and non-file pins refuse before launch
+ok - a Pi pin selects its root and passes the declared provider
+ok - a Pi pin refuses unqualified, missing, undeclared, signed-out, and raw launches
+ok - extension providers and a Pi without auth check fall back to an exact model-listing match
+ok - a Claude pin leaves codex and Pi launches unchanged
+ok - a raw Claude launch command receives the home's pin
+ok - a pinned home refuses a raw Claude command that overrides the account
+ok - an unpinned home keeps a raw Claude account override
+ok - an absent Codex pin leaves the Codex launch exactly as it was
+ok - a Codex pin selects its root over the pane's CODEX_HOME and sheds the credentials that would outrank it
+ok - a Codex pin refuses a signed-out root even when the invoking process carries a Codex token
+ok - an ordinary Codex pin selects the default login and drops an ambient CODEX_HOME
+ok - malformed, relative, CR-terminated, empty, extra-line, missing-root, non-directory, and non-file Codex pins refuse
+ok - a raw Codex command receives the pin, and one that overrides the account refuses
+ok - a local secondmate reads the launching home's pin and its own home's file is never inherited over
+ok - without config/claude-accounts the launch, the single pin, and the record are unchanged, and --account refuses
+ok - a declared account named with --account is checked, launched, and recorded like a pin
+ok - a list refuses a missing, undeclared, signed-out, wrong-runner, raw-override, doubled, or malformed choice
+warning: re-init: ignored --initial-branch=main
+warning: re-init: ignored --initial-branch=main
+ok - a list never chooses a secondmate's account: it needs its own pin and refuses --account
+# all fm-worker-account tests passed
