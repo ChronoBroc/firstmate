@@ -3836,7 +3836,7 @@ fi
 # that reuses the id cannot launch it (FINISHED BRIEFS in
 # bin/fm-backlog-transition-lib.sh). A failure refuses while every record and
 # the endpoint are still intact for a plain rerun.
-if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
+if [ "$BACKLOG_TRANSITION" = close ] && { [ "$KIND" = ship ] || [ "$KIND" = scout ]; }; then
   fm_finished_brief_record "$DATA" "$ID" || {
     echo "error: $FM_FINISHED_BRIEF_ERROR; refusing destructive teardown" >&2
     exit 1

@@ -1380,6 +1380,41 @@ test_reused_id_refuses_a_finished_brief() {
   pass "a reused id cannot launch the finished task's brief, and launches once it has its own"
 }
 
+
+test_retained_task_can_resume_its_brief() {
+  local kind=$1 case_dir home id out
+  local -a flags=(--mode no-mistakes --yolo off)
+  id="atomic-retained-$kind"
+  case_dir=$(make_home "retained-$kind" "$id")
+  home=$(home_of "$case_dir")
+  [ "$kind" != scout ] || flags=(--scout)
+  add_item "$case_dir" "$id" "$kind"
+  out=$(run_spawn "$case_dir" "$id" "$case_dir/project" "${flags[@]}") || fail "initial spawn failed: $out"
+  cp "$home/data/$id/brief.md" "$case_dir/original-brief.md"
+  out=$(FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-captain-hold.sh" hold "$id" --reason 'Continue after approval') \
+    || fail "could not hold the task: $out"
+  out=$(run_teardown "$case_dir" "$id" --force) || fail "retain teardown failed: $out"
+  assert_absent "$home/state/$id.meta" "retain teardown left metadata"
+  assert_absent "$home/data/$id/finished-briefs" "retain teardown recorded an unfinished brief"
+  [ "$(row_state "$case_dir" "$id")" = queued ] || fail "retain did not keep the row queued"
+  printf 'Continue the same work.\n' > "$case_dir/answer.txt"
+  out=$(FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-captain-hold.sh" answer "$id" --release --decision-file "$case_dir/answer.txt") \
+    || fail "could not release the task: $out"
+  out=$(run_spawn "$case_dir" "$id" "$case_dir/project" "${flags[@]}") || fail "released task could not continue: $out"
+  cmp -s "$case_dir/original-brief.md" "$home/data/$id/brief.md" || fail "continuation changed the brief"
+  [ "$(row_state "$case_dir" "$id")" = in_flight ] || fail "continuation did not start the task"
+  out=$(run_teardown "$case_dir" "$id" --force) || fail "final teardown failed: $out"
+  assert_present "$home/data/$id/finished-briefs" "final close did not record the finished brief"
+  rm "$home/data/$id/finished-briefs"
+  ( cd "$home" && tasks-axi prune --keep 0 --file "$home/data/backlog.md" >/dev/null ) || fail "prune failed"
+  add_item "$case_dir" "$id" "$kind"
+  if out=$(run_spawn "$case_dir" "$id" "$case_dir/project" "${flags[@]}"); then
+    fail "a new row inherited the previous task's release"
+  fi
+  assert_contains "$out" "matches a previous launch" "new row was not refused by the legacy guard"
+  pass "retained $kind continues unchanged, but a new row cannot inherit its release"
+}
+
 test_unrun_launch_brief_can_be_retried() {
   local case_dir home id out rc=0
   id=atomic-unrun-brief
@@ -3201,6 +3236,8 @@ test_reused_id_refuses_a_finished_brief
 test_reused_id_refuses_a_finished_brief role-first
 test_reused_id_refuses_a_finished_brief brief-first
 test_unrun_launch_brief_can_be_retried
+test_retained_task_can_resume_its_brief ship
+test_retained_task_can_resume_its_brief scout
 test_dispatch_refuses_to_commit_without_a_published_record
 test_dispatch_leaves_no_record_when_the_transition_fails
 test_dispatch_reports_an_incomplete_record_rollback
