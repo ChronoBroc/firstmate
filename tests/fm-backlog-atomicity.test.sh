@@ -1334,6 +1334,40 @@ test_dispatch_refuses_a_closed_item() {
   pass "dispatch refuses a closed item instead of silently reopening it"
 }
 
+test_reused_id_refuses_a_finished_brief() {
+  local case_dir home id out rc=0
+  id=atomic-reused-id-b1
+  case_dir=$(make_home reused-id "$id")
+  home=$(home_of "$case_dir")
+  printf '%s\n' 'OLD-INSTRUCTIONS for the finished task.' >> "$home/data/$id/brief.md"
+  add_item "$case_dir" "$id"
+  out=$(run_ship_spawn "$case_dir" "$id") || fail "first spawn failed: $out"
+  out=$(run_teardown "$case_dir" "$id" --force) || fail "teardown of the finished task failed: $out"
+  [ "$(row_state "$case_dir" "$id")" = "done" ] || fail "teardown did not close the finished item"
+  ( cd "$home" && tasks-axi prune --keep 0 --file "$home/data/backlog.md" >/dev/null ) \
+    || fail "could not prune the finished item"
+  add_item "$case_dir" "$id"
+  [ "$(row_state "$case_dir" "$id")" = queued ] || fail "the reused id was not filed as a new item"
+
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "spawn launched a finished task's brief for a new item that reuses its id"
+  assert_contains "$out" "brief of a finished task" \
+    "the refusal did not say the brief belongs to a finished task"
+  assert_contains "$out" "scaffold a new brief" "the refusal did not name the remedy"
+  assert_absent "$home/state/$id.meta" "the refused spawn left a task record behind"
+  [ "$(row_state "$case_dir" "$id")" = queued ] || fail "the refused spawn moved the new item"
+  assert_grep 'OLD-INSTRUCTIONS' "$home/data/$id/brief.md" \
+    "the refusal changed the finished task's brief"
+
+  mv "$home/data/$id" "$home/data/$id.finished"
+  mkdir -p "$home/data/$id"
+  sed 's/OLD-INSTRUCTIONS/NEW-INSTRUCTIONS/' "$home/data/$id.finished/brief.md" > "$home/data/$id/brief.md"
+  out=$(run_ship_spawn "$case_dir" "$id") || fail "spawn refused a new brief for the reused id: $out"
+  assert_grep 'NEW-INSTRUCTIONS' "$home/data/$id/launch-brief.md" \
+    "the new item did not launch its own brief"
+  pass "a reused id cannot launch the finished task's brief, and launches once it has its own"
+}
+
 test_dispatch_refuses_to_commit_without_a_published_record() {
   local case_dir id meta out rc=0
   id=atomic-dispatch-publish-failure-b4
@@ -3135,6 +3169,7 @@ test_completion_refuses_an_unresolvable_data_directory
 test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_reports_a_backlog_read_failure
 test_dispatch_refuses_a_closed_item
+test_reused_id_refuses_a_finished_brief
 test_dispatch_refuses_to_commit_without_a_published_record
 test_dispatch_leaves_no_record_when_the_transition_fails
 test_dispatch_reports_an_incomplete_record_rollback

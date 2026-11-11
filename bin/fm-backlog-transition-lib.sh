@@ -1237,3 +1237,66 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path> <authorized-data
   fi
   return 1
 }
+
+# FINISHED BRIEFS. data/<id>/ outlives its task on purpose: it holds the
+# finished task's proof. A pruned Done row, though, lets `tasks-axi add` accept
+# the same id again for unrelated work, and bin/fm-brief.sh then refuses to
+# scaffold only because the old brief.md exists. So a supervisor who skips or
+# overlooks that refusal would launch the OLD instructions for the new item.
+# Teardown therefore appends the sha256 of the brief each finished ship or
+# scout ran to data/<id>/finished-briefs, and a fresh spawn refuses while
+# brief.md still matches one of them. A relaunch is exempt: it re-launches the
+# same live task. Nothing here deletes, moves, or overwrites the finished
+# task's files; the remedy is a new brief or a new id.
+
+# Set by the finished-brief helpers when they return non-zero.
+FM_FINISHED_BRIEF_ERROR=
+
+fm_finished_brief_record() {  # <data-dir> <id>
+  local data=$1 id=$2 brief record sum
+  FM_FINISHED_BRIEF_ERROR=
+  brief="$data/$id/brief.md"
+  record="$data/$id/finished-briefs"
+  [ -e "$brief" ] || [ -L "$brief" ] || return 0
+  if [ -L "$record" ] || { [ -e "$record" ] && [ ! -f "$record" ]; }; then
+    FM_FINISHED_BRIEF_ERROR="finished-brief record is not a regular file at $record"
+    return 1
+  fi
+  sum=$(fm_pr_sha256 "$brief") || sum=
+  if [ -z "$sum" ]; then
+    FM_FINISHED_BRIEF_ERROR="could not checksum the finished brief at $brief"
+    return 1
+  fi
+  if [ -f "$record" ] && grep -Fqx -- "$sum" "$record"; then
+    return 0
+  fi
+  if ! printf '%s\n' "$sum" >> "$record" 2>/dev/null || ! grep -Fqx -- "$sum" "$record"; then
+    FM_FINISHED_BRIEF_ERROR="could not record the finished brief in $record"
+    return 1
+  fi
+}
+
+# Returns 0 when <data>/<id>/brief.md is not a brief a finished task already
+# ran, and 1 with FM_FINISHED_BRIEF_ERROR naming the remedy when it is or when
+# that cannot be decided.
+fm_finished_brief_check() {  # <data-dir> <id>
+  local data=$1 id=$2 brief record sum
+  FM_FINISHED_BRIEF_ERROR=
+  brief="$data/$id/brief.md"
+  record="$data/$id/finished-briefs"
+  [ -e "$record" ] || [ -L "$record" ] || return 0
+  if [ -L "$record" ] || [ ! -f "$record" ]; then
+    FM_FINISHED_BRIEF_ERROR="finished-brief record is not a regular file at $record"
+    return 1
+  fi
+  sum=$(fm_pr_sha256 "$brief") || sum=
+  if [ -z "$sum" ]; then
+    FM_FINISHED_BRIEF_ERROR="could not checksum $brief to compare it with the finished briefs in $record"
+    return 1
+  fi
+  if grep -Fqx -- "$sum" "$record"; then
+    FM_FINISHED_BRIEF_ERROR="$brief is the brief of a finished task that already ran under the id $id, so launching it would run the old instructions for a new item; keep $data/$id/ (it holds that task's proof) and either move it aside and scaffold a new brief with bin/fm-brief.sh, or file the new item under a fresh id"
+    return 1
+  fi
+  return 0
+}
