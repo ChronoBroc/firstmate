@@ -137,6 +137,32 @@ zsh
 A persistent parent shell waiting for a child remained reported as the parent process, while a shell that directly execed a simple command changed identity with the process itself.
 Pi and pi-signed 0.82.0 were reverified on 2026-07-27 through real isolated `fm-spawn.sh` launches.
 
+### Server identity for the absence proof
+
+The tmux server identity a task record carries (`tmux_socket=`, `tmux_server=<pid>:<start-time>`) and the process-table read that proves a recorded server exited were verified on 2026-11-11 with tmux 3.8 on macOS 27.2 arm64, on a private socket `$S` under a throwaway directory `$T`.
+
+```sh
+tmux -S "$S" new-session -d -s fmtest -n testwin
+P=$(tmux -S "$S" display-message -p '#{pid}')
+tmux -S "$S" display-message -p -t fmtest:testwin '#{socket_path}|#{pid}:#{start_time}'
+ps -p "$P" -o comm=
+tmux -S "$S" kill-server
+ps -p "$P" -o comm=; echo "rc=$?"
+tmux -S "$S" display-message -p '#{pid}:#{start_time}'
+```
+
+Observed output:
+
+```text
+$T/s|37040:1794397306
+tmux
+rc=1
+no server running on $T/s
+```
+
+An exited server's pid reads as no process at all (exit 1, no output), and its socket answers no identity.
+`tests/fm-control-relaunch.test.sh` (`test_tmux_absence_proof_against_a_real_private_server`) re-checks the same formats and verdicts against a real private server wherever tmux is installed.
+
 ### Agent liveness name sources
 
 Hermes Agent v0.21.7 was verified as a tmux worker on Linux on 2026-11-02: native Node TUI / Python module argv yielded `alive`, and the tool-side harness detector returned `hermes`.
