@@ -162,10 +162,15 @@ fm_backend_tmux_send_literal() {  # <target> <text>
 #       fm_backend_tmux_kill.
 # The target is passed through exactly as the caller means it, so a caller that
 # requires the exact recorded session asks for `=session` and still gets the
-# same classification.
-fm_backend_tmux_window_inventory() {  # <session-target>
+# same classification. An optional <socket> reads the server listening there
+# instead of the one this process addresses.
+fm_backend_tmux_window_inventory() {  # <session-target> [socket]
   local windows
-  if windows=$(LC_ALL=C tmux list-windows -t "$1" -F '#{window_name}' 2>&1); then
+  if windows=$(if [ -n "${2:-}" ]; then
+      LC_ALL=C tmux -S "$2" list-windows -t "$1" -F '#{window_name}' 2>&1
+    else
+      LC_ALL=C tmux list-windows -t "$1" -F '#{window_name}' 2>&1
+    fi); then
     printf '%s\n' "$windows"
     return 0
   fi
@@ -175,6 +180,128 @@ fm_backend_tmux_window_inventory() {  # <session-target>
       ;;
   esac
   return 1
+}
+
+# fm_backend_tmux_server_identity: the identity of the tmux server holding
+# <target>, as "<socket-path>\t<server-pid>:<server-start-time>", both read
+# from the server itself. fm-spawn records it with the task so a later absence
+# proof can name the exact server the window lived on
+# (fm_backend_tmux_endpoint_absence_recheck). Nonzero, printing nothing, when
+# the server cannot be read or answers with something that is not an identity.
+fm_backend_tmux_server_identity() {  # <target>
+  local out socket server
+  out=$(LC_ALL=C tmux display-message -p -t "$1" '#{socket_path}|#{pid}:#{start_time}' 2>/dev/null) || return 1
+  socket=${out%|*}
+  server=${out##*|}
+  case "$socket" in /*) ;; *) return 1 ;; esac
+  fm_backend_tmux_server_id_valid "$server" || return 1
+  printf '%s\t%s\n' "$socket" "$server"
+}
+
+fm_backend_tmux_server_id_valid() {  # <pid:start-time>
+  case "${1:-}" in
+    *[!0-9:]*|:*|*:|*:*:*|'') return 1 ;;
+    *:*) [ "${1%%:*}" != 0 ] ;;
+    *) return 1 ;;
+  esac
+}
+
+# fm_backend_tmux_server_process: what process <pid> is now, settled from the
+# process table rather than from any tmux socket:
+#   gone       - no process has that pid.
+#   other      - the pid now belongs to a program that is not tmux, so the
+#                tmux server that held it has exited.
+#   tmux       - a tmux process holds the pid; whether it is the recorded
+#                server is the socket read's question, not this one's.
+#   unreadable - the process table could not be read.
+# `ps -p` exits 1 with no output at all for an absent pid on both macOS and
+# procps; any message alongside a failure (a malformed pid, a broken ps) is
+# not that answer. The comm basename is matched by prefix because Linux tmux
+# retitles its server "tmux: server".
+fm_backend_tmux_server_process() {  # <pid>
+  local out rc
+  out=$(LC_ALL=C ps -p "$1" -o comm= 2>&1)
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if [ -z "$out" ]; then printf 'gone'; else printf 'unreadable'; fi
+    return 0
+  fi
+  out=${out##*/}
+  case "$out" in
+    '') printf 'unreadable' ;;
+    tmux*) printf 'tmux' ;;
+    *) printf 'other' ;;
+  esac
+}
+
+# fm_backend_tmux_endpoint_absence_recheck: whether a task window that reads
+# `missing` is provably gone, judged against the server identity its record
+# carries (tmux_socket, tmux_server), never against whichever server this
+# process happens to address. Prints one word:
+#   missing    - PROVEN gone: the recorded server process no longer exists
+#                (its pid is free or now another program), or that exact
+#                server is still running, answers at its recorded socket, and
+#                has no such window.
+#   dead/alive - the window is on the recorded server, which is also the one
+#                this process addresses, and the ordinary classifier re-read it.
+#   foreign    - the window is still on the recorded server, but this process
+#                addresses a different one, so nothing here may act on it.
+#   unrecorded - the record carries no usable server identity (a record written
+#                before identities were recorded).
+#   unreadable - anything else: a tmux process still holds the recorded pid but
+#                cannot be confirmed or excluded as the recorded server, or a
+#                read failed. Never evidence of absence.
+# Reads only; it never starts a server or creates anything.
+fm_backend_tmux_endpoint_absence_recheck() {  # <target> <socket> <server-id>
+  local target=${1:-} socket=${2:-} server=${3:-} session window windows inventory_status current state
+  case "$target" in
+    *:*:*|'':*|*:'') printf 'unreadable'; return 0 ;;
+    *:*) ;;
+    *) printf 'unreadable'; return 0 ;;
+  esac
+  case "$socket" in /*) ;; *) printf 'unrecorded'; return 0 ;; esac
+  fm_backend_tmux_server_id_valid "$server" || { printf 'unrecorded'; return 0; }
+  case "$(fm_backend_tmux_server_process "${server%%:*}")" in
+    gone|other) printf 'missing'; return 0 ;;
+    tmux) ;;
+    *) printf 'unreadable'; return 0 ;;
+  esac
+  # A tmux process holds the recorded pid. Only the server at the recorded
+  # socket answering with the recorded pid AND start time is that server;
+  # a different start time under the same pid is a later server that reused
+  # it, which also proves the recorded one exited.
+  current=$(LC_ALL=C tmux -S "$socket" display-message -p '#{pid}:#{start_time}' 2>/dev/null) || current=
+  if [ "$current" != "$server" ]; then
+    if [ "${current%%:*}" = "${server%%:*}" ] && fm_backend_tmux_server_id_valid "$current"; then
+      printf 'missing'
+    else
+      printf 'unreadable'
+    fi
+    return 0
+  fi
+  session=${target%%:*}
+  window=${target#*:}
+  windows=$(fm_backend_tmux_window_inventory "=$session" "$socket")
+  inventory_status=$?
+  case "$inventory_status" in
+    2) printf 'missing'; return 0 ;;
+    0) ;;
+    *) printf 'unreadable'; return 0 ;;
+  esac
+  if ! printf '%s\n' "$windows" | grep -Fqx -- "$window"; then
+    printf 'missing'
+    return 0
+  fi
+  current=$(LC_ALL=C tmux display-message -p '#{pid}:#{start_time}' 2>/dev/null) || current=
+  if [ "$current" != "$server" ]; then
+    printf 'foreign'
+    return 0
+  fi
+  state=$(fm_backend_tmux_agent_state "$target")
+  case "$state" in
+    dead|alive) printf '%s' "$state" ;;
+    *) printf 'unreadable' ;;
+  esac
 }
 
 # Resolve one exact window selector in one exact session to its stable id.
