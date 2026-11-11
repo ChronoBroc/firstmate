@@ -1280,7 +1280,7 @@ fm_finished_brief_record() {  # <data-dir> <id>
 # ran, and 1 with FM_FINISHED_BRIEF_ERROR naming the remedy when it is or when
 # that cannot be decided.
 fm_finished_brief_check() {  # <data-dir> <id> <state-dir>
-  local data=$1 id=$2 state=$3 brief record sum row
+  local data=$1 id=$2 state=$3 brief record sum
   FM_FINISHED_BRIEF_ERROR=
   brief="$data/$id/brief.md"
   record="$data/$id/finished-briefs"
@@ -1296,19 +1296,7 @@ fm_finished_brief_check() {  # <data-dir> <id> <state-dir>
         $launch =~ s/\A# Current worker role contract\n[^\n]*(?:\n[^\n]+)*\n\n//;
         exit(index($launch, $brief) == 0 ? 0 : 1);
       ' "$brief" "$data/$id/launch-brief.md"; then
-      if row=$(fm_backlog_row_show "$data" "$id" --full) &&
-        printf '%s\n' "$row" | perl -MJSON::PP -0777 -e '
-          my $row = <STDIN>;
-          exit 1 unless $row =~ /^  state: queued$/m;
-          my ($body) = $row =~ /^  body: (.*)$/m;
-          exit 1 unless defined $body;
-          $body = JSON::PP->new->utf8->allow_nonref->decode($body)
-            if $body =~ /\A"/;
-          exit($body =~ /\AResolution recorded by fm-captain-hold\.\nDecision digest: [^\n]+\nResolution mode: released\n/ ? 0 : 1);
-        '; then
-        return 0
-      fi
-      FM_FINISHED_BRIEF_ERROR="$brief matches a previous launch without a finished-brief record; if a finished task ran this brief, keep $data/$id/ and move it aside and scaffold a new brief, or use a fresh id; if an earlier spawn of this same item failed before any worker ran, remove only $data/$id/launch-brief.md and spawn again"
+      FM_FINISHED_BRIEF_ERROR="$brief matches a previous launch without a finished-brief record; if a finished task ran this brief, keep $data/$id/ and move it aside and scaffold a new brief, or use a fresh id; if an earlier spawn of this same item failed before any worker ran, remove only $data/$id/launch-brief.md and spawn again; if continuing a captain-held task after retain teardown, first confirm this is the same retained task rather than a new item reusing its id, then remove only $data/$id/launch-brief.md and spawn again"
       return 1
     fi
     return 0

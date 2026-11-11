@@ -1381,7 +1381,7 @@ test_reused_id_refuses_a_finished_brief() {
 }
 
 
-test_retained_task_can_resume_its_brief() {
+test_retained_task_requires_confirmed_continuation() {
   local kind=$1 case_dir home id out
   local -a flags=(--mode no-mistakes --yolo off)
   id="atomic-retained-$kind"
@@ -1400,7 +1400,16 @@ test_retained_task_can_resume_its_brief() {
   printf 'Continue the same work.\n' > "$case_dir/answer.txt"
   out=$(FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-captain-hold.sh" answer "$id" --release --decision-file "$case_dir/answer.txt") \
     || fail "could not release the task: $out"
-  out=$(run_spawn "$case_dir" "$id" "$case_dir/project" "${flags[@]}") || fail "released task could not continue: $out"
+  if out=$(run_spawn "$case_dir" "$id" "$case_dir/project" "${flags[@]}"); then
+    fail "release alone permitted an ambiguous previous launch"
+  fi
+  assert_contains "$out" "same retained task rather than a new item" "refusal omitted the continuation condition"
+  assert_contains "$out" "remove only $home/data/$id/launch-brief.md" "refusal omitted the continuation remedy"
+  assert_absent "$home/state/$id.meta" "refusal created metadata"
+  [ "$(row_state "$case_dir" "$id")" = queued ] || fail "refusal changed the queued row"
+  cmp -s "$case_dir/original-brief.md" "$home/data/$id/brief.md" || fail "refusal changed the brief"
+  rm "$home/data/$id/launch-brief.md"
+  out=$(run_spawn "$case_dir" "$id" "$case_dir/project" "${flags[@]}") || fail "confirmed continuation failed: $out"
   cmp -s "$case_dir/original-brief.md" "$home/data/$id/brief.md" || fail "continuation changed the brief"
   [ "$(row_state "$case_dir" "$id")" = in_flight ] || fail "continuation did not start the task"
   out=$(run_teardown "$case_dir" "$id" --force) || fail "final teardown failed: $out"
@@ -1412,7 +1421,18 @@ test_retained_task_can_resume_its_brief() {
     fail "a new row inherited the previous task's release"
   fi
   assert_contains "$out" "matches a previous launch" "new row was not refused by the legacy guard"
-  pass "retained $kind continues unchanged, but a new row cannot inherit its release"
+  out=$(FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-captain-hold.sh" hold "$id" --reason 'Approve the new item') \
+    || fail "could not hold the new item: $out"
+  out=$(FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-captain-hold.sh" answer "$id" --release --decision-file "$case_dir/answer.txt") \
+    || fail "could not release the new item: $out"
+  if out=$(run_spawn "$case_dir" "$id" "$case_dir/project" "${flags[@]}"); then
+    fail "holding and releasing a new item allowed the old brief to launch"
+  fi
+  assert_contains "$out" "matches a previous launch" "released new item bypassed the legacy guard"
+  assert_absent "$home/state/$id.meta" "released new item created metadata"
+  [ "$(row_state "$case_dir" "$id")" = queued ] || fail "refusal moved the released new item"
+  cmp -s "$case_dir/original-brief.md" "$home/data/$id/brief.md" || fail "refusal changed the old brief"
+  pass "retained $kind needs confirmed continuation; releasing a new item cannot authorize an old brief"
 }
 
 test_unrun_launch_brief_can_be_retried() {
@@ -3236,8 +3256,8 @@ test_reused_id_refuses_a_finished_brief
 test_reused_id_refuses_a_finished_brief role-first
 test_reused_id_refuses_a_finished_brief brief-first
 test_unrun_launch_brief_can_be_retried
-test_retained_task_can_resume_its_brief ship
-test_retained_task_can_resume_its_brief scout
+test_retained_task_requires_confirmed_continuation ship
+test_retained_task_requires_confirmed_continuation scout
 test_dispatch_refuses_to_commit_without_a_published_record
 test_dispatch_leaves_no_record_when_the_transition_fails
 test_dispatch_reports_an_incomplete_record_rollback
