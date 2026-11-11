@@ -1277,7 +1277,13 @@ test_workers_wait_without_spending_turns() {
     assert_grep "gh pr checks <pr> --watch" "$brief" "$id: the CI wait primitive is missing"
     assert_grep "a \`timeout\` of at most 2700 seconds" "$brief" "$id: the Pi ceiling is missing"
     assert_grep "its maximum \`timeout\` of 600000 ms" "$brief" "$id: the Claude Code ceiling is missing"
-    assert_grep "empty \`write_stdin\` polls of up to 300000 ms" "$brief" "$id: the Codex ceiling is missing"
+    assert_grep "first line is \`// @exec: {\"yield_time_ms\": 300000}\`" "$brief" \
+      "$id: the Codex cell pragma that lifts the 30-second yield is missing"
+    assert_grep "empty \`write_stdin\` poll with \`yield_time_ms: 300000\` inside such a cell" "$brief" \
+      "$id: the Codex long poll is missing"
+    assert_grep "\`wait\` with \`yield_time_ms: 300000\` on a cell that has yielded" "$brief" \
+      "$id: the Codex wait on a yielded cell is missing"
+    assert_no_grep "polls of up to 300000 ms" "$brief" "$id: the short-poll Codex advice is still present"
     assert_grep "is the sanctioned foreground wait" "$brief" \
       "$id: the wait a Claude Code worker may use is not named"
     assert_grep "reattach with \`no-mistakes axi run --wait\` instead, and never send the same \`respond\` again" "$brief" \
