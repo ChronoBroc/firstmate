@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Steer a task by durable record: write the message into the task's steering
 # inbox and ring a constant doorbell through its backend endpoint, best-effort.
-# Usage: fm-send.sh <target> [--resolve-key <key>]... [--fire-and-forget <delivery-id>] <text...>
+# Usage: fm-send.sh <target> [--resolve-key <key>]... [--fire-and-forget <delivery-id>] [--] <text...>
 #   <target> may be an exact task id, a legacy fm-<id> task label resolved
 #   through this home's state/<id>.meta, or an explicit well-formed backend
 #   target. fm-send refuses unresolved guesses rather than falling back to a
@@ -11,6 +11,12 @@
 # before anything is marked, recorded, or submitted, because an empty marked
 # secondmate request delivers only marker and correlation bytes and leaves the
 # parent waiting on a reply to nothing.
+# A first text argument shaped like an unknown flag (-x, --name, --name=value)
+# is refused before anything is marked, recorded, or submitted, and the error
+# prints the resend that carries it as text. "--" ends the flags, so everything
+# after it is the message, even "--key" or "--help". Text that only begins with
+# dashes, such as "- item", "--- heading", "-1", or "--help me with this", is
+# already ordinary text and needs no "--".
 # Special keys instead of text: fm-send.sh <target> --key Enter
 # Key support is backend-specific: tmux/herdr support Escape, Enter, and C-c;
 # Orca supports Enter and C-c only; T3 Code maps Escape and C-c to a native
@@ -513,10 +519,10 @@ if [ -n "$TARGET_META" ]; then
 fi
 
 # Collect --resolve-key flags (answerer-closes; see the header contract). They
-# must precede --key or the message text; everything after the last flag is the
-# message exactly as before, so ordinary sends are byte-identical.
+# must precede --key, "--", or the message text.
 RESOLVE_KEYS=
 FIRE_AND_FORGET_ID=
+FM_SEND_END_OF_FLAGS=0
 fm_send_add_resolve_key() { # <key>
   local k=$1
   case "$k" in
@@ -567,9 +573,19 @@ while :; do
     FIRE_AND_FORGET_ID=${1#--fire-and-forget=}
     shift
     ;;
+  --)
+    FM_SEND_END_OF_FLAGS=1
+    shift
+    break
+    ;;
   *) break ;;
   esac
 done
+
+FM_SEND_KEY_MODE=0
+if [ "$FM_SEND_END_OF_FLAGS" = 0 ] && [ "${1:-}" = "--key" ]; then
+  FM_SEND_KEY_MODE=1
+fi
 
 if [ "$TARGET_BACKEND" != remote ]; then
   fm_backend_validate "$TARGET_BACKEND" || exit 1
@@ -644,6 +660,7 @@ fm_send_open_set_keys() {  # <open-set>
 # The message this send was carrying, quoted for a copy-paste resend, so a
 # refused key never costs the operator the text they typed.
 fm_send_quoted_message() {  # <text...>
+  [ "$FM_SEND_END_OF_FLAGS" = 0 ] || printf -- '-- '
   printf '%q' "$*"
 }
 
@@ -691,6 +708,30 @@ fm_send_resolve_close_note() { # <key> <excerpt>
   printf 'answered: %s' "$excerpt"
 }
 
+# Succeeds for -x, --name, and --name=value; any other word is message text.
+fm_send_flag_shaped() { # <word>
+  local name=${1%%=*}
+  case "$name" in
+  --[A-Za-z]* | -[A-Za-z]*) ;;
+  *) return 1 ;;
+  esac
+  case "$name" in
+  *[!A-Za-z0-9_-]*) return 1 ;;
+  esac
+}
+
+if [ "$FM_SEND_END_OF_FLAGS" = 0 ] && [ "$FM_SEND_KEY_MODE" = 0 ] && fm_send_flag_shaped "${1:-}"; then
+  {
+    echo "error: unknown flag '$1' after target '$RAW_TARGET'; nothing was sent. fm-send takes --resolve-key, --fire-and-forget, and --key here; run fm-send.sh --help for usage."
+    printf '  to send it as the message text, end the flags with --:\n    %s%s' "$(fm_send_resend_env)" "$(fm_send_resend_exe)"
+    for resend_arg in "${FM_SEND_ORIGINAL_ARGS[@]:0:$((${#FM_SEND_ORIGINAL_ARGS[@]} - $#))}" -- "$@"; do
+      printf ' %q' "$resend_arg"
+    done
+    printf '\n'
+  } >&2
+  exit 1
+fi
+
 if [ -n "$FIRE_AND_FORGET_ID" ]; then
   printf '%s' "$FIRE_AND_FORGET_ID" | grep -Eq '^[a-f0-9]{16}$' ||
     {
@@ -714,7 +755,7 @@ if [ -n "$RESOLVE_KEYS" ]; then
     echo "error: --resolve-key needs a task selector resolved through this home's metadata; an explicit backend target has no decision ledger here" >&2
     exit 1
   fi
-  if [ "${1:-}" = "--key" ]; then
+  if [ "$FM_SEND_KEY_MODE" = 1 ]; then
     echo "error: --resolve-key cannot accompany --key; answering a decision requires a text answer" >&2
     exit 1
   fi
@@ -891,7 +932,7 @@ fm_send_feed_resolved_holds() { # <answer-text>
 # send implementation. A failed backend send is still surfaced below as a hard
 # error with the attempted resolution attached.
 
-if [ "${1:-}" = "--key" ]; then
+if [ "$FM_SEND_KEY_MODE" = 1 ]; then
   [ -z "$FIRE_AND_FORGET_ID" ] ||
     {
       echo "error: --fire-and-forget cannot accompany --key" >&2
