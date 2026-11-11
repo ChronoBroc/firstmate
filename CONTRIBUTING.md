@@ -30,6 +30,18 @@ GitHub Actions and Dependabot are exempt so their automation keeps working, but 
    Follow the installed no-mistakes version's SKILL.md and live `axi` help for gate mechanics.
 7. Once the pipeline passes, it pushes the branch to your fork and opens the PR against the parent repo for you.
 
+### Keeping a fork in sync with the parent
+
+A fork that carries its own commits on `main` takes the parent's new commits by merging, never by rebasing or force-pushing its published history.
+
+1. Add the parent as a remote once (`git remote add upstream https://github.com/kunchenguid/firstmate`), then `git fetch upstream main`.
+2. List the fork's own commits with `git log upstream/main..origin/main`, so you know which fixes must survive the merge.
+3. On a branch cut from the fork's `main`, run `git merge upstream/main`, which records a real merge commit.
+4. Resolve conflicts so both sides' intent survives; where the parent has since fixed the same thing differently, prefer the parent's version so the fork carries as little divergence as possible.
+5. Validate the branch through the fork's usual gate, running the suites the merge touched plus the suites that cover the fork's own commits.
+6. Land the pull request with a merge commit, never a squash or rebase merge.
+   A squash drops the parent's ancestry, so the next sync conflicts again on the commits this one already brought in.
+
 ### The `full-ci` label
 
 CI on a pull request from an author without write access runs only the quick checks at first: `Test coverage guard`, `Repo invariants`, and the no-mistakes body check.
