@@ -1,0 +1,3 @@
+.s: exit=1, no server running on {run-worktree}/.s
+.t: exit=1, no server running on {run-worktree}/.t
+Removed disposable homes, synthetic repositories, archived baseline, and test driver from worktree.

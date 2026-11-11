@@ -1,0 +1,17 @@
+window=seat:fm-recover
+endpoint_task_id=recover
+worktree={run-worktree}/.test-tmux/worker
+project={run-worktree}/.test-tmux/project
+harness=codex
+approval_mode=bypass
+kind=ship
+mode=no-mistakes
+yolo=off
+branch=task-recover
+tasktmp=/tmp/fm-recover
+model=default
+effort=default
+spawn_gen=s1794404421.21993.2908
+tmux_socket={run-worktree}/.t
+tmux_server=99458:1794404412
+control_relaunch_tx=19430.20261111T134019Z.19064

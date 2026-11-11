@@ -1,0 +1,149 @@
+{run-worktree}/.test-tmux/home
+SCENARIO renamed session retains its running pane
+> bin/fm-control.sh recover exit
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+error: task recover's endpoint original:fm-recover reads 'missing', but the tmux server the task was created on could not be confirmed gone or read at its recorded socket; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+exit_status=1
+> bin/fm-control.sh recover relaunch --note must not duplicate renamed session
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+error: task recover's endpoint original:fm-recover reads 'missing', but the tmux server the task was created on could not be confirmed gone or read at its recorded socket; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+error: relaunch of recover failed while stopping the old agent and its state is 'missing', so it was not proven stopped; its original instructions were restored and the durable record was retained for recovery
+exit_status=1
+surviving_pane_pid=92418
+SCENARIO moved window retains its running pane
+> bin/fm-control.sh recover exit
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+error: task recover's endpoint original:fm-recover reads 'missing', but the tmux server the task was created on could not be confirmed gone or read at its recorded socket; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+exit_status=1
+> bin/fm-control.sh recover relaunch --note must not duplicate moved window
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+error: task recover's endpoint original:fm-recover reads 'missing', but the tmux server the task was created on could not be confirmed gone or read at its recorded socket; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+error: relaunch of recover failed while stopping the old agent and its state is 'missing', so it was not proven stopped; its original instructions were restored and the durable record was retained for recovery
+exit_status=1
+SCENARIO recorded endpoint survives on another server
+> bin/fm-control.sh recover exit
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+error: task recover's endpoint original:fm-recover reads 'missing', but the window is still present on the tmux server the task was created on, which is not the server this process addresses; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+exit_status=1
+> bin/fm-control.sh recover relaunch --note must not duplicate foreign endpoint
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+error: task recover's endpoint original:fm-recover reads 'missing', but the window is still present on the tmux server the task was created on, which is not the server this process addresses; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+error: relaunch of recover failed while stopping the old agent and its state is 'missing', so it was not proven stopped; its original instructions were restored and the durable record was retained for recovery
+exit_status=1
+SCENARIO unreachable recorded socket while its server lives
+> bin/fm-control.sh recover exit
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+error: task recover's endpoint original:fm-recover reads 'missing', but the tmux server the task was created on could not be confirmed gone or read at its recorded socket; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+exit_status=1
+> bin/fm-control.sh recover relaunch --note must not duplicate unconfirmed server
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+error: task recover's endpoint original:fm-recover reads 'missing', but the tmux server the task was created on could not be confirmed gone or read at its recorded socket; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+error: relaunch of recover failed while stopping the old agent and its state is 'missing', so it was not proven stopped; its original instructions were restored and the durable record was retained for recovery
+exit_status=1
+SCENARIO legacy record without identity
+> bin/fm-control.sh recover exit
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+error: task recover's endpoint original:fm-recover reads 'missing', but tmux absence cannot be proven from this task record: it does not carry the tmux server identity (written before identities were recorded), and a server-wide window inventory only describes the tmux server this process addresses, so a window absent from it may still be alive on another; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+exit_status=1
+> bin/fm-control.sh recover relaunch --note must not infer old identity
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+error: task recover's endpoint original:fm-recover reads 'missing', but tmux absence cannot be proven from this task record: it does not carry the tmux server identity (written before identities were recorded), and a server-wide window inventory only describes the tmux server this process addresses, so a window absent from it may still be alive on another; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one
+error: relaunch of recover failed while stopping the old agent and its state is 'missing', so it was not proven stopped; its original instructions were restored and the durable record was retained for recovery
+exit_status=1
+SCENARIO server loss and existing replacement collision
+> bin/fm-control.sh recover exit
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+endpoint-gone recover harness=codex backend=tmux endpoint=original:fm-recover worktree={run-worktree}/.test-tmux/worker
+> bin/fm-control.sh recover relaunch --note must not adopt colliding bare shell
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+warning: {run-worktree}/.test-tmux/home/data/recover/launch-brief.md records no ship branch; relaunching on the task's recorded branch task-recover
+warning: {run-worktree}/.test-tmux/home/data/recover/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+notice: recover ships branch=task-recover while project registers the ship-branch prefix 'fm/' (branch fm/recover) - the task's branch and PR will read as firstmate-authored; proceed only on a current explicit captain instruction or an intake judgment you can state
+error: window seat:fm-recover already exists
+error: the replacement agent for recover could not be launched on codex
+error: recover's agent was stopped but the replacement did not launch; no agent is running, and its work plus the recorded progress note are preserved at {run-worktree}/.test-tmux/worker
+exit_status=1
+SCENARIO reclaim lost server into fresh window
+> bin/fm-control.sh recover relaunch --note Resume after verified tmux server loss; preserve precious.txt.
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+fm-gate-refuse: gate agent lifecycle permitted only against lab home {run-worktree}/.test-tmux/home
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+warning: {run-worktree}/.test-tmux/home/data/recover/launch-brief.md records no ship branch; relaunching on the task's recorded branch task-recover
+warning: {run-worktree}/.test-tmux/home/data/recover/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+notice: recover ships branch=task-recover while project registers the ship-branch prefix 'fm/' (branch fm/recover) - the task's branch and PR will read as firstmate-authored; proceed only on a current explicit captain instruction or an intake judgment you can state
+relaunched recover harness=codex from=codex model=default effort=default backend=tmux endpoint=seat:fm-recover worktree={run-worktree}/.test-tmux/worker
+PERSISTED RECORD
+window=seat:fm-recover
+endpoint_task_id=recover
+worktree={run-worktree}/.test-tmux/worker
+project={run-worktree}/.test-tmux/project
+harness=codex
+approval_mode=bypass
+kind=ship
+mode=no-mistakes
+yolo=off
+branch=task-recover
+tasktmp=/tmp/fm-recover
+model=default
+effort=default
+spawn_gen=s1794404421.21993.2908
+tmux_socket={run-worktree}/.t
+tmux_server=99458:1794404412
+control_relaunch_tx=19430.20261111T134019Z.19064
+WINDOW INVENTORY
+seat:keep {run-worktree} zsh
+seat:fm-recover {run-worktree}/.test-tmux/worker codex
+WORKTREE SENTINEL
+uncommitted recovery sentinel
+PANE CAPTURE
+
+
+  Folder access
+  {run-worktree}/.test-tmux/worker
+
+  Note: You’re in a subdirectory of a Git project. Trusting will apply to the repository root:
+  {run-worktree}/.test-tmux/project
+
+  Trust this folder? Codex can read, edit, and run files here, subject to your permission settings. Folder settings
+  can run code automatically, even without a model request. Continue only if you trust these files. Your trust
+  decision will be saved.
+
+› 1. Trust and continue
+  2. Back to Agent Command Center
+
+  enter continue · esc back
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+verified: one replacement, correct live server identity, original branch and uncommitted sentinel preserved
+ALL REQUESTED CONTROL CHECKS COMPLETED
