@@ -1169,6 +1169,46 @@ test_refusal_keyed_resend_keeps_the_accepted_keys() {
   pass "fm-send --resolve-key: a refused key's keyed resend keeps every accepted key in order"
 }
 
+test_flag_shaped_answers() {
+  local dir fb log home err rc resend
+  dir="$TMP_ROOT/flag-answer"; mkdir -p "$dir"
+  fb=$(make_stubs "$dir"); log="$dir/send.log"; err="$dir/send.err"
+  home=$(setup_home flag-answer)
+  fm_write_meta "$home/state/t12.meta" "window=sess:fm-t12" "kind=ship"
+  printf 'needs-decision [key=k]: choose\n' > "$home/state/t12.status"
+
+  : > "$log"
+  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
+    "$SEND" t12 --resolve-key k --help >/dev/null 2>"$err"; rc=$?
+  expect_code 1 "$rc" "an unknown flag after --resolve-key should refuse"
+  assert_contains "$(cat "$err")" "unknown flag '--help'" "the refusal should name the flag"
+  [ ! -d "$home/state/t12.inbox" ] || fail "a refused answer still enqueued an inbox record"
+  if grep -F 'resolved' "$home/state/t12.status" >/dev/null; then
+    fail "a refused answer still closed its decision: $(cat "$home/state/t12.status")"
+  fi
+
+  # A refused key must hand back a resend that keeps -- ahead of the message,
+  # or a preserved "--key" would press a key instead of delivering text.
+  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
+    "$SEND" t12 --resolve-key missing -- --key >/dev/null 2>"$err"; rc=$?
+  [ "$rc" -ne 0 ] || fail "a key nothing owns should refuse"
+  resend=$(grep -F 'deliver without closing anything' "$err" \
+    | sed 's/[[:space:]]*#.*$//; s/^[[:space:]]*//')
+  [ -n "$resend" ] || fail "the refusal printed no resend command: $(cat "$err")"
+  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$home" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
+    bash -c "$resend" >/dev/null 2>&1 || fail "the printed resend does not run: $resend"
+  [ "$(tail -n 1 "$home/state/t12.inbox/001.msg")" = "--key" ] ||
+    fail "the printed resend should deliver --key as text: $(cat "$home/state/t12.inbox/001.msg")"
+
+  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$home" FM_HOME="$home" FM_SEND_LOG="$log" FM_SEND_SETTLE=0 \
+    "$SEND" t12 --resolve-key k -- --help >/dev/null 2>"$err"; rc=$?
+  expect_code 0 "$rc" "an answer after -- should send and close"
+  [ "$(tail -n 1 "$home/state/t12.inbox/002.msg")" = "--help" ] ||
+    fail "the answer after -- should be recorded as text: $(cat "$home/state/t12.inbox/002.msg")"
+  assert_contains "$(cat "$home/state/t12.status")" "resolved" "the answer after -- should close its decision"
+  pass "fm-send --resolve-key: flag-shaped answers refuse unless carried after --"
+}
+
 test_answer_send_closes_open_decision
 test_answer_close_is_self_announced
 test_separate_resolve_key_answers_do_not_rewake
@@ -1190,6 +1230,7 @@ test_remote_secondmate_answer_closes_locally
 test_remote_reply_corr_tag_does_not_block_resolve_key
 test_remote_transport_failure_does_not_close
 test_flag_misuse_refuses
+test_flag_shaped_answers
 test_reserved_pending_reply_key_closes_through_resolve_key
 test_unrelated_writer_cannot_close_or_hijack_reserved_key
 test_unclosable_reserved_key_refuses_before_send

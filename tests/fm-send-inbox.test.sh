@@ -27,6 +27,9 @@
 #  10. An empty or whitespace-only text steer is refused before anything is
 #      marked, recorded, or typed - on the marked secondmate path that means
 #      no marker-only record and no pending-reply expectation.
+#  11. A first text argument shaped like an unknown flag is refused before
+#      anything is marked, recorded, or typed; "--" carries it as text, and
+#      text that only begins with dashes stays ordinary text.
 # Every case below that passes a literal `$...` message quotes it on purpose
 # (the point is sending an unexpanded `$` line), so SC2016 is disabled.
 # shellcheck disable=SC2016
@@ -504,6 +507,109 @@ test_empty_message_refused() {
   pass "fm-send: an empty or whitespace-only text steer refuses before marking, recording, or typing"
 }
 
+assert_flag_refused() { # <case-name> <flag-in-error> <fm-send args after t1...>
+  local name=$1 flag=$2 dir err rc
+  shift 2
+  dir=$(setup_case "$name")
+  err="$dir/send.err"
+  run_send "$dir" "$err" -- t1 "$@"
+  rc=$?
+  expect_code 1 "$rc" "t1 $* should refuse"
+  assert_contains "$(cat "$err")" "unknown flag '$flag'" "the refusal should name $flag"
+  assert_contains "$(cat "$err")" "nothing was sent" "the refusal should state nothing was sent"
+  [ ! -d "$dir/home/state/t1.inbox" ] || fail "t1 $* still wrote an inbox record"
+  [ ! -s "$dir/send.log" ] || fail "t1 $* still typed something:"$'\n'"$(cat "$dir/send.log")"
+}
+
+test_unknown_flag_refused() {
+  local dir err rc
+  assert_flag_refused flag-file --file --file /tmp/brief.md
+  assert_flag_refused flag-help --help --help
+  assert_flag_refused flag-short -f -f /tmp/brief.md
+  assert_flag_refused flag-equals --file=/tmp/brief.md --file=/tmp/brief.md
+  assert_flag_refused flag-then-text --force --force restart it now
+
+  # A marked secondmate request must not mint its reply expectation first.
+  dir=$(setup_case flag-marked)
+  err="$dir/send.err"
+  fm_write_secondmate_meta "$dir/home/state/domain.meta" "$dir/home" "sess:fm-domain"
+  run_send "$dir" "$err" -- fm-domain --fire-and-forget 0123456789abcdef --help
+  rc=$?
+  expect_code 1 "$rc" "an unknown flag after --fire-and-forget should refuse"
+  [ ! -d "$dir/home/state/domain.inbox" ] || fail "a refused secondmate steer still wrote an inbox record"
+  [ -z "$(ls -A "$dir/home/state/pending-replies" 2>/dev/null)" ] ||
+    fail "a refused secondmate steer still minted a pending-reply expectation"
+
+  # The typed plane refuses the same way.
+  dir=$(setup_case flag-typed)
+  err="$dir/send.err"
+  run_send "$dir" "$err" -- sess:fm-t1 --help
+  rc=$?
+  expect_code 1 "$rc" "an unknown flag to an explicit backend target should refuse"
+  [ ! -s "$dir/send.log" ] || fail "a refused typed steer still typed something:"$'\n'"$(cat "$dir/send.log")"
+
+  pass "fm-send: a flag-shaped first text argument refuses before marking, recording, or typing"
+}
+
+test_refused_flag_resend_delivers_it_as_text() {
+  local dir err rc resend body
+  dir=$(setup_case flag-resend)
+  err="$dir/send.err"
+  run_send "$dir" "$err" -- t1 --file "/tmp/a b.md"
+  rc=$?
+  expect_code 1 "$rc" "an unknown flag should refuse"
+  resend=$(grep -F -A1 'end the flags with --' "$err" | tail -1 | sed 's/^[[:space:]]*//')
+  [ -n "$resend" ] || fail "the refusal printed no resend command: $(cat "$err")"
+  env PATH="$dir/fakebin:$PATH" FM_ROOT_OVERRIDE="$dir/home" FM_SEND_LOG="$dir/send.log" FM_SEND_SETTLE=0 \
+    bash -c "$resend" >/dev/null 2>&1 || fail "the printed resend does not run: $resend"
+  body=$(record_body _ "$dir/home/state/t1.inbox/001.msg")
+  assert_equals "--file /tmp/a b.md" "$body" "the printed resend should deliver the refused words"
+  pass "fm-send: the command a flag refusal prints delivers the words as text"
+}
+
+test_double_dash_ends_flags() {
+  local dir err body
+  dir=$(setup_case dash-file)
+  err="$dir/send.err"
+  run_send "$dir" "$err" -- t1 -- --file /tmp/brief.md || fail "text after -- should send"
+  body=$(record_body _ "$dir/home/state/t1.inbox/001.msg")
+  assert_equals "--file /tmp/brief.md" "$body" "-- should not reach the record"
+
+  # After --, --key is the message: it must never press a key.
+  dir=$(setup_case dash-key)
+  err="$dir/send.err"
+  run_send "$dir" "$err" -- t1 -- --key Enter || fail "--key after -- should send as text"
+  body=$(record_body _ "$dir/home/state/t1.inbox/001.msg")
+  assert_equals "--key Enter" "$body" "--key after -- should be recorded as text"
+
+  # A bare -- still carries no message.
+  dir=$(setup_case dash-empty)
+  err="$dir/send.err"
+  run_send "$dir" "$err" -- t1 -- && fail "a bare -- should refuse as an empty message"
+  assert_contains "$(cat "$err")" "nonempty message" "a bare -- should be the empty-message refusal"
+  [ ! -d "$dir/home/state/t1.inbox" ] || fail "a bare -- still wrote an inbox record"
+
+  pass "fm-send: -- ends the flags and everything after it is the message"
+}
+
+test_dash_leading_text_stays_text() {
+  local dir err body msg i=0
+  for msg in $'- first item\n- second item' '--- heading' '-1 is the answer' \
+    '--help me understand this' '--note: see below' '-' '--'; do
+    i=$((i + 1))
+    dir=$(setup_case "dash-text-$i")
+    err="$dir/send.err"
+    if [ "$msg" = -- ]; then
+      run_send "$dir" "$err" -- t1 -- "$msg" || fail "a literal -- after -- should send"
+    else
+      run_send "$dir" "$err" -- t1 "$msg" || fail "'$msg' should send: $(cat "$err")"
+    fi
+    body=$(record_body _ "$dir/home/state/t1.inbox/001.msg")
+    assert_equals "$msg" "$body" "dash-leading text should arrive byte-exact"
+  done
+  pass "fm-send: text that only begins with dashes is not mistaken for a flag"
+}
+
 test_text_steer_rides_inbox
 test_deep_home_doorbell_stays_short
 test_multiline_steer_is_legal
@@ -520,3 +626,7 @@ test_post_enqueue_bookkeeping_failure_is_not_retryable
 test_meta_lock_contention_fails_bounded
 test_unwritable_inbox_fails_loudly
 test_empty_message_refused
+test_unknown_flag_refused
+test_refused_flag_resend_delivers_it_as_text
+test_double_dash_ends_flags
+test_dash_leading_text_stays_text
