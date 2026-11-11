@@ -1,0 +1,8 @@
+headroom: record ~/.crew/headroom/runs/h20261111-084001-f471.json
+Traceback (most recent call last):
+  File "{run-worktree}/.reclaim-lab/live.py", line 62, in <module>
+    ready(state['window'],'fallback-worker')
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "{run-worktree}/.reclaim-lab/live.py", line 61, in ready
+    raise RuntimeError('real replacement did not show RECOVERY_READY within 65 seconds')
+RuntimeError: real replacement did not show RECOVERY_READY within 65 seconds

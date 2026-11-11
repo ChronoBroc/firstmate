@@ -1,0 +1,3 @@
+headroom: record ~/.crew/headroom/runs/h20261111-083624-3819.json
+headroom: waiting: suite slots 0 of 3 free (ui-wave0-full-gate, idle-updates-1, rev3070-code-1)
+headroom: interrupted (TERM) before the command started

@@ -1,0 +1,23 @@
+{
+  "id": "lr31790",
+  "state": {
+    "window": "replacement:fm-lr31790",
+    "endpoint_task_id": "lr31790",
+    "worktree": "{run-worktree}/.reclaim-lab/wt",
+    "project": "{run-worktree}/.reclaim-lab/proj",
+    "harness": "codex",
+    "approval_mode": "bypass",
+    "kind": "ship",
+    "mode": "no-mistakes",
+    "yolo": "off",
+    "branch": "fm/lr31790",
+    "tasktmp": "/tmp/fm-lr31790",
+    "model": "default",
+    "effort": "default",
+    "spawn_gen": "s1794408380.86681.10794",
+    "tmux_socket": "{run-worktree}/.s1",
+    "tmux_server": "74468:1794408373",
+    "control_relaunch_tx": "84368.20261111T144617Z.9585"
+  },
+  "old_server": "32304:1794408357"
+}
