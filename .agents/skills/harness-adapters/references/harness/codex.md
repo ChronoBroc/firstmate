@@ -26,7 +26,7 @@ The decision persists for the repository, so later worktrees of the same project
 ## Security-shaped work
 
 Codex can refuse a security or exploit-shaped review partway through the task, rendering "This content can't be shown" and leaving the worker idle with its doorbell text in the composer.
-Dispatch such reviews to another harness such as Claude; recover a refused worker with `fm-control.sh <id> relaunch --harness <other>`, which keeps its local copy and progress.
+Route such reviews to Claude; recover a refused worker with `fm-control.sh <id> relaunch --harness claude --note '<what the review covered so far>'`, which keeps its local copy, and the note tells the replacement where to continue.
 
 ## Hook trust
 
