@@ -1,0 +1,4 @@
+ok - a live worker on its unchanged recorded server reads alive and working
+ok - after a server restart, a same-named window and a stale busy record no longer make a dead worker read alive or working
+ok - a replaced server reads exactly like a window closed on a surviving server
+ok - a record written before server identity was recorded is not reported dead on that ground

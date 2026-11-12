@@ -1,0 +1,45 @@
+== target ({run-worktree}) lab=/tmp/fmlab.LN3fHi
+  window keep cmd=zsh
+  window fm-w1 cmd=claude
+  window fm-w2 cmd=claude
+
+### A: live workers on their recorded server (w1 has server identity, w2 legacy record without it)
+- crew-state w1: state: working · source: pane · harness busy (fm-spawn)
+- crew-state w2: state: working · source: pane · harness busy (fm-spawn)
+- digest: --- w1 ---
+- digest: endpoint: alive (backend=tmux window=crew:fm-w1)
+- digest: --- w2 ---
+- digest: endpoint: alive (backend=tmux window=crew:fm-w2)
+- snapshot w1: endpoint_exists={'target': 'crew:fm-w1', 'exists': True, 'agent_alive': 'not_checked', 'status': 'unknown', 'observed_at': '2026-11-12T19:09:51Z', 'freshness': 'fresh'}
+- snapshot w2: endpoint_exists={'target': 'crew:fm-w2', 'exists': True, 'agent_alive': 'not_checked', 'status': 'unknown', 'observed_at': '2026-11-12T19:09:51Z', 'freshness': 'fresh'}
+
+### B: tmux server restarts (old 50714:1794510584); new server recreates session 'crew' only
+  new server: 72032:1794510592
+  old server pid 50714 gone
+- crew-state w1: state: unknown · source: none · backend target gone: crew:fm-w1
+- digest: --- w1 ---
+- digest: endpoint: dead (backend=tmux window=crew:fm-w1)
+- digest: --- w2 ---
+- digest: endpoint: dead (backend=tmux window=crew:fm-w2)
+- snapshot w1: endpoint_exists={'target': 'crew:fm-w1', 'exists': False, 'agent_alive': 'not_checked', 'status': 'absent', 'observed_at': '2026-11-12T19:09:57Z', 'freshness': 'fresh'}
+- snapshot w2: endpoint_exists={'target': 'crew:fm-w2', 'exists': False, 'agent_alive': 'not_checked', 'status': 'absent', 'observed_at': '2026-11-12T19:09:57Z', 'freshness': 'fresh'}
+
+### C: new server also holds a same-named window crew:fm-w1 running a different claude
+  window keep cmd=zsh
+  window fm-w1 cmd=claude
+- crew-state w1: state: unknown · source: none · backend target gone: crew:fm-w1
+- digest: --- w1 ---
+- digest: endpoint: dead (backend=tmux window=crew:fm-w1)
+- digest: --- w2 ---
+- digest: endpoint: dead (backend=tmux window=crew:fm-w2)
+- snapshot w1: endpoint_exists={'target': 'crew:fm-w1', 'exists': False, 'agent_alive': 'not_checked', 'status': 'absent', 'observed_at': '2026-11-12T19:10:07Z', 'freshness': 'fresh'}
+- snapshot w2: endpoint_exists={'target': 'crew:fm-w2', 'exists': False, 'agent_alive': 'not_checked', 'status': 'absent', 'observed_at': '2026-11-12T19:10:07Z', 'freshness': 'fresh'}
+
+### D: legacy record (no server identity) against the same-named window keeps the unbound reading
+- crew-state w2: state: working · source: pane · harness busy (fm-spawn)
+- digest: --- w1 ---
+- digest: endpoint: dead (backend=tmux window=crew:fm-w1)
+- digest: --- w2 ---
+- digest: endpoint: alive (backend=tmux window=crew:fm-w2)
+- snapshot w1: endpoint_exists={'target': 'crew:fm-w1', 'exists': False, 'agent_alive': 'not_checked', 'status': 'absent', 'observed_at': '2026-11-12T19:10:20Z', 'freshness': 'fresh'}
+- snapshot w2: endpoint_exists={'target': 'crew:fm-w2', 'exists': True, 'agent_alive': 'not_checked', 'status': 'unknown', 'observed_at': '2026-11-12T19:10:20Z', 'freshness': 'fresh'}

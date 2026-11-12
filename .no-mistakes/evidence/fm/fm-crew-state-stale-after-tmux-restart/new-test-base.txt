@@ -1,0 +1,2 @@
+ok - a live worker on its unchanged recorded server reads alive and working
+not ok - a worker whose recorded server was replaced must read gone, got: state: working · source: pane · harness busy (fm-spawn)
