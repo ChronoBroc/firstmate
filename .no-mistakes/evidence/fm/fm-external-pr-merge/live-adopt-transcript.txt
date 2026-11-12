@@ -1,0 +1,177 @@
+
+=================== S0 baseline: base commit 95ee3c7f, outside PR with a hand-written stand-in record ===================
+$ /tmp/fm-base.1svQF9/bin/fm-pr-check.sh ext-1 https://github.com/cli/cli/pull/14846
+error: task metadata is unavailable
+[exit 1]
+# stand-in record:
+kind=ship
+project=/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.n6LfjJ/projects/cli
+$ /tmp/fm-base.1svQF9/bin/fm-pr-check.sh ext-1 https://github.com/cli/cli/pull/14846
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: named head cannot be verified: worktree missing
+[exit 1]
+# base has an adopt form?
+$ /tmp/fm-base.1svQF9/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/14846 --project /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.n6LfjJ/projects/cli
+error: invalid PR check request
+[exit 2]
+
+=================== S1 adopt a real open outside GitHub PR (target commit) ===================
+# live GitHub head:
+aaf296326df06cbafd523c12efa0112cdc53c10c
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/14846 --project /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.2IObkm/projects/cli
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+armed: state/ext-1.check.sh
+[exit 0]
+# task record:
+kind=adopted-pr
+project=/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.2IObkm/projects/cli
+pr=https://github.com/cli/cli/pull/14846
+pr_head=aaf296326df06cbafd523c12efa0112cdc53c10c
+# merge poll armed:
+ext-1.check.sh
+# backlog:
+## In flight
+- [ ] ext-1 - Merge the outside pull request (repo: cli) (kind: ship) (since 2026-11-12)
+
+## Queued
+## Done
+
+=================== S2 crew-state / session-start report the adopted record ===================
+$ {run-worktree}/bin/fm-crew-state.sh ext-1
+state: done · source: none · adopted pull request, no worker; merge through bin/fm-pr-merge.sh · pr=https://github.com/cli/cli/pull/14846
+[exit 0]
+112-count: 1
+113-tasks[1]{id,state,kind,repo,title,blocked_by,hold_kind,hold_reason}:
+114:  ext-1,in_flight,ship,cli,Merge the outside pull request,none,"-","-"
+115-
+116-held (captain- or time-gated; an in-flight item that is also held appears in both groups):
+--
+131---------------------------------------------------------------------------------
+132-
+133:--- ext-1 ---
+134-kind=adopted-pr
+135-project=/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.2IObkm/projects/cli
+--
+137-pr_head=aaf296326df06cbafd523c12efa0112cdc53c10c
+138-endpoint: none (adopted pull request: no worker, merged through bin/fm-pr-merge.sh)
+139:status tail: (no status file yet: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.2IObkm/state/ext-1.status)
+140-
+141-Orphan status logs (state/*.status without matching .meta)
+
+=================== S3 adopting the same PR again, and a fleet task re-registering it ===================
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/14846 --project /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.2IObkm/projects/cli
+error: task ext-1 already has a task record; adoption only creates a new record for a pull request no fleet worker opened, and a fleet task registers its own pull request with fm-pr-check.sh ext-1 <pr-url>
+[exit 1]
+
+=================== S4 adversarial refusals against real PRs ===================
+--- draft
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/14927 --project /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.68jj6C/projects/cli
+error: https://github.com/cli/cli/pull/14927 is a draft pull request; a draft cannot be merged - mark it ready for review and adopt it again
+[exit 1]
+# state after: no ext-1 record
+--- closed
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/15044 --project /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.EVgLH6/projects/cli
+error: https://github.com/cli/cli/pull/15044 is CLOSED, not open; only an open pull request can be adopted
+[exit 1]
+# state after: no ext-1 record
+--- owned-branch
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/14846 --project /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.sqGuuT/projects/cli
+error: https://github.com/cli/cli/pull/14846's head branch tidy-dev-prepare-team-pr-skill belongs to fleet task task-y1; register it through that task
+[exit 1]
+# state after: no ext-1 record
+--- nobacklog
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/14846 --project /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.nkyL0M/projects/cli
+error: adoption refused: backlog item ext-1 vanished before dispatch commit; file the work item ext-1 first
+[exit 1]
+# state after: no ext-1 record
+--- gitlab
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://gitlab.com/a/b/-/merge_requests/3 --project /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.kT4RoO/projects/cli
+error: adopting a pull request is supported only for GitHub pull requests; https://gitlab.com/a/b/-/merge_requests/3 is a gitlab URL
+[exit 1]
+# state after: no ext-1 record
+--- relative
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/14846 --project projects/cli
+error: --project must be an absolute path to the project's local clone
+[exit 1]
+# state after: no ext-1 record
+
+=================== S5 namesake branch: fork PR pad895:patch-1 while a same-project fleet task owns branch patch-1 ===================
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/15003 --project /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.UcxwbH/projects/cli
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  2 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+armed: state/ext-1.check.sh
+[exit 0]
+kind=adopted-pr
+project=/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.UcxwbH/projects/cli
+pr=https://github.com/cli/cli/pull/15003
+pr_head=38aef55a786788888bd90ddaeaac0bf6b0b98bb1
+
+=================== S6 teardown of an adopted record in a manual-backlog home, and after an interrupted (legacy-stamped) teardown ===================
+--- manual
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/14846 --project /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.vG36AP/projects/cli
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+armed: state/ext-1.check.sh
+[exit 0]
+$ {run-worktree}/bin/fm-teardown.sh ext-1
+error: refusing fleet lifecycle from inside a no-mistakes gate worktree (~/.no-mistakes/repos/af987dfc3730.git)
+[exit 3]
+# state after: ext-1.check.sh
+ext-1.meta
+ext-1.pr-poll
+ext-1.pr-poll-registration
+--- stamped
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/14846 --project /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.7xX5Y6/projects/cli
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+armed: state/ext-1.check.sh
+[exit 0]
+$ {run-worktree}/bin/fm-crew-state.sh ext-1
+state: done · source: none · adopted pull request, no worker; merge through bin/fm-pr-merge.sh · pr=https://github.com/cli/cli/pull/14846
+[exit 0]
+$ {run-worktree}/bin/fm-teardown.sh ext-1
+error: refusing fleet lifecycle from inside a no-mistakes gate worktree (~/.no-mistakes/repos/af987dfc3730.git)
+[exit 3]
+# state after: ext-1.check.sh
+ext-1.meta
+ext-1.pr-poll
+ext-1.pr-poll-registration
+
+=================== S7 a fleet record relabelled kind=adopted-pr (names a worktree) is refused ===================
+$ {run-worktree}/bin/fm-pr-check.sh ext-1 https://github.com/cli/cli/pull/14846
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: an adopted pull request record must name no worker (none of: worktree window terminal branch harness tasktmp backend home busy_gen endpoint_task_id, nor a spawn_gen other than a teardown legacy- stamp); a fleet task registers its pull request through its own named-head gate
+[exit 1]

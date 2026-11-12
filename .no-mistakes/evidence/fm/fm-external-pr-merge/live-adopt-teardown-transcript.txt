@@ -1,0 +1,69 @@
+=================== S6 teardown of an adopted record (lab home at physical path) ===================
+
+--- markdown-backlog
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/14846 --project /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.OF2oho/projects/cli
+armed: state/ext-1.check.sh
+[exit 0]
+$ {run-worktree}/bin/fm-teardown.sh ext-1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.OF2oho
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+cli: STUCK: on branch main, ? commits behind origin/trunk - needs attention
+teardown ext-1 complete (adopted pull request record: no worker, worktree, or endpoint)
+Backlog: ext-1 is closed in /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.OF2oho/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+# state after: no ext-1 files
+# backlog after:
+## In flight
+## Queued
+## Done
+- [x] ext-1 - Merge the outside pull request https://github.com/cli/cli/pull/14846 (repo: cli) (kind: ship) (merged 2026-11-12)
+
+--- manual-backlog
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/14846 --project /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.H5eUmX/projects/cli
+armed: state/ext-1.check.sh
+[exit 0]
+$ {run-worktree}/bin/fm-teardown.sh ext-1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.H5eUmX
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+cli: STUCK: on branch main, ? commits behind origin/trunk - needs attention
+teardown ext-1 complete (adopted pull request record: no worker, worktree, or endpoint)
+Backlog: ext-1 just finished (config/backlog-backend selects manual editing). Update /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.H5eUmX/data/backlog.md - move ext-1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+# state after: no ext-1 files
+# backlog after:
+## In flight
+
+## Queued
+- [ ] ext-1 - Merge the outside pull request (repo: cli) (kind: ship)
+
+## Done
+
+--- stamped-interrupted
+$ {run-worktree}/bin/fm-pr-check.sh adopt ext-1 https://github.com/cli/cli/pull/14846 --project /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.KiDRUn/projects/cli
+armed: state/ext-1.check.sh
+[exit 0]
+# record now:
+kind=adopted-pr
+project=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.KiDRUn/projects/cli
+pr=https://github.com/cli/cli/pull/14846
+pr_head=aaf296326df06cbafd523c12efa0112cdc53c10c
+spawn_gen=legacy-20261101T000000Z-4242
+$ {run-worktree}/bin/fm-crew-state.sh ext-1
+state: done · source: none · adopted pull request, no worker; merge through bin/fm-pr-merge.sh · pr=https://github.com/cli/cli/pull/14846
+[exit 0]
+$ {run-worktree}/bin/fm-teardown.sh ext-1
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.KiDRUn
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+cli: STUCK: on branch main, ? commits behind origin/trunk - needs attention
+teardown ext-1 complete (adopted pull request record: no worker, worktree, or endpoint)
+Backlog: ext-1 is closed in /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.KiDRUn/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+[exit 0]
+# state after: no ext-1 files
+# backlog after:
+## In flight
+## Queued
+## Done
+- [x] ext-1 - Merge the outside pull request https://github.com/cli/cli/pull/14846 (repo: cli) (kind: ship) (merged 2026-11-12)
