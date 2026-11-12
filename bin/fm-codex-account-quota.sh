@@ -4,6 +4,7 @@
 #
 # Usage:
 #   fm-codex-account-quota.sh [--model <model>] [--quota-scope <scope>]
+#   fm-codex-account-quota.sh --json
 #
 # The measured store is the one the launch selects:
 #   config/codex-account present  its path, or ~/.codex for `ordinary`, after
@@ -48,6 +49,11 @@
 #   Uncertainty names a failed or invalid read, quota-axi's own unknown or
 #   unavailable state and reason, a missing codex row, or no applicable scope.
 #   A missing quota-axi prints `error: quota-axi not installed` in the block.
+# --json prints the same reading as one JSON line instead, for
+# bin/fm-quota-axi-lib.sh to bind native Codex candidates to:
+#   {"account", "root", "snapshot": <the store's validated quota-axi JSON>}
+#   {"account", "root", "error": <why this store is not measured>}
+# with no scope filtering, so --model and --quota-scope do not apply.
 #   Readings exit 0. Exit 2 for a usage error or a config/codex-account that
 #   bin/fm-worker-account-lib.sh refuses, which is actionable, never measured
 #   around.
@@ -82,6 +88,7 @@ usage() {
 
 MODEL=
 QUOTA_SCOPE=
+JSON_OUT=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --model)
@@ -104,11 +111,13 @@ while [ "$#" -gt 0 ]; do
       [ -n "$QUOTA_SCOPE" ] || die "--quota-scope needs a value"
       shift
       ;;
+    --json) JSON_OUT=1; shift ;;
     -h|--help|help) usage; exit 0 ;;
     *) die "unexpected argument: $1" ;;
   esac
 done
 [ "$MODEL" != default ] || MODEL=
+[ -z "$JSON_OUT" ] || [ -z "$MODEL$QUOTA_SCOPE" ] || die "--json takes no --model or --quota-scope"
 
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
@@ -160,7 +169,11 @@ fi
 [ -n "$STORE" ] || STORE="${HOME:?HOME is required to measure the default Codex store}/.codex"
 
 if ! command -v quota-axi >/dev/null 2>&1; then
-  printf 'codex-account-quota:\n  error: quota-axi not installed\n'
+  if [ -n "$JSON_OUT" ]; then
+    jq -cn --arg account "$ACCOUNT" --arg root "$STORE" '{account: $account, root: $root, error: "quota-axi not installed"}'
+  else
+    printf 'codex-account-quota:\n  error: quota-axi not installed\n'
+  fi
   exit 0
 fi
 
@@ -179,6 +192,10 @@ if [ -n "$ERROR" ]; then
 else
   jq -c --arg account "$ACCOUNT" --arg root "$STORE" '{account: $account, root: $root, snapshot: .}' "$WORK/snapshot.json"
 fi > "$WORK/store.json" || die "cannot record the quota reading for $STORE"
+if [ -n "$JSON_OUT" ]; then
+  cat "$WORK/store.json" || die "cannot print the quota reading for $STORE"
+  exit 0
+fi
 
 jq -r --arg model "$MODEL" --arg qs "$QUOTA_SCOPE" '
   def flat: tostring | gsub("[\t\r\n]"; " ");

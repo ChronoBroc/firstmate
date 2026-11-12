@@ -57,7 +57,12 @@
 #   candidate binds to one row through quota_row in
 #   bin/fm-quota-axi-lib.sh, so a Pi lane such as openai-codex-work/...
 #   reads its own account's row and an expanded provider with no row for the
-#   candidate is unmeasured, never blocked), then the optional preferred_provider
+#   candidate is unmeasured, never blocked; when a candidate the selected rule
+#   or its default fallback evaluates is native Codex, that lib also adds the
+#   launch store's own profile-only codex row, so a `harness: codex` candidate
+#   is measured on the store its worker launches on, unmeasured when that store
+#   cannot be read; a rule with no native Codex candidate never reads it),
+#   then the optional preferred_provider
 #   family restriction before spendPriority ranks the remaining candidates.
 #   An eligible but wholly unrankable preferred family escalates rather than
 #   authorizing another family.
@@ -112,7 +117,8 @@
 #   Every outcome exits 0 so an intake is never blocked by this tool.
 #   Exit 2 only for a usage or configuration error (unreadable brief, an
 #   existing unreadable rules file, malformed rules, an unreadable or invalid
-#   credential source declaration, missing jq, an unknown provider, a selected
+#   credential source declaration, a config/codex-account that
+#   bin/fm-codex-account-quota.sh refuses, missing jq, an unknown provider, a selected
 #   non-typesafe provider without a model, an invalid TYPESAFE_BASE, or systemone
 #   without a valid base URL), which is actionable, never selected around.
 #   The capability probe is the one other exit: 1 for an unsupported source.
@@ -471,7 +477,7 @@ RESP_FILE=$(mktemp) || die "mktemp failed"
 QUOTA=$(mktemp) || { rm -f "$RESP_FILE"; die "mktemp failed"; }
 TASK_TEXT=$(mktemp) || { rm -f "$RESP_FILE" "$QUOTA"; die "mktemp failed"; }
 SEND_TEXT=$(mktemp) || { rm -f "$RESP_FILE" "$QUOTA" "$TASK_TEXT"; die "mktemp failed"; }
-trap 'rm -f "$RULES" "$RESP_FILE" "$QUOTA" "$TASK_TEXT" "$SEND_TEXT"' EXIT
+trap 'rm -f "$RULES" "$RESP_FILE" "$QUOTA" "$QUOTA.launch" "$TASK_TEXT" "$SEND_TEXT"' EXIT
 
 never_send_off() {
   resolver_off "$1; nothing sent"
@@ -641,7 +647,8 @@ else
 fi
 
 # ---- resolution: declared gates + quota evidence + argmax, all in jq ------------
-RESULT=$(jq -n --arg floor "$CONFIDENCE_FLOOR" --argjson lat "$LAT_MS" --arg none_criterion "$DEFAULT_WHEN" --argjson pmap "$PMAP" --argjson sq "$SQ" \
+resolve() {
+jq -n --arg floor "$CONFIDENCE_FLOOR" --argjson lat "$LAT_MS" --arg none_criterion "$DEFAULT_WHEN" --argjson pmap "$PMAP" --argjson sq "$SQ" \
   --slurpfile resp "$RESP_FILE" --slurpfile rules "$RULES" --slurpfile quota "$QUOTA" "$FM_QUOTA_ROW_JQ"'
   ($resp[0]) as $r | ($rules[0]) as $cfg | ($quota[0]) as $q | ($r.answers.rule) as $a |
   def profiles($v): if ($v | type) == "array" then $v elif ($v | type) == "object" then [$v] else [] end;
@@ -799,7 +806,18 @@ RESULT=$(jq -n --arg floor "$CONFIDENCE_FLOOR" --argjson lat "$LAT_MS" --arg non
            else {} end)
       end
     end
-  end') || emit_error "resolution failed"
+  end'
+}
+RESULT=$(resolve) || emit_error "resolution failed"
+if [ "$SQ" = false ] && jq -e 'any(.candidates[]?; .profile.harness == "codex")' <<<"$RESULT" >/dev/null; then
+  fm_quota_with_codex_launch_store < "$QUOTA" > "$QUOTA.launch"
+  case $? in
+    0) mv -f -- "$QUOTA.launch" "$QUOTA" ;;
+    2) rm -f -- "$QUOTA.launch"; die "config/codex-account is refused; the native Codex launch store cannot be measured" ;;
+    *) rm -f -- "$QUOTA.launch"; emit_error "the native Codex launch store's quota read failed" ;;
+  esac
+  RESULT=$(resolve) || emit_error "resolution failed"
+fi
 
 TEXT=$(jq -r '
   def flat: tostring | gsub("[\t\r\n]"; " ");

@@ -347,7 +347,29 @@ test_missing_quota_axi_is_reported() {
   pass "a missing quota-axi is reported in the block"
 }
 
+test_json_prints_the_store_reading_for_the_quota_lib() {
+  local out rc
+  new_case json
+  store "$CASE/pinned" 64 0.31
+  store "$CASE/ambient" 7 0.2
+  printf '%s\n' "$CASE/pinned" > "$HOME_DIR/config/codex-account"
+  out=$(run_tool --codex-home "$CASE/ambient" --json); rc=$?
+  expect_code 0 "$rc" "a --json reading exits 0: $out"
+  assert_equals "$CASE/pinned|$CASE/pinned|64|0.31" \
+    "$(printf '%s\n' "$out" | jq -r '[.account, .root, (.snapshot.providers[0].quotaSemantics.effectiveAvailability[0] | .effectivePercentRemaining, .selection.spendPriority)] | map(tostring) | join("|")')" \
+    "--json carries the pinned store's own snapshot"
+  reads_once
+  rm -f "$CASE/pinned/quota.json"
+  out=$(run_tool --codex-home "$CASE/ambient" --json); rc=$?
+  expect_code 0 "$rc" "an unreadable store is still a --json reading: $out"
+  assert_equals "quota-axi could not read this account" "$(printf '%s\n' "$out" | jq -r '.error')" "--json names why the store is unmeasured"
+  out=$(run_tool --json --model gpt-6-astra); rc=$?
+  expect_code 2 "$rc" "--json refuses scope filters: $out"
+  pass "--json prints the launch store's reading as one JSON record"
+}
+
 test_a_pinned_store_is_measured_over_the_ambient_one
+test_json_prints_the_store_reading_for_the_quota_lib
 test_an_ordinary_pin_is_measured_from_the_default_store
 test_without_a_tmux_server_the_callers_store_is_measured
 test_an_unpinned_tmux_home_measures_the_global_store
