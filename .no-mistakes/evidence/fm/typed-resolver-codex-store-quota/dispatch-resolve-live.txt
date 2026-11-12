@@ -1,0 +1,115 @@
+== R1 codex rule; shared snapshot codex 90% / claude 40%; pinned launch store has no login ==
+### R1 base (reproduce)
+config/codex-account: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/empty-pin
+dispatch-resolve:
+  status: clear
+  model: lab-mock   latency_ms: 0   tokens: 10/5
+  rule: rule_1 (Codex refactor work.)   confidence: 0.9
+  probabilities: rule_1=0.9 rule_2=0.08 default=0.02
+  note: rule matched
+  candidate: codex:gpt-5.5  provider=codex  scope=all_models  remaining=90%  spendPriority=0.9  runway=through_reset  -> eligible
+  candidate: claude:sonnet  provider=claude  scope=all_models  remaining=40%  spendPriority=0.4  runway=through_reset  -> eligible
+  profile: --harness 'codex' --model 'gpt-5.5'
+exit=0
+quota-axi calls:
+  shared-json
+
+### R1 change
+config/codex-account: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/empty-pin
+dispatch-resolve:
+  status: clear
+  model: lab-mock   latency_ms: 0   tokens: 10/5
+  rule: rule_1 (Codex refactor work.)   confidence: 0.9
+  probabilities: rule_1=0.9 rule_2=0.08 default=0.02
+  note: rule matched
+  note: 1 eligible candidate(s) unranked (codex)
+  candidate: codex:gpt-5.5  provider=codex  -> eligible, unranked: provider codex unmeasured (unknown): disclosed uncertainty
+  candidate: claude:sonnet  provider=claude  scope=all_models  remaining=40%  spendPriority=0.4  runway=through_reset  -> eligible
+  profile: --harness 'claude' --model 'sonnet'
+exit=0
+quota-axi calls:
+  shared-json
+  real: CODEX_HOME=/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/empty-pin --provider codex --profile-only --json
+
+== R2 codex rule; shared snapshot codex EXHAUSTED; pin 'ordinary' (real ~/.codex, profile-only) ==
+### R2 base
+config/codex-account: ordinary
+dispatch-resolve:
+  status: clear
+  model: lab-mock   latency_ms: 0   tokens: 10/5
+  rule: rule_1 (Codex refactor work.)   confidence: 0.9
+  probabilities: rule_1=0.9 rule_2=0.08 default=0.02
+  note: rule matched
+  candidate: codex:gpt-5.5  provider=codex  scope=all_models  remaining=0%  spendPriority=-  runway=exhausted_now  -> not eligible: runway exhausted_now at all_models
+  candidate: claude:sonnet  provider=claude  scope=all_models  remaining=40%  spendPriority=0.4  runway=through_reset  -> eligible
+  profile: --harness 'claude' --model 'sonnet'
+exit=0
+quota-axi calls:
+  shared-json
+
+### R2 change
+config/codex-account: ordinary
+dispatch-resolve:
+  status: clear
+  model: lab-mock   latency_ms: 0   tokens: 10/5
+  rule: rule_1 (Codex refactor work.)   confidence: 0.9
+  probabilities: rule_1=0.9 rule_2=0.08 default=0.02
+  note: rule matched
+  candidate: codex:gpt-5.5  provider=codex  scope=all_models  remaining=9%  spendPriority=-2.7371  runway=projected_exhaustion  -> eligible
+  candidate: claude:sonnet  provider=claude  scope=all_models  remaining=40%  spendPriority=0.4  runway=through_reset  -> eligible
+  profile: --harness 'claude' --model 'sonnet'
+exit=0
+quota-axi calls:
+  shared-json
+  real: CODEX_HOME=~/.codex --provider codex --profile-only --json
+
+== R3 unpinned; ambient CODEX_HOME = store with no login ==
+### R3 change
+config/codex-account: <absent>
+dispatch-resolve:
+  status: clear
+  model: lab-mock   latency_ms: 0   tokens: 10/5
+  rule: rule_1 (Codex refactor work.)   confidence: 0.9
+  probabilities: rule_1=0.9 rule_2=0.08 default=0.02
+  note: rule matched
+  note: 1 eligible candidate(s) unranked (codex)
+  candidate: codex:gpt-5.5  provider=codex  -> eligible, unranked: provider codex unmeasured (unknown): disclosed uncertainty
+  candidate: claude:sonnet  provider=claude  scope=all_models  remaining=40%  spendPriority=0.4  runway=through_reset  -> eligible
+  profile: --harness 'claude' --model 'sonnet'
+exit=0
+quota-axi calls:
+  shared-json
+  real: CODEX_HOME=/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/empty-ambient --provider codex --profile-only --json
+
+== R4 refused pin (relative) on a codex rule ==
+### R4 change
+config/codex-account: not a store
+error: config/codex-account must hold 'ordinary' or one absolute path on a single line with no control characters: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/config/codex-account
+error: config/codex-account is refused; the native Codex launch store cannot be measured
+exit=2
+quota-axi calls:
+  shared-json
+
+== R5 adversarial (review R1): Claude-only rule matched, other rule holds Codex, pin names removed dir ==
+### R5 change
+config/codex-account: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/removed
+dispatch-resolve:
+  status: clear
+  model: lab-mock   latency_ms: 0   tokens: 10/5
+  rule: rule_2 (Documentation edits.)   confidence: 0.9
+  probabilities: rule_1=0.08 rule_2=0.9 default=0.02
+  note: rule matched
+  candidate: claude:sonnet  provider=claude  scope=all_models  remaining=40%  spendPriority=0.4  runway=through_reset  -> eligible
+  profile: --harness 'claude' --model 'sonnet'
+exit=0
+quota-axi calls:
+  shared-json
+
+### R5 contrast: codex rule with same removed pin
+config/codex-account: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/removed
+error: config/codex-account must name a readable, searchable existing directory (ordinary means ~/.codex with CODEX_HOME unset): /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/config/codex-account -> /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/removed
+error: config/codex-account is refused; the native Codex launch store cannot be measured
+exit=2
+quota-axi calls:
+  shared-json
+

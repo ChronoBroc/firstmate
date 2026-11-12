@@ -1,0 +1,64 @@
+== S1 pinned store with no login; shared snapshot says codex 90% ==
+### S1 base (reproduce)  (base)
+config/codex-account: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/empty-pin
+codex gpt-5.5
+exit=0
+
+### S1 change  (change)
+config/codex-account: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/empty-pin
+claude sonnet
+exit=0
+
+store reading the chooser bound to:
+### S1 store read  (change)
+config/codex-account: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/empty-pin
+{"account":"/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/empty-pin","root":"/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/empty-pin","snapshot":{"generatedAt":"2026-11-12T22:46:50.231Z","schemaVersion":5,"providers":[{"provider":"codex","windows":[],"state":{"status":"unavailable","stale":false,"error":"Codex profile credentials missing"},"accountKeys":["codex-home"],"quotaSemantics":{"status":"unknown","effectiveAvailability":[]},"notSetUp":true}]}}
+exit=0
+
+== S2 unpinned, ambient CODEX_HOME = store with no login ==
+### S2 base  (base)
+config/codex-account: <absent>
+codex gpt-5.5
+exit=0
+
+### S2 change  (change)
+config/codex-account: <absent>
+claude sonnet
+exit=0
+
+== S3 pin 'ordinary' -> real ~/.codex read profile-only (no refresh) ==
+### S3 store read  (change)
+config/codex-account: ordinary
+codex-account-quota:
+  row: ordinary  root=~/.codex  scope=all_models  status=known  remaining=9%  spendPriority=-2.7376  runway=projected_exhaustion  usableRunwaySeconds=18970  confidence=established
+exit=0
+
+### S3 change  (change)
+config/codex-account: ordinary
+codex gpt-5.5
+exit=0
+
+== S4 refused pin (relative path) ==
+### S4 change  (change)
+config/codex-account: not a store
+error: config/codex-account must hold 'ordinary' or one absolute path on a single line with no control characters: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/config/codex-account
+exit=2
+
+== S5 no codex candidate + pin to removed dir: no store read ==
+### S5 change, codex not listed  (change)
+config/codex-account: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/removed
+claude sonnet
+exit=0
+
+### S5 contrast, codex listed  (change)
+config/codex-account: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/removed
+error: config/codex-account must name a readable, searchable existing directory (ordinary means ~/.codex with CODEX_HOME unset): /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/config/codex-account -> /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.gZQSDQ/stores/removed
+exit=2
+
+== S3b shared snapshot says codex EXHAUSTED; pin 'ordinary' real ~/.codex store has headroom ==
+### base
+claude sonnet
+exit=0
+### change
+codex gpt-5.5
+exit=0
