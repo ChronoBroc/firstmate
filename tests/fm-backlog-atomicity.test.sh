@@ -1402,6 +1402,39 @@ test_teardown_restores_a_brief_deleted_from_the_evidence_directory() {
   pass "teardown restores a brief a worker's tool deleted and records it as finished"
 }
 
+# A restore that runs out of space part way must not leave a truncated
+# launch-brief.md: a retry would keep it, and a brief that no longer matches
+# the start of launch-brief.md slips past the previous-launch guard.
+test_failed_restore_leaves_no_partial_launch_brief() {
+  local dir out
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-restore-partial.XXXXXX")
+  mkdir -p "$dir/data/t" "$dir/state"
+  printf 'FULL-INSTRUCTIONS line one\nline two\n' > "$dir/state/t.brief"
+  out=$(
+    # shellcheck source=bin/fm-task-brief-lib.sh
+    . "$ROOT/bin/fm-task-brief-lib.sh"
+    calls=0
+    cp() {
+      calls=$((calls + 1))
+      if [ "$calls" -eq 2 ]; then
+        head -c 5 "$2" > "$3"
+        return 1
+      fi
+      command cp "$@"
+    }
+    fm_task_brief_restore "$dir/data" "$dir/state" t 2>&1
+  ) && fail "restore reported success after its copy failed: $out"
+  assert_absent "$dir/data/t/launch-brief.md" "a failed restore left a partial launch-brief.md"
+  assert_absent "$dir/data/t/brief.md" "a failed restore published brief.md"
+  out=$(. "$ROOT/bin/fm-task-brief-lib.sh"; fm_task_brief_restore "$dir/data" "$dir/state" t 2>&1) \
+    || fail "retry after the failed restore failed: $out"
+  cmp -s "$dir/state/t.brief" "$dir/data/t/launch-brief.md" || fail "retry did not restore the full launch-brief.md"
+  cmp -s "$dir/state/t.brief" "$dir/data/t/brief.md" || fail "retry did not restore the full brief.md"
+  [ -z "$(find "$dir/data/t" -name '.*restore*')" ] || fail "a restore left temporary files behind"
+  rm -rf "$dir"
+  pass "a restore that fails part way leaves no partial launch-brief.md for a retry to keep"
+}
+
 test_retained_task_requires_confirmed_continuation() {
   local kind=$1 wipe=${2:-} case_dir home id out
   local -a flags=(--mode no-mistakes --yolo off)
@@ -3285,6 +3318,7 @@ test_unrun_launch_brief_can_be_retried
 test_retained_task_requires_confirmed_continuation ship
 test_retained_task_requires_confirmed_continuation scout
 test_retained_task_requires_confirmed_continuation ship wiped
+test_failed_restore_leaves_no_partial_launch_brief
 test_retained_task_requires_confirmed_continuation scout wiped
 test_dispatch_refuses_to_commit_without_a_published_record
 test_dispatch_leaves_no_record_when_the_transition_fails

@@ -53,19 +53,21 @@ fm_task_brief_protect() {  # <data-dir> <state-dir> <id>
 # from (the caller's own missing-brief refusal then applies), and non-zero when
 # a restore was needed but failed.
 fm_task_brief_restore() {  # <data-dir> <state-dir> <id>
-  local brief="$1/$3/brief.md" copy tmp launch
+  local brief="$1/$3/brief.md" copy tmp launch launch_tmp
   copy=$(fm_task_brief_copy_path "$2" "$3")
   { [ -e "$brief" ] || [ -L "$brief" ]; } && return 0
   [ -f "$copy" ] && [ ! -L "$copy" ] || return 0
   tmp="$1/$3/.brief.md.restore.${BASHPID:-$$}"
   launch="$1/$3/launch-brief.md"
+  launch_tmp="$1/$3/.launch-brief.md.restore.${BASHPID:-$$}"
   if mkdir -p -- "$1/$3" && cp -- "$copy" "$tmp" && chmod 0644 "$tmp" &&
-    { [ -e "$launch" ] || [ -L "$launch" ] || cp -- "$tmp" "$launch"; } &&
+    { [ -e "$launch" ] || [ -L "$launch" ] ||
+      { cp -- "$tmp" "$launch_tmp" && mv -f -- "$launch_tmp" "$launch"; }; } &&
     mv -f -- "$tmp" "$brief"; then
     echo "warning: task $3's instructions were missing from $brief (its evidence directory was emptied); restored them from $copy" >&2
     return 0
   fi
-  rm -f -- "$tmp" 2>/dev/null || true
+  rm -f -- "$tmp" "$launch_tmp" 2>/dev/null || true
   echo "error: task $3's instructions are missing from $brief and could not be restored from $copy" >&2
   return 1
 }
