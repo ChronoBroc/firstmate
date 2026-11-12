@@ -241,6 +241,8 @@
 #   landed-work checks. Every other windowless record, including one with a
 #   spawn_gen, a non-tmux backend, or an ambiguous field, still faces the
 #   validator and refuses.
+#   An adopted pull request record (bin/fm-pr-check.sh adopt) never had a
+#   worker, worktree, or endpoint, so it takes that same windowless path.
 #
 # Transient / stale worktree git lock recovery (teardown-lock-race): a crew process
 # killed mid-git-operation can leave a .git/worktrees/<wt>/index.lock (or, for a
@@ -701,6 +703,7 @@ TEARDOWN_BACKLOG_APPLIES=0
 TEARDOWN_BACKLOG_SKIP_REASON=
 TEARDOWN_WINDOWLESS=0
 TEARDOWN_WINDOWLESS_SHAPE=0
+TEARDOWN_ADOPTED=0
 TEARDOWN_WINDOW_COUNT=$(LC_ALL=C grep -c '^window=' "$META" 2>/dev/null || true)
 TEARDOWN_BACKEND_COUNT=$(LC_ALL=C grep -c '^backend=' "$META" 2>/dev/null || true)
 case "$TEARDOWN_WINDOW_COUNT:$(fm_meta_get "$META" window)" in
@@ -720,6 +723,13 @@ case "$TEARDOWN_WINDOW_COUNT:$(fm_meta_get "$META" window)" in
             TEARDOWN_WINDOWLESS_SHAPE=1
           fi
           rm -f "$TEARDOWN_SHAPE_META"
+        fi
+        # An adopted pull request record never had a worker, worktree, or
+        # endpoint, so it is windowless by construction (see the header).
+        if fm_pr_adopted_record "$META"; then
+          TEARDOWN_WINDOWLESS_SHAPE=1
+          TEARDOWN_WINDOWLESS=1
+          TEARDOWN_ADOPTED=1
         fi
         ;;
     esac
@@ -4296,6 +4306,8 @@ if [ -d "$STATE" ]; then
 fi
 if [ "$TEARDOWN_POOL_SLOT_LOST" = 1 ]; then
   echo "teardown $ID finished its cleanup and removed its task record, but a returned pool slot did not come back clean (see the warning above); clear those paths so the pool can reuse the slot" >&2
+elif [ "$TEARDOWN_ADOPTED" = 1 ]; then
+  echo "teardown $ID complete (adopted pull request record: no worker, worktree, or endpoint)"
 elif [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT, legacy record accepted without spawn_gen: endpoint $TEARDOWN_LEGACY_ENDPOINT, incarnation $TEARDOWN_META_SPAWN_GEN)"
 elif teardown_owns_worktree; then

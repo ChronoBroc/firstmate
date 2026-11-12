@@ -225,6 +225,13 @@ case "${1:-} ${2:-}" in
         fi
         exit 0
         ;;
+      *headRefName*)
+        # The adoption read: state, draft, head, and head branch in one view.
+        jq -c '{state, isDraft, headRefOid, headRefName: (.headRefName // "outside-contributor"),
+          headRepository: (.headRepository // {name: "repo"}),
+          headRepositoryOwner: (.headRepositoryOwner // {login: "example"})}' "$FM_TEST_GH_VIEW_JSON"
+        exit 0
+        ;;
       *headRefOid*)
         cat "$FM_TEST_GH_HEAD"
         exit 0
@@ -1800,6 +1807,289 @@ test_extra_merge_args_forwarded() {
     > "$case_dir/stdout" 2> "$case_dir/stderr" || fail "extra-args-attended: attended override should merge"
   assert_logged_gh_merge "$case_dir" 15 example/repo --squash --delete-branch
   pass "fm-pr-merge refuses branch deletion unless --attended-override is passed"
+}
+
+# An externally opened GitHub pull request, adopted into a worker-less record.
+ADOPT_URL=https://github.com/example/repo/pull/176
+ADOPT_HEAD=1761761761761761761761761761761761761761
+
+# A case with no task record, a project clone, and a queued backlog row for
+# the adoption's task id. Echoes the case directory. Args: name [head]
+make_adopt_case() {
+  local case_dir
+  case_dir=$(make_case "$1")
+  rm -f "$case_dir/state/task-x1.meta"
+  git init -q "$case_dir/project"
+  git -C "$case_dir/project" remote add origin https://github.com/Example/repo.git
+  printf '%s\n' '## In flight' '' '## Queued' \
+    "- [ ] ext-176 - Merge the outside pull request (repo: repo) (kind: ship)" '' '## Done' \
+    > "$case_dir/home/data/backlog.md"
+  add_gh_mocks "$case_dir" "${2:-$ADOPT_HEAD}"
+  : > "$case_dir/gh-axi.log"
+  printf '%s\n' "$case_dir"
+}
+
+# fm-pr-check.sh with the same scratch home and mocks run_pr_merge uses.
+run_pr_check_in_case() {
+  local case_dir=$1
+  shift
+  FM_ROOT_OVERRIDE="$ROOT" \
+  FM_HOME="$case_dir/home" \
+  FM_STATE_OVERRIDE="$case_dir/state" \
+  FM_TEST_GH_LOG="$case_dir/gh.log" \
+  FM_TEST_GH_AXI_LOG="$case_dir/gh-axi.log" \
+  FM_TEST_GH_VIEW_JSON="$case_dir/github-view.json" \
+  FM_TEST_GH_HEAD="$case_dir/github-head" \
+  HOME="$case_dir/user-home" \
+  PATH="$case_dir/fakebin:$PATH" \
+    "$ROOT/bin/fm-pr-check.sh" "$@"
+}
+
+adopt_in_case() {
+  local case_dir=$1
+  run_pr_check_in_case "$case_dir" adopt ext-176 "$ADOPT_URL" --project "$case_dir/project"
+}
+
+test_adopted_pr_merges_through_the_guarded_path() {
+  local case_dir rc
+  case_dir=$(make_adopt_case adopt-merge)
+
+  set +e
+  run_pr_merge "$case_dir" ext-176 "$ADOPT_URL" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "adopt-merge: a pull request with no task record must still refuse"
+  assert_grep 'task metadata is unavailable' "$case_dir/stderr" \
+    "adopt-merge: the unadopted refusal changed"
+
+  set +e
+  adopt_in_case "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 0 "$rc" "adopt-merge: adoption should succeed ($(cat "$case_dir/stderr"))"
+  assert_grep "kind=adopted-pr" "$case_dir/state/ext-176.meta" "adopt-merge: no adopted kind"
+  assert_grep "pr=$ADOPT_URL" "$case_dir/state/ext-176.meta" "adopt-merge: pr= was not recorded"
+  assert_grep "pr_head=$ADOPT_HEAD" "$case_dir/state/ext-176.meta" \
+    "adopt-merge: the forge's head was not recorded"
+  assert_no_regex '^worktree=' "$case_dir/state/ext-176.meta" "adopt-merge: a worker field was written"
+  [ -f "$case_dir/state/ext-176.check.sh" ] || fail "adopt-merge: no merge poll was armed"
+  sed -n '/^## In flight/,/^## Queued/p' "$case_dir/home/data/backlog.md" | grep -q 'ext-176' \
+    || fail "adopt-merge: the backlog row was not moved In flight"
+
+  set +e
+  run_pr_merge "$case_dir" ext-176 "$ADOPT_URL" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 0 "$rc" "adopt-merge: the guarded merge should succeed ($(cat "$case_dir/stderr"))"
+  assert_logged_gh_merge "$case_dir" 176 example/repo --squash
+  assert_grep "is merged" "$case_dir/stdout" "adopt-merge: the merge was not proven"
+  [ -f "$case_dir/state/ext-176.merge-authority" ] || fail "adopt-merge: merge authority was not recorded"
+
+  set +e
+  FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$case_dir/home" FM_STATE_OVERRIDE="$case_dir/state" \
+    HOME="$case_dir/user-home" PATH="$case_dir/fakebin:$PATH" \
+    "$ROOT/bin/fm-teardown.sh" ext-176 > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 0 "$rc" "adopt-merge: cleanup should succeed ($(cat "$case_dir/stderr"))"
+  assert_grep 'adopted pull request record' "$case_dir/stdout" "adopt-merge: cleanup did not name the record"
+  assert_absent "$case_dir/state/ext-176.meta" "adopt-merge: cleanup left the record"
+  sed -n '/^## Done/,$p' "$case_dir/home/data/backlog.md" | grep -q "ext-176.*$ADOPT_URL" \
+    || fail "adopt-merge: the backlog row was not closed with the pull request"
+  pass "fm-pr-check.sh adopt registers an outside GitHub pull request that fm-pr-merge.sh merges and teardown closes"
+}
+
+test_adoption_refusals_record_nothing() {
+  local case_dir rc name
+  for name in existing-record owned-url owned-branch draft closed unreadable no-row gitlab relative-project; do
+    case_dir=$(make_adopt_case "adopt-refuse-$name")
+    case "$name" in
+      existing-record)
+        fm_write_meta "$case_dir/state/ext-176.meta" "window=fm-ext-176" "worktree=$case_dir/wt" \
+          "project=$case_dir/project" "kind=ship" "mode=no-mistakes"
+        cp "$case_dir/state/ext-176.meta" "$case_dir/meta-before"
+        ;;
+      owned-url)
+        fm_write_meta "$case_dir/state/task-y1.meta" "worktree=$case_dir/wt" "kind=ship" "pr=$ADOPT_URL"
+        ;;
+      owned-branch)
+        fm_write_meta "$case_dir/state/task-y1.meta" "worktree=$case_dir/wt" "kind=ship" "branch=fm/fleet-work" \
+          "project=$case_dir/project"
+        jq -c '.headRefName = "fm/fleet-work"' "$case_dir/github-view.json" > "$case_dir/v" \
+          && mv "$case_dir/v" "$case_dir/github-view.json"
+        ;;
+      draft)
+        jq -c '.isDraft = true' "$case_dir/github-view.json" > "$case_dir/v" && mv "$case_dir/v" "$case_dir/github-view.json"
+        ;;
+      closed)
+        jq -c '.state = "CLOSED"' "$case_dir/github-view.json" > "$case_dir/v" && mv "$case_dir/v" "$case_dir/github-view.json"
+        ;;
+      unreadable)
+        jq -c '.headRefOid = "not-a-sha"' "$case_dir/github-view.json" > "$case_dir/v" && mv "$case_dir/v" "$case_dir/github-view.json"
+        ;;
+      no-row)
+        printf '%s\n' '## In flight' '' '## Queued' '' '## Done' > "$case_dir/home/data/backlog.md"
+        ;;
+    esac
+    set +e
+    case "$name" in
+      gitlab) run_pr_check_in_case "$case_dir" adopt ext-176 "$MR_URL" --project "$case_dir/project" ;;
+      relative-project) run_pr_check_in_case "$case_dir" adopt ext-176 "$ADOPT_URL" --project project ;;
+      *) adopt_in_case "$case_dir" ;;
+    esac > "$case_dir/stdout" 2> "$case_dir/stderr"
+    rc=$?
+    set -e
+    expect_code 1 "$rc" "adopt-refuse-$name: adoption must refuse"
+    case "$name" in
+      existing-record)
+        assert_grep 'already has a task record' "$case_dir/stderr" "adopt-refuse-$name: wrong reason"
+        cmp -s "$case_dir/meta-before" "$case_dir/state/ext-176.meta" \
+          || fail "adopt-refuse-$name: the fleet task's record was changed"
+        ;;
+      owned-url) assert_grep 'already recorded by task task-y1' "$case_dir/stderr" "adopt-refuse-$name: wrong reason" ;;
+      owned-branch) assert_grep 'belongs to fleet task task-y1' "$case_dir/stderr" "adopt-refuse-$name: wrong reason" ;;
+      draft) assert_grep 'is a draft pull request' "$case_dir/stderr" "adopt-refuse-$name: wrong reason" ;;
+      closed) assert_grep 'is CLOSED, not open' "$case_dir/stderr" "adopt-refuse-$name: wrong reason" ;;
+      unreadable) assert_grep 'head cannot be proven from the forge' "$case_dir/stderr" "adopt-refuse-$name: wrong reason" ;;
+      no-row) assert_grep 'file the work item ext-176 first' "$case_dir/stderr" "adopt-refuse-$name: wrong reason" ;;
+      gitlab) assert_grep 'supported only for GitHub' "$case_dir/stderr" "adopt-refuse-$name: wrong reason" ;;
+      relative-project) assert_grep 'must be an absolute path' "$case_dir/stderr" "adopt-refuse-$name: wrong reason" ;;
+    esac
+    [ "$name" = existing-record ] || assert_absent "$case_dir/state/ext-176.meta" \
+      "adopt-refuse-$name: a task record was left behind"
+    assert_absent "$case_dir/state/ext-176.check.sh" "adopt-refuse-$name: a merge poll was armed"
+    assert_no_grep 'pr merge' "$case_dir/gh.log" "adopt-refuse-$name: a merge ran"
+  done
+  pass "fm-pr-check.sh adopt refuses fleet-owned, draft, closed, unprovable, unfiled, and non-GitHub pull requests and records nothing"
+}
+
+# Branch ownership is repository-scoped: a task in another project, or an
+# outside contributor's fork, using a fleet branch name does not own the PR.
+test_adoption_ignores_branch_namesakes_outside_the_repository() {
+  local case_dir rc name
+  for name in other-project fork; do
+    case_dir=$(make_adopt_case "adopt-namesake-$name")
+    jq -c '.headRefName = "fm/fleet-work"' "$case_dir/github-view.json" > "$case_dir/v" \
+      && mv "$case_dir/v" "$case_dir/github-view.json"
+    case "$name" in
+      other-project)
+        git init -q "$case_dir/other-project"
+        git -C "$case_dir/other-project" remote add origin https://github.com/other/thing.git
+        fm_write_meta "$case_dir/state/task-y1.meta" "worktree=$case_dir/wt" "kind=ship" \
+          "branch=fm/fleet-work" "project=$case_dir/other-project"
+        ;;
+      fork)
+        fm_write_meta "$case_dir/state/task-y1.meta" "worktree=$case_dir/wt" "kind=ship" \
+          "branch=fm/fleet-work" "project=$case_dir/project"
+        jq -c '.headRepositoryOwner = {login: "contributor"}' "$case_dir/github-view.json" > "$case_dir/v" \
+          && mv "$case_dir/v" "$case_dir/github-view.json"
+        ;;
+    esac
+    set +e
+    adopt_in_case "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+    rc=$?
+    set -e
+    expect_code 0 "$rc" "adopt-namesake-$name: adoption should succeed ($(cat "$case_dir/stderr"))"
+    assert_grep "pr=$ADOPT_URL" "$case_dir/state/ext-176.meta" "adopt-namesake-$name: pr= was not recorded"
+  done
+  pass "fm-pr-check.sh adopt ignores a fleet branch name used in another repository"
+}
+
+# An adopted record has no endpoint, so teardown closes it whether or not the
+# home transitions its backlog, and after an interrupted teardown left its
+# legacy incarnation stamp on the record.
+test_adopted_record_teardown_without_backlog_or_after_interruption() {
+  local case_dir rc name
+  for name in manual-backlog stamped; do
+    case_dir=$(make_adopt_case "adopt-teardown-$name")
+    [ "$name" != manual-backlog ] || printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+    set +e
+    adopt_in_case "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+    rc=$?
+    set -e
+    expect_code 0 "$rc" "adopt-teardown-$name: adoption should succeed ($(cat "$case_dir/stderr"))"
+    if [ "$name" = stamped ]; then
+      printf '%s\n' "spawn_gen=legacy-20261101T000000Z-4242" >> "$case_dir/state/ext-176.meta"
+      FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$case_dir/home" FM_STATE_OVERRIDE="$case_dir/state" \
+        HOME="$case_dir/user-home" PATH="$case_dir/fakebin:$PATH" \
+        "$ROOT/bin/fm-crew-state.sh" ext-176 > "$case_dir/stdout" 2> "$case_dir/stderr" || true
+      assert_grep 'state: done' "$case_dir/stdout" "adopt-teardown-$name: the stamped record is no longer adopted"
+    fi
+    set +e
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$case_dir/home" FM_STATE_OVERRIDE="$case_dir/state" \
+      HOME="$case_dir/user-home" PATH="$case_dir/fakebin:$PATH" \
+      "$ROOT/bin/fm-teardown.sh" ext-176 > "$case_dir/stdout" 2> "$case_dir/stderr"
+    rc=$?
+    set -e
+    expect_code 0 "$rc" "adopt-teardown-$name: cleanup should succeed ($(cat "$case_dir/stderr"))"
+    assert_grep 'adopted pull request record' "$case_dir/stdout" "adopt-teardown-$name: cleanup did not name the record"
+    assert_absent "$case_dir/state/ext-176.meta" "adopt-teardown-$name: cleanup left the record"
+  done
+  pass "teardown closes an adopted record in a manual-backlog home and after an interrupted teardown"
+}
+
+# A fleet ship record relabelled as adopted still names its worker, so neither
+# registration nor the merge accepts it in place of its named-head gate.
+test_fleet_record_cannot_claim_to_be_adopted() {
+  local case_dir rc
+  case_dir=$(make_adopt_case adopt-claimed)
+  fm_git_init_commit "$case_dir/unpushed"
+  fm_write_meta "$case_dir/state/ext-176.meta" "window=fm-ext-176" "worktree=$case_dir/unpushed" \
+    "project=$case_dir/project" "kind=adopted-pr" "mode=no-mistakes"
+  set +e
+  run_pr_check_in_case "$case_dir" ext-176 "$ADOPT_URL" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "adopt-claimed: registration must refuse"
+  assert_grep 'must name no worker' "$case_dir/stderr" "adopt-claimed: registration gave the wrong reason"
+  assert_absent "$case_dir/state/ext-176.check.sh" "adopt-claimed: a merge poll was armed"
+  set +e
+  run_pr_merge "$case_dir" ext-176 "$ADOPT_URL" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "adopt-claimed: the merge must refuse"
+  assert_grep 'must name no worker' "$case_dir/stderr" "adopt-claimed: the merge gave the wrong reason"
+  assert_no_grep 'pr merge' "$case_dir/gh.log" "adopt-claimed: gh pr merge ran"
+  pass "a fleet record labelled adopted keeps its named-head refusal at registration and merge"
+}
+
+test_adopted_pr_keeps_every_merge_guard() {
+  local case_dir rc name other
+  other=2222222222222222222222222222222222222222
+  for name in red missing-required draft expected-head; do
+    case_dir=$(make_adopt_case "adopt-guard-$name")
+    adopt_in_case "$case_dir" > /dev/null 2>&1 || fail "adopt-guard-$name: adoption failed"
+    case "$name" in
+      red) write_github_red_json "$case_dir" "$ADOPT_HEAD" ci ;;
+      missing-required) write_github_required "$case_dir" classic:required-ci ;;
+      draft) jq -c '.isDraft = true' "$case_dir/github-view.json" > "$case_dir/v" && mv "$case_dir/v" "$case_dir/github-view.json" ;;
+    esac
+    set +e
+    if [ "$name" = expected-head ]; then
+      run_pr_merge "$case_dir" ext-176 "$ADOPT_URL" --expected-head "$other"
+    else
+      run_pr_merge "$case_dir" ext-176 "$ADOPT_URL"
+    fi > "$case_dir/stdout" 2> "$case_dir/stderr"
+    rc=$?
+    set -e
+    expect_code 1 "$rc" "adopt-guard-$name: the merge must refuse"
+    assert_no_grep 'pr merge' "$case_dir/gh.log" "adopt-guard-$name: gh pr merge ran"
+    case "$name" in
+      expected-head) assert_grep "not the expected head $other" "$case_dir/stderr" "adopt-guard-$name: wrong reason" ;;
+      draft) assert_grep 'draft' "$case_dir/stderr" "adopt-guard-$name: wrong reason" ;;
+      missing-required) assert_grep 'required-ci' "$case_dir/stderr" "adopt-guard-$name: wrong reason" ;;
+    esac
+  done
+  case_dir=$(make_adopt_case adopt-guard-waived)
+  adopt_in_case "$case_dir" > /dev/null 2>&1 || fail "adopt-guard-waived: adoption failed"
+  write_github_red_json "$case_dir" "$ADOPT_HEAD" flaky
+  set +e
+  run_pr_merge "$case_dir" ext-176 "$ADOPT_URL" --allow-red flaky > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 0 "$rc" "adopt-guard-waived: a named waiver should merge ($(cat "$case_dir/stderr"))"
+  assert_logged_gh_merge "$case_dir" 176 example/repo --squash
+  pass "an adopted pull request keeps the red, required-check, draft, expected-head, and named-waiver merge rules"
 }
 
 test_missing_meta_refuses_before_merge() {
@@ -3578,6 +3868,12 @@ test_github_verified_merge_requires_poll_recording
 test_github_queued_outcome_is_verified
 test_github_queue_required_refusal_names_retry_flags
 test_extra_merge_args_forwarded
+test_adopted_pr_merges_through_the_guarded_path
+test_adoption_refusals_record_nothing
+test_adoption_ignores_branch_namesakes_outside_the_repository
+test_adopted_record_teardown_without_backlog_or_after_interruption
+test_fleet_record_cannot_claim_to_be_adopted
+test_adopted_pr_keeps_every_merge_guard
 test_missing_meta_refuses_before_merge
 test_malformed_url_refuses_before_merge
 test_help_prints_usage_and_exits_zero

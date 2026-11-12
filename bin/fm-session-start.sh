@@ -367,6 +367,8 @@ PRIMARY_HARNESS=$("$SCRIPT_DIR/fm-harness.sh" 2>/dev/null || printf unknown)
 . "$SCRIPT_DIR/fm-backend.sh"
 # shellcheck source=bin/fm-tasks-axi-lib.sh
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+# shellcheck source=bin/fm-pr-lib.sh
+. "$SCRIPT_DIR/fm-pr-lib.sh"
 # shellcheck source=bin/fm-public-followup-lib.sh
 . "$SCRIPT_DIR/fm-public-followup-lib.sh"
 # shellcheck source=bin/fm-trace-context-lib.sh
@@ -951,6 +953,8 @@ for meta in "$STATE"/*.meta; do
     else
       printf 'endpoint: dead (backend=%s window=%s)\n' "$backend" "$window"
     fi
+  elif fm_pr_adopted_record "$meta"; then
+    printf 'endpoint: none (adopted pull request: no worker, merged through bin/fm-pr-merge.sh)\n'
   else
     printf 'endpoint: unknown (no window recorded)\n'
   fi
