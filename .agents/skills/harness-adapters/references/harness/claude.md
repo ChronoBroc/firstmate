@@ -9,7 +9,7 @@ These command-line and terminal facts apply to pane-backed sessions; for T3 Code
 | Fact | Value |
 |---|---|
 | Busy | Owned hooks: `UserPromptSubmit` opens while `Stop`, `StopFailure`, and `SessionEnd` close; a secondmate gets no `Stop` busy hook, because its home's tracked Stop guard is its only Stop writer, unless that guard predates `.fm-busy-stop` and the launch keeps the `Stop` idle hook (`../../../docs/turnend-guard.md` owns that); manual interrupt emits no hook, so control reports delivered keys and live endpoint only, publishes no idle event or cancellation claim, and usually leaves `claude-hook` busy. |
-| Exit | `/exit`. |
+| Exit | `/exit`; with a background shell still running it opens a picker whose Enter stops that shell before exiting (verified on 2.1.322), so `fm-control` exit refuses there; never confirm it with Enter, and Escape cancels it. |
 | Interrupt | Single Escape. |
 | Skill | `/<skill>`, for example `/no-mistakes`. |
 | Model | `--model <model>`; discover through the interactive `/model` picker, with alias or full-name shape documented by `claude --help`. |
@@ -46,6 +46,8 @@ Firstmate cannot move a selection with Enter, Escape, and C-c alone, so it canno
 Inspect the session to identify which dialog is on screen, and report it rather than answering it.
 A launch under `config/claude-permission-mode=auto` never meets the bypass confirmation, because it does not request bypass mode: on 2.1.269 `claude --permission-mode auto` reached the composer directly with the footer `⏵⏵ auto mode on (shift+tab to cycle)`, so a captain who refuses the bypass dialog selects `auto` there instead of accepting it.
 The workspace-trust dialog is unaffected by the permission mode and still needs the pre-registration above.
+
+A worker that hits its usage limit stops on a picker offering to wait or switch to usage credits; `fm-control.sh <id> interrupt` (one Escape) clears it and leaves the composer empty, so a relaunch can proceed.
 
 ## Composer ghost
 
