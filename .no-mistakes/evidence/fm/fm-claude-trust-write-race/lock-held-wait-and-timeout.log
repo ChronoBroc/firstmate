@@ -1,0 +1,23 @@
+##### HEAD, writer stalls 5s (second must wait, then both land)
+lock while first writer stalls: .claude.json .claude.json.fm-trust.30118.b586ceda66937681 .claude.json.fm-trust.lock .claude.json.fm-trust.lock.owner.XiYL4x 
+--- first (stalled 5s):
+trusted: /private/tmp/fmhold.MkKGHR/a
+trusted (project root): /private/tmp/fmhold.MkKGHR/p
+rc=0 t=5s
+--- second:
+trusted: /private/tmp/fmhold.MkKGHR/b
+trusted (project root): /private/tmp/fmhold.MkKGHR/p
+rc=0 t=6s
+--- store worktree entries: a,b
+--- config dir after: .claude.json 
+##### HEAD, writer stalls 40s (> LOCK_WAIT=30s: second must refuse loudly)
+lock while first writer stalls: .claude.json .claude.json.fm-trust.41525.f77314f2ba8ecb83 .claude.json.fm-trust.lock .claude.json.fm-trust.lock.owner.C2KKyZ 
+--- first (stalled 40s):
+trusted: /private/tmp/fmhold.wx0okP/a
+trusted (project root): /private/tmp/fmhold.wx0okP/p
+rc=0 t=40s
+--- second:
+error: refusing to pre-register Claude trust: another registration has held '/private/tmp/fmhold.wx0okP/cfg/.claude.json.fm-trust.lock' for over 30s; if no registration is running, remove that lock
+rc=1 t=31s
+--- store worktree entries: a
+--- config dir after: .claude.json 

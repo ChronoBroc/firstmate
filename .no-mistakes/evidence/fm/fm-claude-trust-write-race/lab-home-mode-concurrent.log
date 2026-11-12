@@ -1,0 +1,4 @@
+[BASE --lab-home x4] exit codes: rc=0 rc=0 rc=0 rc=0  entries_in_store=1
+[BASE] sample: trusted: /private/tmp/fmlabmode.cuEoaG/lab-BASE.TGdL
+[HEAD --lab-home x4] exit codes: rc=0 rc=0 rc=0 rc=0  entries_in_store=4
+[HEAD] sample: trusted: /private/tmp/fmlabmode.cuEoaG/lab-HEAD.AUAF

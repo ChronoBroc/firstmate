@@ -1,0 +1,61 @@
+=== base: registration outputs
+trusted: /private/tmp/fmrace.ausyMw/live/base-a
+trusted (project root): /private/tmp/fmrace.ausyMw/live/proj
+rc=0
+trusted: /private/tmp/fmrace.ausyMw/live/base-b
+trusted (project root): /private/tmp/fmrace.ausyMw/live/proj
+rc=0
+=== base: trust entries in store:
+  /private/tmp/fmrace.ausyMw/live/base-a hasTrustDialogAccepted=true
+  /private/tmp/fmrace.ausyMw/live/proj hasTrustDialogAccepted=true
+=== base: real claude pane launched in /tmp/fmrace.ausyMw/live/base-a
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  WARNING: Claude Code running in Bypass Permissions mode
+  In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands.
+  This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be restored if damaged.
+  By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.
+  https://code.claude.com/docs/en/security
+  ❯ No, exit
+    Yes, I accept
+  Enter to confirm · Esc to cancel
+=== base: real claude pane launched in /tmp/fmrace.ausyMw/live/base-b
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  WARNING: Claude Code running in Bypass Permissions mode
+  In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands.
+  This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be restored if damaged.
+  By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.
+  https://code.claude.com/docs/en/security
+  ❯ No, exit
+    Yes, I accept
+  Enter to confirm · Esc to cancel
+=== head: registration outputs
+trusted: /private/tmp/fmrace.ausyMw/live/head-a
+trusted (project root): /private/tmp/fmrace.ausyMw/live/proj
+rc=0
+trusted: /private/tmp/fmrace.ausyMw/live/head-b
+trusted (project root): /private/tmp/fmrace.ausyMw/live/proj
+rc=0
+=== head: trust entries in store:
+  /private/tmp/fmrace.ausyMw/live/head-b hasTrustDialogAccepted=true
+  /private/tmp/fmrace.ausyMw/live/proj hasTrustDialogAccepted=true
+  /private/tmp/fmrace.ausyMw/live/head-a hasTrustDialogAccepted=true
+=== head: real claude pane launched in /tmp/fmrace.ausyMw/live/head-a
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  WARNING: Claude Code running in Bypass Permissions mode
+  In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands.
+  This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be restored if damaged.
+  By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.
+  https://code.claude.com/docs/en/security
+  ❯ No, exit
+    Yes, I accept
+  Enter to confirm · Esc to cancel
+=== head: real claude pane launched in /tmp/fmrace.ausyMw/live/head-b
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  WARNING: Claude Code running in Bypass Permissions mode
+  In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands.
+  This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be restored if damaged.
+  By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.
+  https://code.claude.com/docs/en/security
+  ❯ No, exit
+    Yes, I accept
+  Enter to confirm · Esc to cancel

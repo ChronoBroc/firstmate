@@ -1,0 +1,9 @@
+[BASE f4d51de5 2-spawn slow-rename run1] registrations=2 reported_success=2 worktree_entries_in_store=1 leftover=.claude.json 
+[BASE f4d51de5 2-spawn slow-rename run2] registrations=2 reported_success=2 worktree_entries_in_store=1 leftover=.claude.json 
+[BASE f4d51de5 2-spawn slow-rename run3] registrations=2 reported_success=2 worktree_entries_in_store=1 leftover=.claude.json 
+[HEAD 192c9301 2-spawn slow-rename run1] registrations=2 reported_success=2 worktree_entries_in_store=2 leftover=.claude.json 
+[HEAD 192c9301 2-spawn slow-rename run2] registrations=2 reported_success=2 worktree_entries_in_store=2 leftover=.claude.json 
+[HEAD 192c9301 2-spawn slow-rename run3] registrations=2 reported_success=2 worktree_entries_in_store=2 leftover=.claude.json 
+[BASE f4d51de5 8-spawn slow-rename] registrations=8 reported_success=8 worktree_entries_in_store=1 leftover=.claude.json 
+[HEAD 192c9301 8-spawn slow-rename] registrations=8 reported_success=8 worktree_entries_in_store=8 leftover=.claude.json 
+[HEAD 192c9301 16-spawn natural] registrations=16 reported_success=16 worktree_entries_in_store=16 leftover=.claude.json 
