@@ -27,7 +27,7 @@ The declared value must be a boolean; anything else is an actionable configurati
 ## Worker-side quota helper
 
 The canonical shell helper for a worker that has already performed its model-selection reasoning and now needs to pick the first viable candidate is `bin/fm-quota-choose.sh`.
-Pass it the intake's already-captured default TOON or permitted JSON fallback through stdin or `--snapshot`; it never takes another quota snapshot, so it selects from the same quota state as the intake.
+Pass it the intake's already-captured default TOON or permitted JSON fallback through stdin or `--snapshot`; it never takes another quota snapshot, so it selects from the same quota state as the intake, except that a native Codex candidate is measured on its launch store (see [eligibility](#1-eligibility)).
 Pass each candidate as `harness:model`, with earlier candidates preferred.
 The helper's header owns its provider mapping and quota selection mechanics.
 An `exhausted_now` runway vetoes the candidate.
