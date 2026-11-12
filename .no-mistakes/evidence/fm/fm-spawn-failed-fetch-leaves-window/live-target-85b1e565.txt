@@ -1,0 +1,45 @@
+=== [target-85b1e565] fm-root={run-worktree}  lab=/private/tmp/fmlive.NFQDAL/lab  project origin=ssh://git@git.example.invalid/fm-lab/project.git
+=== [target-85b1e565] windows before spawn:
+  driver
+=== [target-85b1e565] attempt 1: bin/fm-spawn.sh fetchfail-live-t1 <project> --mode no-mistakes --yolo off
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fmlive.NFQDAL/lab
+warning: /private/tmp/fmlive.NFQDAL/lab/data/fetchfail-live-t1/launch-brief.md records no ship branch; defaulting to legacy branch fm/fetchfail-live-t1
+warning: /private/tmp/fmlive.NFQDAL/lab/data/fetchfail-live-t1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: treehouse get did not enter an isolated worktree within 60s (last seen '/private/tmp/fmlive.NFQDAL/project': it is the spawning project itself; spawning project '/private/tmp/fmlive.NFQDAL/project'); window firstmate:fm-fetchfail-live-t1 is closed on exit, returning any pool slot it held
+last output in firstmate:fm-fetchfail-live-t1 before the failed spawn closed it:
+  | treehouse get
+  | broc-macmini@Brocs-Mac-mini project % treehouse get
+  | 🌳 Setting up worktree...
+  | fetch failed: git fetch origin: ssh: Could not resolve hostname git.example.inva
+  | lid: nodename nor servname provided, or not known
+  | fatal: Could not read from remote repository.
+  | Please make sure you have the correct access rights
+  | and the repository exists.
+  | broc-macmini@Brocs-Mac-mini project %
+=== [target-85b1e565] attempt 1 exit=1 after 71s
+=== [target-85b1e565] windows after failed spawn:
+  driver
+=== [target-85b1e565] state/fetchfail-live-t1.meta: absent
+=== [target-85b1e565] data/fetchfail-live-t1/launch-brief.md: absent
+=== [target-85b1e565] treehouse status:
+  base  main  (repository default)
+  🌳 No worktrees in pool.
+=== [target-85b1e565] attempt 2 (retry, cause NOT cleared)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fmlive.NFQDAL/lab
+warning: /private/tmp/fmlive.NFQDAL/lab/data/fetchfail-live-t1/launch-brief.md records no ship branch; defaulting to legacy branch fm/fetchfail-live-t1
+warning: /private/tmp/fmlive.NFQDAL/lab/data/fetchfail-live-t1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: treehouse get did not enter an isolated worktree within 60s (last seen '/private/tmp/fmlive.NFQDAL/project': it is the spawning project itself; spawning project '/private/tmp/fmlive.NFQDAL/project'); window firstmate:fm-fetchfail-live-t1 is closed on exit, returning any pool slot it held
+last output in firstmate:fm-fetchfail-live-t1 before the failed spawn closed it:
+  | treehouse get
+  | broc-macmini@Brocs-Mac-mini project % treehouse get
+  | 🌳 Setting up worktree...
+  | fetch failed: git fetch origin: ssh: Could not resolve hostname git.example.inva
+  | lid: nodename nor servname provided, or not known
+  | fatal: Could not read from remote repository.
+  | Please make sure you have the correct access rights
+  | and the repository exists.
+  | broc-macmini@Brocs-Mac-mini project %
+=== [target-85b1e565] attempt 2 exit=1 after 71s
+=== [target-85b1e565] windows after retry:
+  driver
+=== [target-85b1e565] DONE

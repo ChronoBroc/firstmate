@@ -1,0 +1,25 @@
+=== [base-c2f42d9e] fm-root=/private/tmp/fmbase.WafzM0/fm  lab=/private/tmp/fmlivebase.iOtJrp/lab  project origin=ssh://git@git.example.invalid/fm-lab/project.git
+=== [base-c2f42d9e] windows before spawn:
+  driver
+=== [base-c2f42d9e] attempt 1: bin/fm-spawn.sh fetchfail-live-b1 <project> --mode no-mistakes --yolo off
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fmlivebase.iOtJrp/lab
+warning: /private/tmp/fmlivebase.iOtJrp/lab/data/fetchfail-live-b1/launch-brief.md records no ship branch; defaulting to legacy branch fm/fetchfail-live-b1
+warning: /private/tmp/fmlivebase.iOtJrp/lab/data/fetchfail-live-b1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: treehouse get did not enter an isolated worktree within 60s (last seen '/private/tmp/fmlivebase.iOtJrp/project': it is the spawning project itself; spawning project '/private/tmp/fmlivebase.iOtJrp/project'); inspect window firstmate:fm-fetchfail-live-b1
+=== [base-c2f42d9e] attempt 1 exit=1 after 71s
+=== [base-c2f42d9e] windows after failed spawn:
+  driver
+  fm-fetchfail-live-b1
+=== [base-c2f42d9e] state/fetchfail-live-b1.meta: absent
+=== [base-c2f42d9e] data/fetchfail-live-b1/launch-brief.md: present
+=== [base-c2f42d9e] treehouse status:
+  base  main  (repository default)
+  🌳 No worktrees in pool.
+=== [base-c2f42d9e] attempt 2 (retry, cause NOT cleared)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fmlivebase.iOtJrp/lab
+error: spawn refused: /private/tmp/fmlivebase.iOtJrp/lab/data/fetchfail-live-b1/brief.md matches a previous launch without a finished-brief record; if a finished task ran this brief, keep /private/tmp/fmlivebase.iOtJrp/lab/data/fetchfail-live-b1/ and move it aside and scaffold a new brief, or use a fresh id; if an earlier spawn of this same item failed before any worker ran, remove only /private/tmp/fmlivebase.iOtJrp/lab/data/fetchfail-live-b1/launch-brief.md and spawn again; if continuing a captain-held task after retain teardown, first confirm this is the same retained task rather than a new item reusing its id, then remove only /private/tmp/fmlivebase.iOtJrp/lab/data/fetchfail-live-b1/launch-brief.md and spawn again
+=== [base-c2f42d9e] attempt 2 exit=1 after 1s
+=== [base-c2f42d9e] windows after retry:
+  driver
+  fm-fetchfail-live-b1
+=== [base-c2f42d9e] DONE

@@ -1,0 +1,38 @@
+=== project2 treehouse.toml max_trees=1; one slot already leased by another holder: /private/tmp/fmlive.NFQDAL/pool/.treehouse/project2-483c2d/1/project2
+=== windows before spawn:
+  driver
+  fm-prewin-live-t2
+=== attempt 1: bin/fm-spawn.sh poolfull-live-t3 <project2> --mode no-mistakes --yolo off
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fmlive.NFQDAL/lab
+warning: /private/tmp/fmlive.NFQDAL/lab/data/poolfull-live-t3/launch-brief.md records no ship branch; defaulting to legacy branch fm/poolfull-live-t3
+warning: /private/tmp/fmlive.NFQDAL/lab/data/poolfull-live-t3/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: treehouse get did not enter an isolated worktree within 60s (last seen '/private/tmp/fmlive.NFQDAL/project2': it is the spawning project itself; spawning project '/private/tmp/fmlive.NFQDAL/project2'); window firstmate:fm-poolfull-live-t3 is closed on exit, returning any pool slot it held
+last output in firstmate:fm-poolfull-live-t3 before the failed spawn closed it:
+  | treehouse get
+  | broc-macmini@Brocs-Mac-mini project2 % treehouse get
+  | 🌳 Setting up worktree...
+  | all 1 worktrees are in use or dirty (max_trees = 1). Run 'treehouse status' to s
+  | ee details, or increase max_trees in treehouse.toml
+  | broc-macmini@Brocs-Mac-mini project2 %
+=== attempt 1 exit=1
+=== windows after failed spawn:
+  driver
+  fm-prewin-live-t2
+=== state/poolfull-live-t3.meta: absent; launch-brief.md: absent
+=== clearing the cause: treehouse return --force /private/tmp/fmlive.NFQDAL/pool/.treehouse/project2-483c2d/1/project2
+🌳 Worktree returned to pool.
+=== attempt 2 (retry, same id, nothing killed by hand)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fmlive.NFQDAL/lab
+warning: /private/tmp/fmlive.NFQDAL/lab/data/poolfull-live-t3/launch-brief.md records no ship branch; defaulting to legacy branch fm/poolfull-live-t3
+warning: /private/tmp/fmlive.NFQDAL/lab/data/poolfull-live-t3/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned poolfull-live-t3 harness=codex kind=ship mode=no-mistakes yolo=off window=firstmate:fm-poolfull-live-t3 worktree=/private/tmp/fmlive.NFQDAL/pool/.treehouse/project2-483c2d/1/project2
+=== attempt 2 exit=0
+=== windows after retry:
+  driver
+  fm-prewin-live-t2
+  fm-poolfull-live-t3
+=== state/poolfull-live-t3.meta:
+  window=firstmate:fm-poolfull-live-t3
+  worktree=/private/tmp/fmlive.NFQDAL/pool/.treehouse/project2-483c2d/1/project2
+  harness=codex
+DONE

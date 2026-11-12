@@ -1,0 +1,15 @@
+=== windows before spawn:
+  driver (@0)
+  fm-prewin-live-t2 (@3)
+=== bin/fm-spawn.sh prewin-live-t2 <project> --mode no-mistakes --yolo off
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fmlive.NFQDAL/lab
+warning: /private/tmp/fmlive.NFQDAL/lab/data/prewin-live-t2/launch-brief.md records no ship branch; defaulting to legacy branch fm/prewin-live-t2
+warning: /private/tmp/fmlive.NFQDAL/lab/data/prewin-live-t2/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: window firstmate:fm-prewin-live-t2 already exists
+=== exit=1
+=== windows after refused spawn:
+  driver (@0)
+  fm-prewin-live-t2 (@3)
+=== state/prewin-live-t2.meta: absent
+DONE
+brief.md
