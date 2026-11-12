@@ -1416,6 +1416,36 @@ EOF
   pass "tmux endpoint liveness is reported per task: alive for a live window, dead for a gone one"
 }
 
+# After a tmux server restart the new server can hold a window under the
+# recorded name. A record whose recorded server is proven gone must read dead
+# even though a window of that name answers; this fixture's ps reports the
+# recorded server pid as a program that is not tmux, which is that proof. A
+# record with no server identity keeps the unbound reading.
+test_endpoint_liveness_tmux_replaced_server() {
+  local rec root home fakebin out
+  rec=$(new_world liveness-tmux-replaced)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  make_fake_tmux "$fakebin" "fm-sess:live-window"
+
+  printf 'window=fm-sess:live-window\nkind=ship\ntmux_socket=/fake/tmux.sock\ntmux_server=424242:1700000000\n' \
+    > "$home/state/task-replaced.meta"
+  printf 'window=fm-sess:live-window\nkind=ship\n' > "$home/state/task-legacy.meta"
+
+  out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  assert_contains "$(printf '%s\n' "$out" | sed -n '/^--- task-replaced ---$/,/^endpoint:/p')" \
+    "endpoint: dead (backend=tmux window=fm-sess:live-window)" \
+    "a window whose recorded server is gone must not read alive through a same-named window"
+  assert_contains "$(printf '%s\n' "$out" | sed -n '/^--- task-legacy ---$/,/^endpoint:/p')" \
+    "endpoint: alive (backend=tmux window=fm-sess:live-window)" \
+    "a record without server identity must keep the unbound reading"
+
+  pass "tmux endpoint liveness binds to the recorded server: a replaced server's same-named window reads dead"
+}
+
 test_endpoint_liveness_herdr() {
   local rec root home fakebin out
   rec=$(new_world liveness-herdr)
@@ -3117,6 +3147,7 @@ test_status_tail_bounding
 test_status_tail_line_cap
 test_orphan_status_logs_are_printed
 test_endpoint_liveness_tmux
+test_endpoint_liveness_tmux_replaced_server
 test_endpoint_liveness_herdr
 test_endpoint_read_death_is_isolated_and_reported
 test_endpoint_read_hang_is_bounded_and_reported

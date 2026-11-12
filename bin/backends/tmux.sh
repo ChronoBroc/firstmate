@@ -245,6 +245,31 @@ fm_backend_tmux_server_process() {  # <pid>
   esac
 }
 
+# fm_backend_tmux_recorded_server_lost: 0 only when the tmux server a task
+# record names (tmux_socket, tmux_server) is PROVEN to have exited: its pid is
+# free or now another program, or the server at the recorded socket answers
+# with that pid under a different start time (a later server that reused it).
+# Every other outcome returns 1 - an unrecorded or malformed identity, the
+# recorded server answering, a tmux process still holding the pid that this
+# read cannot confirm or exclude, or a failed read - so absence of proof never
+# reads as loss. A window on the server answering now is never the recorded
+# task's window once this returns 0, whatever its name: a restarted server can
+# carry a same-named session and window that hold some other process.
+# Reads only; it never starts a server.
+fm_backend_tmux_recorded_server_lost() {  # <socket> <server-id>
+  local socket=${1:-} server=${2:-} current
+  case "$socket" in /*) ;; *) return 1 ;; esac
+  fm_backend_tmux_server_id_valid "$server" || return 1
+  case "$(fm_backend_tmux_server_process "${server%%:*}")" in
+    gone|other) return 0 ;;
+    tmux) ;;
+    *) return 1 ;;
+  esac
+  current=$(LC_ALL=C tmux -S "$socket" display-message -p '#{pid}:#{start_time}' 2>/dev/null) || return 1
+  [ "$current" != "$server" ] && [ "${current%%:*}" = "${server%%:*}" ] \
+    && fm_backend_tmux_server_id_valid "$current"
+}
+
 # fm_backend_tmux_endpoint_absence_recheck: whether a task window that reads
 # `missing` is provably gone, judged against the server identity its record
 # carries (tmux_socket, tmux_server), never against whichever server this
@@ -270,22 +295,19 @@ fm_backend_tmux_endpoint_absence_recheck() {  # <target> <socket> <server-id>
   esac
   case "$socket" in /*) ;; *) printf 'unrecorded'; return 0 ;; esac
   fm_backend_tmux_server_id_valid "$server" || { printf 'unrecorded'; return 0; }
-  case "$(fm_backend_tmux_server_process "${server%%:*}")" in
-    gone|other) printf 'missing'; return 0 ;;
-    tmux) ;;
-    *) printf 'unreadable'; return 0 ;;
-  esac
-  # A tmux process holds the recorded pid. Only the server at the recorded
-  # socket answering with the recorded pid AND start time is that server;
-  # a different start time under the same pid is a later server that reused
-  # it, which also proves the recorded one exited.
-  current=$(LC_ALL=C tmux -S "$socket" display-message -p '#{pid}:#{start_time}' 2>/dev/null) || current=
+  if fm_backend_tmux_recorded_server_lost "$socket" "$server"; then
+    printf 'missing'
+    return 0
+  fi
+  # Only a tmux process at the recorded pid, answering at the recorded socket
+  # with the recorded pid AND start time, is that server; anything short of
+  # that is unproven.
+  current=
+  [ "$(fm_backend_tmux_server_process "${server%%:*}")" != tmux ] \
+    || current=$(LC_ALL=C tmux -S "$socket" display-message -p '#{pid}:#{start_time}' 2>/dev/null) \
+    || current=
   if [ "$current" != "$server" ]; then
-    if [ "${current%%:*}" = "${server%%:*}" ] && fm_backend_tmux_server_id_valid "$current"; then
-      printf 'missing'
-    else
-      printf 'unreadable'
-    fi
+    printf 'unreadable'
     return 0
   fi
   session=${target%%:*}

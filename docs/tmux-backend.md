@@ -53,6 +53,10 @@ It classifies recognized Claude, Codex, OpenCode, Pi, pi-signed, Grok, Kimi, Cur
 The process-name vocabulary behind those verdicts is owned by `bin/fm-agent-process-lib.sh` and shared with the Herdr adapter, which proves a registered agent against the same names ([herdr-backend.md](herdr-backend.md) "Restart and liveness behavior").
 Control-plane recovery follows the [endpoint-absence contract](agent-control.md#reclaiming-a-task-whose-endpoint-is-gone); a raw `missing` verdict alone does not authorize reclaim.
 
+A window name alone does not identify a task's endpoint across a server restart, because the new server can hold a session and window under the recorded names.
+Readers that hold the task record - the crew-state reading, the session-start and fleet-snapshot endpoint reads, the watcher, and the live busy classifier - pass it to the probe, and when the record's server identity proves its server exited (the [server-identity proof](agent-control.md#reclaiming-a-task-whose-endpoint-is-gone)), the endpoint reads as not existing and `missing` whatever the answering server holds; `fm_backend_record_server_lost` in `bin/fm-backend.sh` owns that binding.
+A record without server identity keeps the unbound reading.
+
 For positive attribution, the probe combines two independent name sources rather than making either one load-bearing.
 `#{pane_current_command}` and the pane tty foreground process group's kernel `comm` values expose different name fields, and which one retains executable identity is platform-dependent.
 The foreground probe also reads argv[0] so an exact harness install-path component can carry the verdict when the other fields expose a rewritten process name.

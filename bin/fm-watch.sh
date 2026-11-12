@@ -560,6 +560,21 @@ window_backend() {
   echo tmux
 }
 
+# The recovery-grade agent state of <window>, bound to its task record so a
+# same-named window on a server that replaced the recorded one reads `missing`
+# (fm_backend_record_server_lost owns that binding).
+window_agent_state() {  # <window>
+  local w=$1 meta
+  meta=$(fm_backend_meta_for_window "$w" "$STATE" 2>/dev/null || true)
+  fm_backend_agent_state "$(window_backend "$w")" "$w" "$meta"
+}
+
+window_agent_alive() {  # <window>
+  local w=$1 meta
+  meta=$(fm_backend_meta_for_window "$w" "$STATE" 2>/dev/null || true)
+  fm_backend_agent_alive "$(window_backend "$w")" "$w" "$meta"
+}
+
 window_harness() {
   local w=$1 meta
   meta=$(fm_backend_meta_for_window "$w" "$STATE" 2>/dev/null || true)
@@ -629,7 +644,7 @@ inbox_steer_check() {  # <window> <task>
       ;;
   esac
   backend=$(window_backend "$w")
-  agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
+  agent_state=$(window_agent_state "$w" 2>/dev/null || true)
   case "$agent_state" in
     dead|missing)
       if [ "$verb" = retry ]; then
@@ -1000,7 +1015,7 @@ secondmate_idle_ring_safe() {  # <window>
   secondmate_busy_class "$w"
   [ "$SECONDMATE_BUSY_CLASS" = idle ] || return 1
   backend=$(window_backend "$w")
-  agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
+  agent_state=$(window_agent_state "$w" 2>/dev/null || true)
   [ "$agent_state" = alive ] || return 1
   cstate=$(fm_backend_composer_state "$backend" "$w" "$(window_label "$w")" 2>/dev/null) || cstate=unknown
   [ "$cstate" != pending ] || return 1
@@ -1898,7 +1913,7 @@ wedge_dead_record() {  # <window> <since-file> <triage-label> <idle-age> <pane-h
   local win=$1 since_file=$2 label=$3 age=$4 hash=$5 task=$6 key marker agent_state detail reason gen id
   key=$(window_key "$win")
   marker="$STATE/.dead-reported-$key"
-  agent_state=$(fm_backend_agent_state "$(window_backend "$win")" "$win" 2>/dev/null) || agent_state=unreadable
+  agent_state=$(window_agent_state "$win" 2>/dev/null) || agent_state=unreadable
   case "$agent_state" in
     dead) detail='the endpoint is still there with no agent running in it' ;;
     missing) detail='the recorded endpoint is gone' ;;
@@ -2738,7 +2753,7 @@ pause_state_class() {  # <window> <task>
   kind=$(window_kind "$win")
   if [ -e "$STATE/.paused-$key" ] && [ "$(age_of "$recheck_file")" -lt "$STALE_ESCALATE_SECS" ]; then
     if [ "$kind" != secondmate ]; then
-      agent_alive=$(fm_backend_agent_alive "$(window_backend "$win")" "$win" 2>/dev/null) || agent_alive=unknown
+      agent_alive=$(window_agent_alive "$win" 2>/dev/null) || agent_alive=unknown
       if [ "$agent_alive" != dead ]; then
         rm -f "$recheck_file"
         printf 'none'
@@ -2755,7 +2770,7 @@ pause_state_class() {  # <window> <task>
     return
   fi
   if [ "$kind" != secondmate ]; then
-    agent_alive=$(fm_backend_agent_alive "$(window_backend "$win")" "$win" 2>/dev/null) || agent_alive=unknown
+    agent_alive=$(window_agent_alive "$win" 2>/dev/null) || agent_alive=unknown
     if [ "$agent_alive" != dead ]; then
       rm -f "$recheck_file"
       printf 'none'
@@ -3100,7 +3115,7 @@ unknown_alive_stale_bound() {  # <window> <task>
       "$task" "$STATE")
   fi
   [ "${verdict%% *}" = unknown ] || return 1
-  agent_alive=$(fm_backend_agent_alive "$(window_backend "$win")" "$win" 2>/dev/null) || agent_alive=unknown
+  agent_alive=$(window_agent_alive "$win" 2>/dev/null) || agent_alive=unknown
   [ "$agent_alive" = alive ] || return 1
   unknown_alive_progressing "$task" || return 1
   STALE_WAIT_DECLARATION="unknown-alive:$task:$(window_backend "$win"):$win:$verdict"

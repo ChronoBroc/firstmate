@@ -579,7 +579,7 @@ print_status_tail() {
   done < <(tail -n "$STATUS_TAIL" "$status")
 }
 
-# fm_session_start_endpoint_read <backend> <target> [expected-label]: ONE
+# fm_session_start_endpoint_read <backend> <target> [expected-label] [meta]: ONE
 # bounded, crash-isolated endpoint-liveness read. The read runs in its own
 # bash under fm_run_timed's bound instead of in this digest process, because
 # a per-task backend liveness read that dies mid-read would otherwise take
@@ -587,13 +587,13 @@ print_status_tail() {
 # surprise in one task's read into that task's own endpoint line - never a
 # silently missing rest of digest. The inner bash re-sources fm-backend.sh
 # per read; that cost is a few milliseconds per task and buys the isolation.
-fm_session_start_endpoint_read() {  # <backend> <target> [expected-label]
-  local backend=$1 target=$2 label=${3:-}
+fm_session_start_endpoint_read() {  # <backend> <target> [expected-label] [meta]
+  local backend=$1 target=$2 label=${3:-} meta=${4:-}
   # shellcheck disable=SC2016  # Positional parameters expand inside the child bash, not here.
   fm_run_timed "$ENDPOINT_TIMEOUT" bash -c '
     . "$1"
-    fm_backend_target_exists "$2" "$3" "$4"
-  ' _ "$SCRIPT_DIR/fm-backend.sh" "$backend" "$target" "$label"
+    fm_backend_target_exists "$2" "$3" "$4" "$5"
+  ' _ "$SCRIPT_DIR/fm-backend.sh" "$backend" "$target" "$label" "$meta"
 }
 
 hash_file_sha256() {
@@ -939,7 +939,7 @@ for meta in "$STATE"/*.meta; do
   if [ -n "$window" ]; then
     backend=$(fm_backend_of_meta "$meta")
     endpoint_rc=0
-    fm_session_start_endpoint_read "$backend" "${target:-$window}" "fm-$id" || endpoint_rc=$?
+    fm_session_start_endpoint_read "$backend" "${target:-$window}" "fm-$id" "$meta" || endpoint_rc=$?
     # Only the timeout owner's own statuses mean the read itself failed: 124 is
     # the bound firing and >=128 is a signal death. Every other nonzero status
     # is the probe's own verdict that the endpoint is gone.
