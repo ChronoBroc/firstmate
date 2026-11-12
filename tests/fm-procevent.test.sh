@@ -5292,4 +5292,64 @@ PATH="$UNDISP/bin:$PATH" FM_HOME="$UNDISP/home" \
   "$ROOT/bin/fm-procevent-lavish.sh" retire "$undisp_art" >/dev/null 2>&1 || true
 pass "arm does not launch beside a stale claim whose process group is alive"
 
+# --- a runner started before the pid-identity UTC pin stays provable ---------
+# A self-update replaces bin/ under a still-running runner. Before
+# fm_pid_identity pinned TZ=UTC0, its ps fallback rendered the start time in
+# local time, so a runner older code started recorded that rendering in its
+# claim. The current code must confirm that exact record - list it live, leave
+# it to reconcile, and let retire stop it - and must still refuse a record
+# that is not an exact rendering of the live runner. The /proc identity never
+# carried a zone, so the case forces the ps fallback on every host.
+HLEG="$TMP_ROOT/pre-utc-pin"; new_home "$HLEG"
+LEG_TRIGGER="$TMP_ROOT/pre-utc-pin-trigger"
+LEG_LOG="$TMP_ROOT/pre-utc-pin-executions"
+leg_pe() { FM_PROC_ROOT_OVERRIDE="$TMP_ROOT/no-proc" TZ="${LEG_TZ:-FMT5}" pe "$@"; }
+FM_PROC_ROOT_OVERRIDE="$TMP_ROOT/no-proc" pe_register "$HLEG" lavish pre-utc-pin-src -- \
+  "$RACE_BLOCKER" "$LEG_LOG" "$LEG_TRIGGER" >/dev/null
+leg_pe "$HLEG" reconcile >/dev/null
+leg_claim="$FM_PROCEVENT_CLAIM_ROOT/pre-utc-pin-src.claim"
+wait_for "$leg_claim" || fail "pre-pin fixture never claimed its source"
+wait_for "$LEG_LOG" || fail "pre-pin fixture source never started"
+leg_leader=$(sed -n '2p' "$leg_claim")
+leg_current=$(sed -n '4p' "$leg_claim")
+leg_legacy=$(COLUMNS=10000 LC_ALL=C TZ=FMT5 ps -p "$leg_leader" -o lstart= -o command= | sed 's/^[[:space:]]*//')
+[ -n "$leg_legacy" ] && [ "$leg_legacy" != "$leg_current" ] \
+  || fail "fixture invalid: the pre-pin rendering does not differ from the current identity"
+awk -v v="$leg_legacy" 'NR == 4 { print v; next } { print }' \
+  "$leg_claim" > "$leg_claim.tmp" && mv "$leg_claim.tmp" "$leg_claim"
+chmod 0600 "$leg_claim"
+
+# Read under another zone, the same record is not an exact rendering of the
+# runner, so it stays unproven: nothing is signalled and nothing replaces it.
+leg_owner=$(LEG_TZ=FMT3 leg_pe "$HLEG" list | awk '$1 == "pre-utc-pin-src" { print $3 }')
+[ "$leg_owner" = orphaned ] \
+  || fail "a pre-pin record read in a different zone was confirmed: owner=$leg_owner"
+if leg_out=$(LEG_TZ=FMT3 leg_pe "$HLEG" retire pre-utc-pin-src 2>&1); then
+  fail "retire signalled a runner whose identity it could not prove: $leg_out"
+fi
+assert_contains "$leg_out" "cannot confirm runner identity" \
+  "an unproven runner was not refused by name: $leg_out"
+assert_contains "$leg_out" "nothing was signalled" \
+  "the identity refusal does not say nothing was signalled: $leg_out"
+kill -0 -"$leg_leader" 2>/dev/null \
+  || fail "an unproven pre-pin runner group was signalled"
+
+# Read in the zone it was written under, the record is the runner's own.
+leg_owner=$(leg_pe "$HLEG" list | awk '$1 == "pre-utc-pin-src" { print $3 }')
+[ "$leg_owner" = live ] \
+  || fail "a running pre-pin runner was not confirmed live: owner=$leg_owner"
+leg_out=$(leg_pe "$HLEG" reconcile)
+assert_contains "$leg_out" "started=0" "reconcile started a replacement beside a pre-pin runner: $leg_out"
+assert_contains "$leg_out" "uncertain=0" "reconcile could not confirm a pre-pin runner: $leg_out"
+[ "$(stranded_wake_count "$HLEG" pre-utc-pin-src)" = 0 ] \
+  || fail "a confirmed pre-pin runner was announced stranded"
+[ "$(wc -l < "$LEG_LOG" | tr -d ' ')" = 1 ] \
+  || fail "a second source ran beside the pre-pin runner: $(cat "$LEG_LOG")"
+leg_out=$(leg_pe "$HLEG" retire pre-utc-pin-src 2>&1) \
+  || fail "retire refused a confirmed pre-pin runner: $leg_out"
+assert_contains "$leg_out" "retired: pre-utc-pin-src" "retire did not retire the pre-pin source: $leg_out"
+wait_gone -"$leg_leader" || fail "retire left the pre-pin runner group running"
+[ ! -e "$leg_claim" ] || fail "retire left the pre-pin claim behind"
+pass "a runner started before the pid-identity UTC pin is confirmed, reconciled, and retired"
+
 printf '\nall procevent tests passed\n'

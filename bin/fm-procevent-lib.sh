@@ -728,6 +728,10 @@ fm_procevent_pid_state() {
   fi
   if actual=$(fm_pid_identity "$pid" 2>/dev/null); then
     [ "$actual" = "$expected" ] && return 0
+    # A runner outlives the code update that changed the identity format, so
+    # a record its older code wrote is confirmed by that format's exact
+    # rendering of this same pid, never by a looser comparison.
+    fm_pid_identity_matches_pre_utc_pin "$pid" "$expected" && return 0
     return 1
   fi
   fm_pid_alive "$pid" || { fm_procevent_group_alive "$pid" && return 3; return 1; }

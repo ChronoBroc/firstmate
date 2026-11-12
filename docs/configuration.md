@@ -3210,6 +3210,7 @@ Ownership is machine-wide per canonical source, because separate homes can share
 - Each claim binds its caller-reported home and runner PID to a process identity, unique claim generation, exact registration-file generation, and resolved state-root identity.
 - Registration, acquisition, replacement, retirement, and generation-bound release are serialized at one machine-wide boundary per source.
 - A live identity-matched owner is never displaced, and release removes only the exact generation the caller acquired.
+- A runner keeps running across a self-update, so a claim its older code wrote in the pre-UTC-pin process identity format is still matched by that format's exact rendering of the live pid (`fm_pid_identity_matches_pre_utc_pin` in [`bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh)); a record that is not an exact rendering stays unproven.
 
 **Prove ownership before stopping a runner**
 
@@ -3226,7 +3227,7 @@ A stale claim whose process group still has members is one `reconcile` never dis
 
 **Reused PID with surviving group members**
 
-When the recorded pid is alive under a different identity but the group still has members, the claim boundary itself does not consult the process group.
+When the recorded pid is alive under a different identity but the group still has members, the pid may have been reused or may still be the original runner under an identity no known format confirms, so nothing signals it and the claim boundary itself does not consult the process group.
 In this case, `bin/fm-procevent.sh start <source-id>` reclaims the claim only if it can tidy the dead generation's reservation records.
 Otherwise it refuses with `cannot claim source`.
 
