@@ -2254,7 +2254,7 @@ cmd_retire() {
       stop_state=$?
       if [ "$stop_state" -eq 2 ]; then
         fm_procevent_source_lock_release "$id"
-        die "cannot confirm runner identity; source remains registered and nothing was signalled: $id (the runner its claim records, pid $pid, could not be proved to be that runner before any signal; check whether process group $pid is still polling the source before acting)"
+        die "cannot confirm runner identity; source remains registered: $id (the runner its claim records, pid $pid, could not be proved to be that runner or proved stopped; check whether process group $pid is still polling the source before acting)"
       fi
       if [ -n "$extension_binding_digest" ] \
         && ! cleanup_extension_binding_invocations "$extension_binding_digest"; then
