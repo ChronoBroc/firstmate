@@ -8,7 +8,7 @@ These command-line and terminal facts apply to pane-backed sessions; for T3 Code
 
 | Fact | Value |
 |---|---|
-| Busy | Owned hooks: `UserPromptSubmit` opens while `Stop`, `StopFailure`, and `SessionEnd` close; a secondmate gets no `Stop` busy hook, because its home's tracked Stop guard is its only Stop writer, unless that guard predates `.fm-busy-stop` and the launch keeps the `Stop` idle hook (`../../../docs/turnend-guard.md` owns that); manual interrupt emits no hook, so control reports delivered keys and live endpoint only, publishes no idle event or cancellation claim, and usually leaves `claude-hook` busy. |
+| Busy | Owned hooks: `UserPromptSubmit` opens while `Stop`, `StopFailure`, and `SessionEnd` close, and `PreToolUse` refreshes the native progress marker inside a turn without changing busy state (verified on 2.1.322 by `tests/fm-claude-busy-progress-live.test.sh`); a secondmate gets no `Stop` busy hook, because its home's tracked Stop guard is its only Stop writer, unless that guard predates `.fm-busy-stop` and the launch keeps the `Stop` idle hook (`../../../docs/turnend-guard.md` owns that); manual interrupt emits no hook, so control reports delivered keys and live endpoint only, publishes no idle event or cancellation claim, and usually leaves `claude-hook` busy. |
 | Exit | `/exit`; with a background shell still running it opens a picker whose Enter stops that shell before exiting (verified on 2.1.322), so `fm-control` exit refuses there; never confirm it with Enter, and Escape cancels it. |
 | Interrupt | Single Escape. |
 | Skill | `/<skill>`, for example `/no-mistakes`. |

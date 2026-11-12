@@ -691,6 +691,38 @@ test_claude_hooks_stale_incarnation_harmless() {
   pass "claude hook events from a superseded incarnation are rejected without breaking the hook"
 }
 
+# A Claude worker in one long healthy turn posts no UserPromptSubmit or Stop
+# between its tool calls, so without a mid-turn signal the watcher's busy-turn
+# bound ages it from the turn's start and wedge-escalates a working worker. The
+# PreToolUse hook is that signal: it refreshes the native progress marker the
+# bound already reads, leaves the busy verdict and the turn-ended notification
+# alone, and is refused for a superseded incarnation like every other hook.
+test_claude_tool_calls_refresh_native_progress() {
+  local rec id=busy-cl-3 out state settings
+  rec=$(make_spawn_case claude-progress claude "$id")
+  read_case_record "$rec"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR")
+  expect_code 0 $? "claude spawn should succeed: $out"
+  state="$HOME_DIR/state"
+  settings="$WT_DIR/.claude/settings.local.json"
+  jq -e '.hooks.PreToolUse[0].matcher == "*"' "$settings" >/dev/null \
+    || fail "claude hook settings must refresh progress on every tool call"
+  run_claude_hook "$settings" UserPromptSubmit || fail "UserPromptSubmit hook command failed"
+  rm -f "$state/$id.progress" "$state/$id.turn-ended"
+  run_claude_hook "$settings" PreToolUse || fail "PreToolUse hook command failed"
+  [ -f "$state/$id.progress" ] || fail "a tool call did not refresh the native progress marker"
+  assert_absent "$state/$id.turn-ended" "a tool call must not fabricate a completed turn"
+  out=$(classify claude "$id" "$state")
+  [ "$out" = "busy claude-hook" ] || fail "a tool call must leave the busy verdict alone, got '$out'"
+
+  "$ROOT/bin/fm-busy-event.sh" arm "$state" "$id" >/dev/null
+  rm -f "$state/$id.progress"
+  run_claude_hook "$settings" PreToolUse \
+    || fail "a stale-gen PreToolUse hook must still exit 0 so Claude's tool call is never blocked"
+  assert_absent "$state/$id.progress" "a superseded incarnation's tool call refreshed the new incarnation's progress"
+  pass "claude tool calls refresh native progress inside a turn without changing busy state"
+}
+
 test_codex_unverified_until_a_semantic_source_exists() {
   local rec id=busy-cx-1 out state
   rec=$(make_spawn_case codex-unverified codex "$id")
@@ -1340,6 +1372,7 @@ test_opencode_plugin_applies_events_in_emission_order
 test_opencode_plugin_v2_applies_events_in_emission_order
 test_claude_hooks_semantic_lifecycle
 test_claude_hooks_stale_incarnation_harmless
+test_claude_tool_calls_refresh_native_progress
 test_gemini_hooks_semantic_lifecycle
 test_gemini_hooks_stale_incarnation_harmless
 test_raw_gemini_launch_has_no_semantic_wiring

@@ -749,6 +749,24 @@ The token-free live guard refreshes the per-version evidence and fails naming th
 bin/fm-test-run.sh tests/fm-claude-tool-exclude-live.test.sh
 ```
 
+## Claude worker busy progress
+
+Verified on 2026-11-12 with Claude Code 2.1.322 on macOS, a `claude -p` run in a worktree whose `.claude/settings.local.json` was written by the real `bin/fm-spawn.sh`, against a local API stub (`tests/fixtures/fm-claude-tool-call-stub.py`) that asks for one Bash tool call and then ends the turn, so no model is called.
+The tool call snapshotted the task's busy record and progress marker while it ran, which shows `PreToolUse` fired inside the turn before the tool and after `UserPromptSubmit`:
+
+```text
+v1 gen=<gen> seq=2 state=busy source=claude-hook event=user-prompt-submit ts=<epoch>
+progress=present
+```
+
+`Stop` then closed the turn (`idle claude-hook`) and touched the turn-ended notification.
+That refresh is what keeps the watcher's `FM_BUSY_TURN_MAX_SECS` bound from aging one long healthy Claude turn from its start: without it, a scratch home whose Claude worker had been in one turn for over an hour, with a fresh `busy claude-hook` record, raised `possible wedge` on every `FM_STALE_ESCALATE_SECS` interval while `bin/fm-crew-state.sh` read `working · harness busy (claude-hook)`.
+The token-free live guard refreshes this evidence and fails naming the Claude Code version if a release stops firing `PreToolUse` inside a turn:
+
+```sh
+bin/fm-test-run.sh tests/fm-claude-busy-progress-live.test.sh
+```
+
 ## Secondmate busy contract
 
 Verified 2026-09-22 on this host with Claude Code 2.1.278, OpenCode 1.18.31, Pi 0.86.1, and Grok 1.0.40.
