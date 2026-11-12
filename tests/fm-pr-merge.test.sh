@@ -227,7 +227,9 @@ case "${1:-} ${2:-}" in
         ;;
       *headRefName*)
         # The adoption read: state, draft, head, and head branch in one view.
-        jq -c '{state, isDraft, headRefOid, headRefName: (.headRefName // "outside-contributor")}' "$FM_TEST_GH_VIEW_JSON"
+        jq -c '{state, isDraft, headRefOid, headRefName: (.headRefName // "outside-contributor"),
+          headRepository: (.headRepository // {name: "repo"}),
+          headRepositoryOwner: (.headRepositoryOwner // {login: "example"})}' "$FM_TEST_GH_VIEW_JSON"
         exit 0
         ;;
       *headRefOid*)
@@ -1818,6 +1820,7 @@ make_adopt_case() {
   case_dir=$(make_case "$1")
   rm -f "$case_dir/state/task-x1.meta"
   git init -q "$case_dir/project"
+  git -C "$case_dir/project" remote add origin https://github.com/Example/repo.git
   printf '%s\n' '## In flight' '' '## Queued' \
     "- [ ] ext-176 - Merge the outside pull request (repo: repo) (kind: ship)" '' '## Done' \
     > "$case_dir/home/data/backlog.md"
@@ -1910,7 +1913,8 @@ test_adoption_refusals_record_nothing() {
         fm_write_meta "$case_dir/state/task-y1.meta" "worktree=$case_dir/wt" "kind=ship" "pr=$ADOPT_URL"
         ;;
       owned-branch)
-        fm_write_meta "$case_dir/state/task-y1.meta" "worktree=$case_dir/wt" "kind=ship" "branch=fm/fleet-work"
+        fm_write_meta "$case_dir/state/task-y1.meta" "worktree=$case_dir/wt" "kind=ship" "branch=fm/fleet-work" \
+          "project=$case_dir/project"
         jq -c '.headRefName = "fm/fleet-work"' "$case_dir/github-view.json" > "$case_dir/v" \
           && mv "$case_dir/v" "$case_dir/github-view.json"
         ;;
@@ -1957,6 +1961,71 @@ test_adoption_refusals_record_nothing() {
     assert_no_grep 'pr merge' "$case_dir/gh.log" "adopt-refuse-$name: a merge ran"
   done
   pass "fm-pr-check.sh adopt refuses fleet-owned, draft, closed, unprovable, unfiled, and non-GitHub pull requests and records nothing"
+}
+
+# Branch ownership is repository-scoped: a task in another project, or an
+# outside contributor's fork, using a fleet branch name does not own the PR.
+test_adoption_ignores_branch_namesakes_outside_the_repository() {
+  local case_dir rc name
+  for name in other-project fork; do
+    case_dir=$(make_adopt_case "adopt-namesake-$name")
+    jq -c '.headRefName = "fm/fleet-work"' "$case_dir/github-view.json" > "$case_dir/v" \
+      && mv "$case_dir/v" "$case_dir/github-view.json"
+    case "$name" in
+      other-project)
+        git init -q "$case_dir/other-project"
+        git -C "$case_dir/other-project" remote add origin https://github.com/other/thing.git
+        fm_write_meta "$case_dir/state/task-y1.meta" "worktree=$case_dir/wt" "kind=ship" \
+          "branch=fm/fleet-work" "project=$case_dir/other-project"
+        ;;
+      fork)
+        fm_write_meta "$case_dir/state/task-y1.meta" "worktree=$case_dir/wt" "kind=ship" \
+          "branch=fm/fleet-work" "project=$case_dir/project"
+        jq -c '.headRepositoryOwner = {login: "contributor"}' "$case_dir/github-view.json" > "$case_dir/v" \
+          && mv "$case_dir/v" "$case_dir/github-view.json"
+        ;;
+    esac
+    set +e
+    adopt_in_case "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+    rc=$?
+    set -e
+    expect_code 0 "$rc" "adopt-namesake-$name: adoption should succeed ($(cat "$case_dir/stderr"))"
+    assert_grep "pr=$ADOPT_URL" "$case_dir/state/ext-176.meta" "adopt-namesake-$name: pr= was not recorded"
+  done
+  pass "fm-pr-check.sh adopt ignores a fleet branch name used in another repository"
+}
+
+# An adopted record has no endpoint, so teardown closes it whether or not the
+# home transitions its backlog, and after an interrupted teardown left its
+# legacy incarnation stamp on the record.
+test_adopted_record_teardown_without_backlog_or_after_interruption() {
+  local case_dir rc name
+  for name in manual-backlog stamped; do
+    case_dir=$(make_adopt_case "adopt-teardown-$name")
+    [ "$name" != manual-backlog ] || printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+    set +e
+    adopt_in_case "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+    rc=$?
+    set -e
+    expect_code 0 "$rc" "adopt-teardown-$name: adoption should succeed ($(cat "$case_dir/stderr"))"
+    if [ "$name" = stamped ]; then
+      printf '%s\n' "spawn_gen=legacy-20261101T000000Z-4242" >> "$case_dir/state/ext-176.meta"
+      FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$case_dir/home" FM_STATE_OVERRIDE="$case_dir/state" \
+        HOME="$case_dir/user-home" PATH="$case_dir/fakebin:$PATH" \
+        "$ROOT/bin/fm-crew-state.sh" ext-176 > "$case_dir/stdout" 2> "$case_dir/stderr" || true
+      assert_grep 'state: done' "$case_dir/stdout" "adopt-teardown-$name: the stamped record is no longer adopted"
+    fi
+    set +e
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$case_dir/home" FM_STATE_OVERRIDE="$case_dir/state" \
+      HOME="$case_dir/user-home" PATH="$case_dir/fakebin:$PATH" \
+      "$ROOT/bin/fm-teardown.sh" ext-176 > "$case_dir/stdout" 2> "$case_dir/stderr"
+    rc=$?
+    set -e
+    expect_code 0 "$rc" "adopt-teardown-$name: cleanup should succeed ($(cat "$case_dir/stderr"))"
+    assert_grep 'adopted pull request record' "$case_dir/stdout" "adopt-teardown-$name: cleanup did not name the record"
+    assert_absent "$case_dir/state/ext-176.meta" "adopt-teardown-$name: cleanup left the record"
+  done
+  pass "teardown closes an adopted record in a manual-backlog home and after an interrupted teardown"
 }
 
 # A fleet ship record relabelled as adopted still names its worker, so neither
@@ -3801,6 +3870,8 @@ test_github_queue_required_refusal_names_retry_flags
 test_extra_merge_args_forwarded
 test_adopted_pr_merges_through_the_guarded_path
 test_adoption_refusals_record_nothing
+test_adoption_ignores_branch_namesakes_outside_the_repository
+test_adopted_record_teardown_without_backlog_or_after_interruption
 test_fleet_record_cannot_claim_to_be_adopted
 test_adopted_pr_keeps_every_merge_guard
 test_missing_meta_refuses_before_merge

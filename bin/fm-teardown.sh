@@ -728,6 +728,7 @@ case "$TEARDOWN_WINDOW_COUNT:$(fm_meta_get "$META" window)" in
         # endpoint, so it is windowless by construction (see the header).
         if fm_pr_adopted_record "$META"; then
           TEARDOWN_WINDOWLESS_SHAPE=1
+          TEARDOWN_WINDOWLESS=1
           TEARDOWN_ADOPTED=1
         fi
         ;;

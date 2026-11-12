@@ -843,7 +843,7 @@ fm_dod_meta_value() {  # <meta> <key>
 fm_dod_accept_adopted_pr() {  # <meta> <provider> <live-forge-head>
   local meta=$1 provider=$2 head=$3
   if ! fm_pr_adopted_record "$meta"; then
-    printf '%s\n' "an adopted pull request record must name no worker (none of: $FM_PR_ADOPTED_WORKER_FIELDS); a fleet task registers its pull request through its own named-head gate"
+    printf '%s\n' "an adopted pull request record must name no worker (none of: $FM_PR_ADOPTED_WORKER_FIELDS, nor a spawn_gen other than a teardown legacy- stamp); a fleet task registers its pull request through its own named-head gate"
     return 1
   fi
   if [ "$provider" != github ]; then

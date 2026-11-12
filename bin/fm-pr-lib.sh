@@ -355,7 +355,9 @@ FM_PR_ADOPTED_KIND=adopted-pr
 
 # 0 when <meta> is an adopted pull request record that names no worker: its
 # kind is FM_PR_ADOPTED_KIND and it carries none of the fields a launched
-# worker's record has. A record that fails this is never treated as adopted.
+# worker's record has. The one spawn_gen it may carry is the legacy- stamp
+# bin/fm-teardown.sh writes while closing it, never a spawn's incarnation. A
+# record that fails this is never treated as adopted.
 fm_pr_adopted_record() {  # <meta>
   local meta=$1 key
   [ -f "$meta" ] && [ ! -L "$meta" ] || return 1
@@ -364,9 +366,11 @@ fm_pr_adopted_record() {  # <meta>
   for key in $FM_PR_ADOPTED_WORKER_FIELDS; do
     ! grep -q "^$key=" "$meta" 2>/dev/null || return 1
   done
+  [ "$(grep -c '^spawn_gen=' "$meta" 2>/dev/null)" -le 1 ] || return 1
+  ! grep '^spawn_gen=' "$meta" 2>/dev/null | grep -qv '^spawn_gen=legacy-' || return 1
 }
 # The fields whose presence marks a launched worker's record.
-FM_PR_ADOPTED_WORKER_FIELDS='worktree window terminal branch harness tasktmp backend home spawn_gen busy_gen endpoint_task_id'
+FM_PR_ADOPTED_WORKER_FIELDS='worktree window terminal branch harness tasktmp backend home busy_gen endpoint_task_id'
 
 # Resolve the PR number for a task copy's branch via gh-axi, run inside that
 # copy so gh-axi resolves the copy's own repository. Echoes the number on a

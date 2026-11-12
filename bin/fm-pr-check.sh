@@ -57,10 +57,10 @@
 # backlog item <task-id> In flight in the same step, then registers the pull
 # request through the ordinary path above. It refuses, recording nothing, a
 # non-GitHub URL, a relative or non-git --project, an id that already has a
-# task record, a pull request another task already records or whose head
-# branch is a task's recorded branch, a pull request that is not open, a
-# draft, an unreadable head, and an id with no filed backlog item when the
-# automatic backlog transition applies. Because the record has no worker copy,
+# task record, a pull request another task already records or whose head is a
+# same-project task's recorded branch in --project's origin repository, a pull
+# request that is not open, a draft, an unreadable head, and an id with no
+# filed backlog item when the automatic backlog transition applies. Because the record has no worker copy,
 # bin/fm-dod-lib.sh fm_dod_accept_adopted_pr replaces the named-head gate with
 # the live head GitHub reports, and refuses any adopted record that names a
 # worker. If registration fails after the record is published, re-run the
@@ -226,8 +226,8 @@ META="$STATE/$ID.meta"
 # under the task-set and meta locks a spawn takes, with this home's backlog row
 # moved In flight in the same step (bin/fm-backlog-transition-lib.sh).
 pr_check_adopt() {
-  local view state draft head head_ref other other_url other_branch tmp \
-    data config set_lock meta_lock gate=0 rc=0
+  local view state draft head head_ref head_repo origin project_real other other_url \
+    other_branch other_project tmp data config set_lock meta_lock gate=0 rc=0
   if [ "$PROVIDER" != github ]; then
     echo "error: adopting a pull request is supported only for GitHub pull requests; $URL is a $PROVIDER URL" >&2
     return 1
@@ -248,7 +248,7 @@ pr_check_adopt() {
     echo "error: task $ID already has a task record; adoption only creates a new record for a pull request no fleet worker opened, and a fleet task registers its own pull request with fm-pr-check.sh $ID <pr-url>" >&2
     return 1
   fi
-  view=$(gh pr view "$URL" --json state,isDraft,headRefOid,headRefName 2>/dev/null) || {
+  view=$(gh pr view "$URL" --json state,isDraft,headRefOid,headRefName,headRepository,headRepositoryOwner 2>/dev/null) || {
     echo "error: $URL could not be read from GitHub, so its head cannot be proven from the forge; nothing was recorded" >&2
     return 1
   }
@@ -256,6 +256,9 @@ pr_check_adopt() {
   draft=$(fm_pr_json_draft_state "$view")
   head=$(printf '%s\n' "$view" | jq -r '.headRefOid // empty' 2>/dev/null || true)
   head_ref=$(printf '%s\n' "$view" | jq -r '.headRefName // empty' 2>/dev/null || true)
+  head_repo=$(printf '%s\n' "$view" \
+    | jq -r 'if (.headRepositoryOwner.login // "") != "" and (.headRepository.name // "") != "" then "\(.headRepositoryOwner.login)/\(.headRepository.name)" else empty end' \
+      2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
   if [ "$state" != OPEN ]; then
     echo "error: $URL is ${state:-in an unreadable state}, not open; only an open pull request can be adopted" >&2
     return 1
@@ -268,18 +271,29 @@ pr_check_adopt() {
     echo "error: GitHub reported no valid head commit for $URL, so its head cannot be proven from the forge; nothing was recorded" >&2
     return 1
   fi
-  # A pull request a fleet task already owns, or one whose head branch is a
-  # fleet task's branch, is that task's to register through its own named-head
-  # gate, never adoptable around it.
+  # A pull request a fleet task already owns, or one whose head is a fleet
+  # task's branch in this project's origin repository, is that task's to
+  # register through its own named-head gate, never adoptable around it.
+  project_real=$(cd -P "$ADOPT_PROJECT" && pwd)
+  origin=$(git -C "$ADOPT_PROJECT" remote get-url origin 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)
+  origin=${origin%/}
+  origin=${origin%.git}
+  case "$origin" in
+    */"$head_repo"|*:"$head_repo") ;;
+    *) head_ref= ;;
+  esac
+  [ -n "$head_repo" ] || head_ref=
   for other in "$STATE"/*.meta; do
     [ -f "$other" ] || continue
     other_url=$(fm_dod_meta_value "$other" pr)
     other_branch=$(fm_dod_meta_value "$other" branch)
+    other_project=$(fm_dod_meta_value "$other" project)
     if [ "$other_url" = "$URL" ]; then
       echo "error: $URL is already recorded by task $(basename "$other" .meta); register it through that task" >&2
       return 1
     fi
-    if [ -n "$head_ref" ] && [ "$other_branch" = "$head_ref" ]; then
+    if [ -n "$head_ref" ] && [ "$other_branch" = "$head_ref" ] && [ -n "$other_project" ] \
+      && [ "$(cd -P "$other_project" 2>/dev/null && pwd)" = "$project_real" ]; then
       echo "error: $URL's head branch $head_ref belongs to fleet task $(basename "$other" .meta); register it through that task" >&2
       return 1
     fi
