@@ -1435,6 +1435,42 @@ test_failed_restore_leaves_no_partial_launch_brief() {
   pass "a restore that fails part way leaves no partial launch-brief.md for a retry to keep"
 }
 
+# A promotion that fails after publishing the ship instructions' protected copy
+# must leave the scout copy in place even when state/ has no room for another
+# copy; otherwise an evidence wipe restores ship instructions for a scout.
+test_failed_promotion_keeps_the_scout_protected_copy() {
+  local case_dir home id out rc=0 real_cp
+  id=atomic-promote-rollback
+  case_dir=$(make_home promote-rollback "$id")
+  home=$(home_of "$case_dir")
+  add_item "$case_dir" "$id" scout
+  out=$(run_spawn "$case_dir" "$id" "$case_dir/project" --scout) || fail "scout spawn failed: $out"
+  cp "$home/state/$id.brief" "$case_dir/scout-copy"
+  cp "$home/data/$id/brief.md" "$case_dir/scout-brief"
+  break_meta_publication "$case_dir" "$home/state/$id.meta"
+  real_cp=$(command -v cp)
+  cat > "$case_dir/fakebin/cp" <<SH
+#!/usr/bin/env bash
+case "\${*: -1}" in
+  "$home/state/$id.brief.tmp."*)
+    if [ -e "$case_dir/state-copy-made" ]; then exit 1; fi
+    : > "$case_dir/state-copy-made" ;;
+esac
+exec "$real_cp" "\$@"
+SH
+  chmod +x "$case_dir/fakebin/cp"
+  out=$(FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" \
+    "$ROOT/bin/fm-promote.sh" "$id" --mode local-only --yolo off 2>&1) || rc=$?
+  rm -f "$case_dir/fakebin/cp" "$case_dir/fakebin/mv"
+  [ "$rc" -ne 0 ] || fail "promotion succeeded without publishing its task record: $out"
+  assert_present "$case_dir/state-copy-made" "promotion never published the ship instructions' protected copy: $out"
+  grep -qx 'kind=scout' "$home/state/$id.meta" || fail "failed promotion changed the task kind"
+  cmp -s "$case_dir/scout-brief" "$home/data/$id/brief.md" || fail "failed promotion left the ship brief in place"
+  cmp -s "$case_dir/scout-copy" "$home/state/$id.brief" || fail "failed promotion left a protected copy that is not the scout instructions"
+  [ -z "$(find "$home/state" -name ".$id.brief.*")" ] || fail "failed promotion left a staged protected copy behind"
+  pass "a failed promotion keeps the scout instructions' protected copy without recopying it"
+}
+
 test_retained_task_requires_confirmed_continuation() {
   local kind=$1 wipe=${2:-} case_dir home id out
   local -a flags=(--mode no-mistakes --yolo off)
@@ -3319,6 +3355,7 @@ test_retained_task_requires_confirmed_continuation ship
 test_retained_task_requires_confirmed_continuation scout
 test_retained_task_requires_confirmed_continuation ship wiped
 test_failed_restore_leaves_no_partial_launch_brief
+test_failed_promotion_keeps_the_scout_protected_copy
 test_retained_task_requires_confirmed_continuation scout wiped
 test_dispatch_refuses_to_commit_without_a_published_record
 test_dispatch_leaves_no_record_when_the_transition_fails

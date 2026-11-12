@@ -21,8 +21,8 @@
 # resurrect the previous item's instructions; teardown removes the copy.
 # The launch brief needs no copy of its own because every launch re-renders it
 # from brief.md, and the steering inbox already lives under state/.
-# bin/fm-promote.sh publishes the copy inside its promotion transaction and
-# refreshes it from the scout brief whenever it rolls the promotion back.
+# bin/fm-promote.sh publishes the copy inside its promotion transaction and,
+# when it rolls the promotion back, renames the scout copy back into place.
 #
 # Regression coverage: tests/fm-control-relaunch.test.sh.
 
