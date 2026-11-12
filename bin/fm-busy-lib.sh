@@ -1306,7 +1306,7 @@ fm_busy_classify_live() {  # <backend> <target> <harness> <id> <state-dir> [expe
     printf 'unknown no-target'
     return 0
   fi
-  if ! fm_backend_target_exists "$backend" "$target" "$label" 2>/dev/null; then
+  if ! fm_backend_target_exists "$backend" "$target" "$label" "$state/$id.meta" 2>/dev/null; then
     printf 'dead endpoint-gone'
     return 0
   fi

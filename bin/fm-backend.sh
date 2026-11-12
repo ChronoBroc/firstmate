@@ -1430,6 +1430,25 @@ fm_backend_composer_state() {  # <backend> <target> [expected-label] -> empty|pe
   esac
 }
 
+# fm_backend_record_server_lost: 0 only when <meta-file> records the session
+# server its endpoint lived on and that server is proven to have exited. This
+# is the one owner of binding a liveness read to the recorded endpoint rather
+# than to a same-named one: after a tmux server restart the new server can hold
+# a session and window under the recorded names, and only the recorded server
+# identity (tmux_socket, tmux_server) tells the two apart. The tmux adapter's
+# fm_backend_tmux_recorded_server_lost owns the proof. Every other case -
+# no file, a record written before identities were recorded, an unproven read,
+# a backend with no recorded server identity - returns 1 and leaves the
+# ordinary read in charge, so a record is never reported dead on this ground
+# without positive evidence.
+fm_backend_record_server_lost() {  # <backend> <meta-file>
+  local backend=$1 meta=${2:-}
+  [ "$backend" = tmux ] && [ -n "$meta" ] && [ -f "$meta" ] || return 1
+  fm_backend_source tmux || return 1
+  fm_backend_tmux_recorded_server_lost \
+    "$(fm_meta_get "$meta" tmux_socket)" "$(fm_meta_get "$meta" tmux_server)"
+}
+
 # fm_backend_target_exists: cheap, READ-ONLY existence check - does the
 # recorded TARGET endpoint still exist on BACKEND? Never starts a server or
 # session: for herdr this deliberately queries the pane directly instead of
@@ -1445,11 +1464,15 @@ fm_backend_composer_state() {  # <backend> <target> [expected-label] -> empty|pe
 # For tmux, TARGET accepts `%pane`, `@window`, `session:@window`, a bare exact
 # session, and `session:window`, `session:index`, or a window index with
 # a numeric `.pane` suffix; optional `=session:=window` markers stay exact too.
-fm_backend_target_exists() {  # <backend> <target> [expected-label]
-  local backend=$1 target=$2 expected_label=${3:-} session pane
+# An optional task <meta-file> binds the read to the record's server identity
+# (fm_backend_record_server_lost below), so a same-named window on a server
+# that replaced the recorded one reads as not existing.
+fm_backend_target_exists() {  # <backend> <target> [expected-label] [meta-file]
+  local backend=$1 target=$2 expected_label=${3:-} meta=${4:-} session pane
   case "$backend" in
     tmux)
       fm_backend_source tmux || return 1
+      ! fm_backend_record_server_lost tmux "$meta" || return 1
       fm_backend_tmux_target_exists "$target"
       ;;
     herdr)
@@ -1536,9 +1559,18 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # no control-plane verb treats a Tern verdict as proof that an agent stopped.
 # hc classifies the one foreground process `hc get` reports through the same
 # classifier and is likewise absent from fm_control_backend_state_verified.
-fm_backend_agent_state() {  # <backend> <target>
-  local backend=$1 target=$2
+# A reader that holds the task's <meta-file> passes it so the verdict is bound
+# to the endpoint the record names: when fm_backend_record_server_lost proves
+# the recorded server gone, the endpoint is `missing` whatever the server
+# answering now holds under the same name. Without the file, or for a record
+# that carries no server identity, the read is exactly the unbound one.
+fm_backend_agent_state() {  # <backend> <target> [meta-file]
+  local backend=$1 target=$2 meta=${3:-}
   fm_backend_source "$backend" || { printf 'unverified'; return 0; }
+  if fm_backend_record_server_lost "$backend" "$meta"; then
+    printf 'missing'
+    return 0
+  fi
   case "$backend" in
     tmux) fm_backend_tmux_agent_state "$target" ;;
     herdr) fm_backend_herdr_agent_state "$target" ;;
@@ -1553,8 +1585,8 @@ fm_backend_agent_state() {  # <backend> <target>
 # Backward-compatible three-state view for existing callers. An
 # authoritatively missing endpoint is confidently not a live agent, while every
 # ambiguous, unreadable, or unverified result stays unknown.
-fm_backend_agent_alive() {  # <backend> <target>
-  case "$(fm_backend_agent_state "$1" "$2")" in
+fm_backend_agent_alive() {  # <backend> <target> [meta-file]
+  case "$(fm_backend_agent_state "$1" "$2" "${3:-}")" in
     alive) printf 'alive' ;;
     dead|missing) printf 'dead' ;;
     *) printf 'unknown' ;;

@@ -162,6 +162,7 @@ no server running on $T/s
 
 An exited server's pid reads as no process at all (exit 1, no output), and its socket answers no identity.
 `tests/fm-control-relaunch.test.sh` (`test_tmux_absence_proof_against_a_real_private_server`) re-checks the same formats and verdicts against a real private server wherever tmux is installed.
+`tests/fm-tmux-server-restart-liveness.test.sh` re-checks, against a real private server restarted on the same socket, that a record naming the exited server reads its same-named window gone through every record-holding liveness reader.
 
 ### Agent liveness name sources
 
