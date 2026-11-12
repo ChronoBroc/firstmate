@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Unit tests for bin/fm-quota-choose.sh.
 # Drives the public argv interface with a mocked quota-axi JSON source.
+# The fake quota-axi answers a native Codex launch-store read
+# (`--provider codex --profile-only --json`) from $CODEX_HOME/quota.json and
+# logs it to $STORE_READS, apart from the snapshot calls in $CALLS. A fake tmux
+# reports no server, so no case reads a live tmux environment, and every case
+# runs with its own HOME and FM_HOME, so no host account pin is read.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,6 +56,10 @@ SCHEMA6_DUPLICATE="$LAB/schema6-duplicate.json"
 SCHEMA6_TOON="$LAB/schema6-quota.toon"
 FAKEBIN="$LAB/fakebin"
 CALLS="$LAB/calls"
+STORE_READS="$LAB/store-reads"
+CHOOSE_HOME="$LAB/home"
+USER_HOME="$LAB/user-home"
+LAUNCH_STORE="$LAB/launch-store"
 
 cleanup() {
   rm -rf "$LAB"
@@ -150,6 +159,11 @@ JSON
 
 cat > "$FAKEBIN/quota-axi" <<'SH'
 #!/usr/bin/env bash
+if [ "$*" = '--provider codex --profile-only --json' ]; then
+  printf '%s\n' "${CODEX_HOME-unset}" >> "${STORE_READS:?}"
+  [ -f "${CODEX_HOME-}/quota.json" ] || exit 1
+  exec cat "$CODEX_HOME/quota.json"
+fi
 printf 'called\n' >> "${QUOTA_AXI_CALLS:?}"
 if [ "${1:-}" = "--version" ]; then
   echo "quota-axi 0.1.51"
@@ -158,12 +172,23 @@ fi
 cat "${QUOTA_AXI_FIXTURE:?}"
 SH
 chmod +x "$FAKEBIN/quota-axi"
+cat > "$FAKEBIN/tmux" <<'SH'
+#!/usr/bin/env bash
+echo 'no server running' >&2
+exit 1
+SH
+chmod +x "$FAKEBIN/tmux"
+mkdir -p "$CHOOSE_HOME/config" "$USER_HOME" "$LAUNCH_STORE"
+# The default launch store measures what the fixture's codex row measures, so
+# cases that only exercise scope matching read the same numbers either way.
+jq '{schemaVersion, providers: [.providers[] | select(.provider == "codex")]}' "$FIXTURE" > "$LAUNCH_STORE/quota.json"
 
 QUOTA_AXI_CALLS="$CALLS" QUOTA_AXI_FIXTURE="$FIXTURE" "$FAKEBIN/quota-axi" --json > "$LAB/captured.json"
 
 call_choose() {
   local output rc call_count
-  output=$(QUOTA_AXI_CALLS="$CALLS" QUOTA_AXI_FIXTURE="$FIXTURE" \
+  output=$(QUOTA_AXI_CALLS="$CALLS" QUOTA_AXI_FIXTURE="$FIXTURE" STORE_READS="$STORE_READS" \
+    HOME="$USER_HOME" FM_HOME="$CHOOSE_HOME" FM_BACKEND=tmux CODEX_HOME="${CHOOSE_CODEX_HOME:-$LAUNCH_STORE}" \
     PATH="$FAKEBIN:$PATH" "$BIN/fm-quota-choose.sh" "$@")
   rc=$?
   call_count=$(wc -l < "$CALLS" | tr -d '[:space:]')
@@ -664,33 +689,25 @@ cat > "$SCHEMA6" <<'JSON'
   ]
 }
 JSON
-out=$(call_choose --snapshot "$SCHEMA6" --candidate codex:default --candidate cursor:default)
+out=$(CHOOSE_CODEX_HOME="$LAB/unread-store" call_choose --snapshot "$SCHEMA6" --candidate codex:default --candidate cursor:default)
 [ "$out" = "cursor default" ] || fail "schema 6 snapshot returned: $out"
 ok "native Codex never infers an account from a Pi lane"
 
 SCHEMA6_NATIVE="$LAB/schema6-native.json"
 jq '
-  .providers |= map(if .provider == "codex" then
-    .quotaSemantics.effectiveAvailability |= map(.effectivePercentRemaining = 0 | .runway.status = "exhausted_now")
-    else . end) |
   (.providers[] | select(.accountKey == "openai-codex-work")) as $account |
   .providers += [($account | .accountKey = "default"),
     ($account | .accountKey = "codex-home" |
       .quotaSemantics.effectiveAvailability |= map(.effectivePercentRemaining = 80 | .runway.status = "through_reset"))]
 ' "$SCHEMA6" > "$SCHEMA6_NATIVE"
+mkdir -p "$LAB/exhausted-store"
+jq '.providers[0].quotaSemantics.effectiveAvailability |= map(.effectivePercentRemaining = 0 | .runway.status = "exhausted_now")' \
+  "$LAUNCH_STORE/quota.json" > "$LAB/exhausted-store/quota.json"
 for model in default gpt-5.6-sol; do
-  out=$(call_choose --snapshot "$SCHEMA6_NATIVE" --candidate "codex:$model" --candidate cursor:default)
-  [ "$out" = "codex $model" ] || fail "native Codex did not select codex-home for $model: $out"
+  out=$(CHOOSE_CODEX_HOME="$LAB/exhausted-store" call_choose --snapshot "$SCHEMA6_NATIVE" --candidate "codex:$model" --candidate cursor:default)
+  [ "$out" = "cursor default" ] || fail "native Codex read the snapshot's codex-home row instead of its exhausted launch store for $model: $out"
 done
-jq '.providers |= reverse' "$SCHEMA6_NATIVE" > "$LAB/schema6-reversed.json"
-out=$(call_choose --snapshot "$LAB/schema6-reversed.json" --candidate codex:default --candidate cursor:default)
-[ "$out" = "codex default" ] || fail "native Codex selection depended on row order: $out"
-
-jq '.providers |= map(select(.provider != "codex" or .accountKey != "default") |
-  if .accountKey == "codex-home" then .accountKey = "default" else . end)' "$SCHEMA6_NATIVE" > "$LAB/schema6-default.json"
-out=$(call_choose --snapshot "$LAB/schema6-default.json" --candidate codex:default --candidate cursor:default)
-[ "$out" = "codex default" ] || fail "native Codex did not fall back to the default row: $out"
-ok "native Codex binds to codex-home before default, independently of model and row order"
+ok "native Codex reads its launch store, never the snapshot's codex-home or default row"
 
 jq '.schemaVersion = 5 | .providers |= unique_by(.provider) | del(.providers[].accountKey)' "$SCHEMA6" > "$SCHEMA5_PAIR"
 out=$(call_choose --snapshot "$SCHEMA5_PAIR" --candidate codex:default --candidate cursor:default)
@@ -725,12 +742,46 @@ attention[1]{provider,accountKey,scope,kind,detail,remedy}:
 help[1]:
   Run `quota-axi --full` for windows, pace, reserve, and account evidence
 TOON
-out=$(call_choose --snapshot "$SCHEMA6_TOON" --candidate claude:default --candidate codex:default --candidate cursor:default)
+out=$(call_choose --snapshot "$SCHEMA6_TOON" --candidate claude:default --candidate cursor:default)
 [ "$out" = "cursor default" ] || fail "schema 6 TOON snapshot returned: $out"
 ok "schema 6 TOON with the accountKey column is accepted"
 
 [ "$(wc -l < "$CALLS" | tr -d '[:space:]')" = 1 ] || fail "helper took an additional quota snapshot"
 ok "helper reuses the captured quota snapshot"
+
+# A config/codex-account pin names the store a native Codex worker launches
+# on; the helper measures that store, not the snapshot's codex row, the
+# inherited CODEX_HOME, or ~/.codex, all of which are exhausted here.
+PIN_HOME="$LAB/pin-home"
+PINNED_STORE="$LAB/pinned-store"
+mkdir -p "$PIN_HOME/config" "$PINNED_STORE" "$USER_HOME/.codex"
+jq '.providers[0].quotaSemantics.effectiveAvailability = [{scope: "all_models", status: "known", effectivePercentRemaining: 77, runway: {status: "through_reset"}}]' \
+  "$LAUNCH_STORE/quota.json" > "$PINNED_STORE/quota.json"
+cp "$LAB/exhausted-store/quota.json" "$USER_HOME/.codex/quota.json"
+jq '(.providers[] | select(.provider == "codex").quotaSemantics.effectiveAvailability) |= map(.effectivePercentRemaining = 0 | .runway.status = "exhausted_now")' \
+  "$LAB/captured.json" > "$LAB/codex-exhausted.json"
+printf '%s\n' "$PINNED_STORE" > "$PIN_HOME/config/codex-account"
+: > "$STORE_READS"
+out=$(CHOOSE_HOME="$PIN_HOME" CHOOSE_CODEX_HOME="$LAB/exhausted-store" call_choose --snapshot "$LAB/codex-exhausted.json" --candidate codex:gpt-5.6-sol --candidate claude:claude-3-5-sonnet)
+[ "$out" = "codex gpt-5.6-sol" ] || fail "pinned native Codex was not measured on its pinned store: $out"
+[ "$(cat "$STORE_READS")" = "$PINNED_STORE" ] || fail "launch-store read went to: $(cat "$STORE_READS")"
+ok "a pinned native Codex candidate is measured on its pinned store"
+
+rm -f "$PINNED_STORE/quota.json"
+out=$(CHOOSE_HOME="$PIN_HOME" call_choose --snapshot "$LAB/captured.json" --candidate codex:default --candidate claude:claude-3-5-sonnet)
+[ "$out" = "claude claude-3-5-sonnet" ] || fail "an unmeasured pinned store fell back to another store's row: $out"
+ok "an unmeasured pinned store is unknown quota, never another store's row"
+
+printf 'not a store\n' > "$PIN_HOME/config/codex-account"
+: > "$STORE_READS"
+if err=$(CHOOSE_HOME="$PIN_HOME" call_choose --snapshot "$LAB/captured.json" --candidate codex:default --candidate claude:claude-3-5-sonnet 2>&1); then
+  fail "a refused Codex pin was selected around: $err"
+fi
+[ ! -s "$STORE_READS" ] || fail "a refused Codex pin still read a store"
+: > "$STORE_READS"
+out=$(CHOOSE_HOME="$PIN_HOME" call_choose --snapshot "$LAB/captured.json" --candidate claude:claude-3-5-sonnet)
+[ "$out" = "claude claude-3-5-sonnet" ] && [ ! -s "$STORE_READS" ] || fail "a list without native Codex read a launch store: $out"
+ok "a refused Codex pin exits 2, and only native Codex candidates read a launch store"
 
 lookup_err=$(bash -c '
   trap "" PIPE

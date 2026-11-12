@@ -4,7 +4,10 @@
 # Drives the public argv and environment interface with a fake curl on PATH
 # that records argv, the request body it read from stdin, and the header it
 # read from file descriptor 3, and answers with a canned provider response.
-# A fake quota-axi serves the selected schema-5 fixture. A fake security and a
+# A fake quota-axi serves the selected schema-5 fixture, and answers a native
+# Codex launch-store read from $CODEX_HOME/quota.json, else, for the test's
+# own default store only, from the fixture's default codex row; any other
+# store without that file is unreadable. A fake tmux reports no server. A fake security and a
 # fake uname stand in for the macOS Keychain, so no case reads the real one.
 # No case touches the network, and the absent-key case proves the tool makes
 # no call at all.
@@ -165,17 +168,27 @@ chmod +x "$FAKEBIN/curl"
 cat > "$FAKEBIN/quota-axi" <<'SH'
 #!/usr/bin/env bash
 set -u
+tag=quota-axi
+[ "$*" != '--provider codex --profile-only --json' ] || tag=quota-axi-store
 if [ -n "${TYPESAFE_API_KEY+x}" ] || [ -n "${TYPESAFE_API_KEY_PRIVATE+x}" ] ||
   [ -n "${OPENROUTER_API_KEY+x}" ] || [ -n "${OPENROUTER_API_KEY_PRIVATE+x}" ] ||
   [ -n "${OPENAI_API_KEY+x}" ] || [ -n "${OPENAI_API_KEY_PRIVATE+x}" ] ||
   [ -n "${FM_DISPATCH_API_KEY+x}" ] || [ -n "${DISPATCH_API_KEY_PRIVATE+x}" ] ||
   [ -n "${KEY_PRIVATE+x}" ]; then
-  printf 'quota-axi:secret-present\n' >> "${CHILD_ENV_LOG:?}"
+  printf '%s:secret-present\n' "$tag" >> "${CHILD_ENV_LOG:?}"
 else
-  printf 'quota-axi:clean\n' >> "${CHILD_ENV_LOG:?}"
+  printf '%s:clean\n' "$tag" >> "${CHILD_ENV_LOG:?}"
 fi
 if [ -n "${FAKE_CANARY_FILE:-}" ] && env | grep -qF -- "$(cat "$FAKE_CANARY_FILE")"; then
-  printf 'quota-axi:canary-in-env\n' >> "${CHILD_ENV_LOG:?}"
+  printf '%s:canary-in-env\n' "$tag" >> "${CHILD_ENV_LOG:?}"
+fi
+if [ "$tag" = quota-axi-store ]; then
+  printf '%s\n' "${CODEX_HOME-unset}" >> "${QUOTA_AXI_STORE_READS:?}"
+  [ ! -f "${CODEX_HOME-}/quota.json" ] || exec cat "$CODEX_HOME/quota.json"
+  [ "${CODEX_HOME-}" = "${QUOTA_AXI_FIXTURE_STORE:?}" ] || exit 1
+  jq -e '{schemaVersion: 5, providers: [[.providers[] | select(.provider == "codex" and ((.accountKey // "default") == "default"))] | first | values | del(.accountKey)]}
+    | select(.providers | length == 1)' "${QUOTA_AXI_FIXTURE:?}" || exit 1
+  exit 0
 fi
 printf '%s\n' "$*" >> "${QUOTA_AXI_CALLS:?}"
 [ "${FAKE_QUOTA_FAIL:-0}" = 1 ] && exit 1
@@ -183,6 +196,14 @@ printf '%s\n' "$*" >> "${QUOTA_AXI_CALLS:?}"
 cat "${QUOTA_AXI_FIXTURE:?}"
 SH
 chmod +x "$FAKEBIN/quota-axi"
+cat > "$FAKEBIN/tmux" <<'SH'
+#!/usr/bin/env bash
+echo 'no server running' >&2
+exit 1
+SH
+chmod +x "$FAKEBIN/tmux"
+CODEX_STORE="$TMP_ROOT/codex-store"
+mkdir -p "$CODEX_STORE"
 
 cat > "$FAKEBIN/security" <<'SH'
 #!/usr/bin/env bash
@@ -237,7 +258,7 @@ SH
 chmod +x "$FAKEBIN/uname"
 
 RESPONSE="$TMP_ROOT/response.json"
-export FAKE_CURL_LOG="$LOG" FAKE_CURL_RESPONSE="$RESPONSE" QUOTA_AXI_CALLS="$LOG/quota-axi.calls" QUOTA_AXI_FIXTURE="$QUOTA" CHILD_ENV_LOG="$LOG/child-env" FAKE_SECURITY_LOG="$LOG/security.argv"
+export FAKE_CURL_LOG="$LOG" FAKE_CURL_RESPONSE="$RESPONSE" QUOTA_AXI_CALLS="$LOG/quota-axi.calls" QUOTA_AXI_STORE_READS="$LOG/store-reads" CODEX_HOME="$CODEX_STORE" QUOTA_AXI_FIXTURE_STORE="$CODEX_STORE" QUOTA_AXI_FIXTURE="$QUOTA" CHILD_ENV_LOG="$LOG/child-env" FAKE_SECURITY_LOG="$LOG/security.argv"
 
 reset_log() {
   rm -rf "$LOG"
@@ -434,7 +455,7 @@ assert_contains "$argv" 'https://api.typesafe.ai/v1/systemone' "the request defa
 assert_contains "$argv" $'--max-time\n5' "the request uses the fixed five-second timeout"
 assert_contains "$argv" '@/dev/fd/3' "the header is read from a file descriptor"
 assert_equals "Authorization: Bearer $KEY" "$(cat "$LOG/header")" "curl receives the bearer header on fd 3"
-assert_equals $'curl:clean\nquota-axi:clean' "$(cat "$LOG/child-env")" "the API key is absent from every child environment"
+assert_equals $'curl:clean\nquota-axi:clean\nquota-axi-store:clean' "$(cat "$LOG/child-env")" "the API key is absent from every child environment"
 body=$(cat "$LOG/body")
 printf '%s\n' "$body" > "$TMP_ROOT/typesafe-body.json"
 assert_equals 'jev-latest' "$(jq -r .model <<<"$body")" "default model is jev-latest"
@@ -460,7 +481,7 @@ while IFS='|' read -r base endpoint; do
   assert_contains "$(cat "$LOG/argv")" $'--globoff\n' "custom base disables curl URL expansion"
   assert_equals "Authorization: Bearer $KEY" "$(cat "$LOG/header")" "custom base keeps the fd header transport"
   assert_not_contains "$(cat "$LOG/argv")" "$KEY" "custom base keeps the key out of argv"
-  assert_equals $'curl:clean\nquota-axi:clean' "$(cat "$LOG/child-env")" "custom base keeps the key out of child environments"
+  assert_equals $'curl:clean\nquota-axi:clean\nquota-axi-store:clean' "$(cat "$LOG/child-env")" "custom base keeps the key out of child environments"
 done <<'BASE_ENDPOINTS'
 https://gateway.example/typesafe/|https://gateway.example/typesafe/v1/systemone
 http://localhost:8080/proxy///|http://localhost:8080/proxy/v1/systemone
@@ -595,7 +616,7 @@ assert_contains "$(cat "$LOG/argv")" 'https://openrouter.ai/api/alpha/decisions'
 assert_contains "$(cat "$LOG/argv")" $'--max-time\n10' "OpenRouter timeout"
 assert_not_contains "$(cat "$LOG/argv")" "$OR_KEY" "OpenRouter key never appears in curl argv"
 assert_equals "Authorization: Bearer $OR_KEY" "$(cat "$LOG/header")" "OpenRouter key reaches curl only through fd 3"
-assert_equals $'curl:clean\nquota-axi:clean' "$(cat "$LOG/child-env")" "OpenRouter key is absent from child environments"
+assert_equals $'curl:clean\nquota-axi:clean\nquota-axi-store:clean' "$(cat "$LOG/child-env")" "OpenRouter key is absent from child environments"
 assert_equals 'typesafe/jev-1.13' "$(jq -r .model "$LOG/body")" "OpenRouter model is explicit"
 assert_equals 'pager' "$(jq -r .state.task.project "$LOG/body")" "project reaches the model"
 assert_equals 'choice' "$(jq -r .questions.rule.type "$LOG/body")" "OpenRouter uses the native Choice request"
@@ -899,7 +920,7 @@ assert_not_contains "$err" "$SECRET" "the key never reaches stderr"
 assert_not_contains "$(cat "$LOG/argv")" "$SECRET" "the key never appears on curl argv"
 assert_not_contains "$(cat "$LOG/security.argv")" "$SECRET" "the key never appears on security argv"
 assert_not_contains "$(cat "$LOG/body")" "$SECRET" "the key never rides in the request body"
-assert_equals $'security:clean\ncurl:clean\nquota-axi:clean' "$(cat "$LOG/child-env")" "the key is in no child environment, and in no file the tool holds while the request is in flight"
+assert_equals $'security:clean\ncurl:clean\nquota-axi:clean\nquota-axi-store:clean' "$(cat "$LOG/child-env")" "the key is in no child environment, and in no file the tool holds while the request is in flight"
 ! grep -rqF -- "$SECRET" "$HOME_DIR" || fail "the key was written under the home"
 ! grep -rqF -- "$SECRET" "$SCAN_TMP" || fail "the key was left in the temporary directory"
 rm -f "$CRED"
@@ -971,7 +992,7 @@ assert_contains "$out" '  status: clear' "systemone with a key is clear"
 assert_contains "$(cat "$LOG/argv")" 'https://so.example.test/v1/systemone' "systemone https base URL"
 assert_not_contains "$(cat "$LOG/argv")" "$SO_KEY" "systemone key never appears in curl argv"
 assert_equals "Authorization: Bearer $SO_KEY" "$(cat "$LOG/header")" "systemone key reaches curl only through fd 3"
-assert_equals $'curl:clean\nquota-axi:clean' "$(cat "$LOG/child-env")" "systemone key is absent from child environments"
+assert_equals $'curl:clean\nquota-axi:clean\nquota-axi-store:clean' "$(cat "$LOG/child-env")" "systemone key is absent from child environments"
 printf '%s\n' 'FM_DISPATCH_PROVIDER=systemone' 'FM_DISPATCH_MODEL=clef' 'FM_DISPATCH_BASE_URL=http://10.0.0.5:8080' \
   "FM_DISPATCH_API_KEY=$SO_KEY" > "$HOME_DIR/.env"
 reset_log
@@ -1057,7 +1078,7 @@ assert_contains "$(cat "$LOG/argv")" 'https://api.openai.com/v1/decisions' "open
 assert_contains "$(cat "$LOG/argv")" $'--max-time\n10' "openai timeout"
 assert_not_contains "$(cat "$LOG/argv")" "$OA_KEY" "openai key never appears in curl argv"
 assert_equals "Authorization: Bearer $OA_KEY" "$(cat "$LOG/header")" "openai key reaches curl only through fd 3"
-assert_equals $'curl:clean\nquota-axi:clean' "$(cat "$LOG/child-env")" "openai key is absent from child environments"
+assert_equals $'curl:clean\nquota-axi:clean\nquota-axi-store:clean' "$(cat "$LOG/child-env")" "openai key is absent from child environments"
 body=$(cat "$LOG/body")
 assert_equals 'gpt-6-luna' "$(jq -r .model <<<"$body")" "openai model is explicit"
 assert_equals "$(jq -c .state "$TMP_ROOT/typesafe-body.json")" "$(jq -c '.input | fromjson' <<<"$body")" "openai input carries the same state as JSON text"
@@ -1766,7 +1787,7 @@ expect_code 0 "$code" "schema 6 snapshot exits 0"
 assert_contains "$out" '  status: clear' "schema 6 snapshot resolves"
 assert_contains "$out" 'candidate: pi:openai-codex-work/gpt-5.6-terra  provider=codex  scope=all_models  remaining=11%  spendPriority=-5.6819  runway=projected_exhaustion  -> eligible' "a Pi lane binds to its own account row"
 assert_contains "$out" 'candidate: pi:openai-codex/gpt-5.6-sol  provider=codex  scope=all_models  remaining=0%  spendPriority=-  runway=exhausted_now  -> not eligible: runway exhausted_now at all_models' "the sibling lane reads its own exhausted row"
-assert_contains "$out" 'candidate: codex:gpt-5.6-sol  provider=codex  -> eligible, unranked: provider codex has no quota row for account codex-home: disclosed uncertainty' "native Codex never infers an account from a Pi lane"
+assert_contains "$out" 'candidate: codex:gpt-5.6-sol  provider=codex  -> eligible, unranked: provider codex unmeasured (unknown): disclosed uncertainty' "native Codex never infers an account from a Pi lane"
 assert_contains "$out" "  profile: --harness 'pi' --model 'openai-codex-work/gpt-5.6-terra'" "the lane with headroom is chosen"
 assert_equals '--json' "$(cat "$LOG/quota-axi.calls")" "schema 6 needs one quota-axi --json read"
 
@@ -1781,24 +1802,60 @@ jq '
       .quotaSemantics.effectiveAvailability |= map(
         .effectivePercentRemaining = 80 | .runway.status = "through_reset" | .selection.spendPriority = 0.8))]
 ' "$SCHEMA6" > "$SCHEMA6_NATIVE"
+# The snapshot's codex-home row (80%) is the default store's reading; the
+# launch store a native Codex worker uses is exhausted, so it must not clear.
+store_quota() {  # <dir> <percent> <runway> <spendPriority>
+  mkdir -p "$1"
+  jq -n --argjson pct "$2" --arg runway "$3" --argjson sp "$4" '{schemaVersion: 5, providers: [{provider: "codex",
+    quotaSemantics: {status: "known", effectiveAvailability: [{scope: "all_models", status: "known",
+      effectivePercentRemaining: $pct, runway: {status: $runway}, selection: {spendPriority: $sp}}]}}]}' > "$1/quota.json"
+}
+store_quota "$CODEX_STORE" 0 exhausted_now -2.5
 reset_log
 TYPESAFE_API_KEY=$KEY QUOTA_AXI_FIXTURE="$SCHEMA6_NATIVE" run code out err "$BRIEF"
 expect_code 0 "$code" "native Codex schema 6 snapshot exits 0"
-assert_contains "$out" '  status: clear' "native Codex headroom resolves despite exhausted Pi and default rows"
-assert_contains "$out" 'candidate: codex:gpt-5.6-sol  provider=codex  scope=all_models  remaining=80%  spendPriority=0.8  runway=through_reset  -> eligible' "native Codex reads codex-home"
-assert_contains "$out" "  profile: --harness 'codex' --model 'gpt-5.6-sol'" "native Codex headroom is chosen"
+assert_contains "$out" 'candidate: codex:gpt-5.6-sol  provider=codex  scope=all_models  remaining=0%  spendPriority=-  runway=exhausted_now  -> not eligible: runway exhausted_now at all_models' "native Codex reads its exhausted launch store, not the snapshot's codex-home row"
+assert_not_contains "$out" "  profile: --harness 'codex'" "the exhausted launch store is not chosen"
+assert_equals "$CODEX_STORE" "$(cat "$LOG/store-reads")" "the launch store is read once"
 
-jq '.providers |= reverse' "$SCHEMA6_NATIVE" > "$TMP_ROOT/schema6-reversed.json"
+store_quota "$CODEX_STORE" 80 through_reset 0.8
+jq '.providers |= map(if .provider == "codex" then .quotaSemantics.effectiveAvailability |= map(.effectivePercentRemaining = 0 | .runway.status = "exhausted_now") else . end)' \
+  "$SCHEMA6_NATIVE" > "$TMP_ROOT/schema6-all-exhausted.json"
+jq '.providers |= map(select(.provider != "codex" or .accountKey != "default") |
+  if .accountKey == "codex-home" then .accountKey = "default" else . end)' "$SCHEMA6_NATIVE" > "$TMP_ROOT/schema6-default.json"
+reset_log
+TYPESAFE_API_KEY=$KEY QUOTA_AXI_FIXTURE="$TMP_ROOT/schema6-all-exhausted.json" run code out err "$BRIEF"
+assert_contains "$out" 'candidate: codex:gpt-5.6-sol  provider=codex  scope=all_models  remaining=80%  spendPriority=0.8  runway=through_reset  -> eligible' "native Codex reads its healthy launch store over exhausted snapshot rows"
+assert_contains "$out" "  profile: --harness 'codex' --model 'gpt-5.6-sol'" "native Codex launch-store headroom is chosen"
+jq '.providers |= reverse' "$TMP_ROOT/schema6-all-exhausted.json" > "$TMP_ROOT/schema6-reversed.json"
 reset_log
 TYPESAFE_API_KEY=$KEY QUOTA_AXI_FIXTURE="$TMP_ROOT/schema6-reversed.json" run code out err "$BRIEF"
 assert_contains "$out" "  profile: --harness 'codex' --model 'gpt-5.6-sol'" "native Codex selection ignores row order"
 
-jq '.providers |= map(select(.provider != "codex" or .accountKey != "default") |
-  if .accountKey == "codex-home" then .accountKey = "default" else . end)' "$SCHEMA6_NATIVE" > "$TMP_ROOT/schema6-default.json"
+# A config/codex-account pin names the launch store: the pinned store is read,
+# not the inherited CODEX_HOME, which stays exhausted here.
+PINNED_STORE="$TMP_ROOT/pinned-store"
+store_quota "$CODEX_STORE" 0 exhausted_now -2.5
+store_quota "$PINNED_STORE" 77 through_reset 0.42
+printf '%s\n' "$PINNED_STORE" > "$HOME_DIR/config/codex-account"
 reset_log
-TYPESAFE_API_KEY=$KEY QUOTA_AXI_FIXTURE="$TMP_ROOT/schema6-default.json" run code out err "$BRIEF"
-assert_contains "$out" "  profile: --harness 'codex' --model 'gpt-5.6-sol'" "native Codex falls back to the default row when codex-home is absent"
-pass "native Codex binds to codex-home before default, independently of Pi accounts and row order"
+TYPESAFE_API_KEY=$KEY QUOTA_AXI_FIXTURE="$TMP_ROOT/schema6-all-exhausted.json" run code out err "$BRIEF"
+assert_contains "$out" 'candidate: codex:gpt-5.6-sol  provider=codex  scope=all_models  remaining=77%  spendPriority=0.42  runway=through_reset  -> eligible' "a pinned native Codex candidate reads its pinned store"
+assert_contains "$out" "  profile: --harness 'codex' --model 'gpt-5.6-sol'" "the pinned store's headroom is chosen"
+assert_equals "$PINNED_STORE" "$(cat "$LOG/store-reads")" "only the pinned store is read"
+
+rm -f "$PINNED_STORE/quota.json"
+reset_log
+TYPESAFE_API_KEY=$KEY QUOTA_AXI_FIXTURE="$TMP_ROOT/schema6-all-exhausted.json" run code out err "$BRIEF"
+assert_contains "$out" 'candidate: codex:gpt-5.6-sol  provider=codex  -> eligible, unranked: provider codex unmeasured (unknown): disclosed uncertainty' "an unmeasured pinned store stays eligible with disclosed uncertainty"
+
+printf 'not a store\n' > "$HOME_DIR/config/codex-account"
+reset_log
+TYPESAFE_API_KEY=$KEY QUOTA_AXI_FIXTURE="$TMP_ROOT/schema6-all-exhausted.json" run code out err "$BRIEF"
+expect_code 2 "$code" "a refused Codex pin is a configuration error"
+assert_contains "$err" 'config/codex-account is refused' "the refused pin is named"
+rm -f "$HOME_DIR/config/codex-account" "$CODEX_STORE/quota.json"
+pass "native Codex is measured on its launch store: pin, else inherited CODEX_HOME, never the snapshot's rows"
 
 jq '.schemaVersion = 5 | .providers |= map(select(.accountKey != "openai-codex")) | del(.providers[].accountKey)' "$SCHEMA6" > "$SCHEMA5_PAIR"
 reset_log

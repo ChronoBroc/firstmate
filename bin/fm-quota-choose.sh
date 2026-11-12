@@ -7,6 +7,12 @@
 # Reads one already-captured quota-axi default TOON or JSON snapshot from the
 # provided file, or from stdin when --snapshot is omitted.
 # bin/fm-quota-axi-lib.sh owns schema compatibility and the shared row join.
+# A native Codex candidate (`codex:<model>`) is the one exception to reading
+# only that snapshot: it is measured on the store its worker would launch on,
+# through that lib's launch-store row, so the helper makes one profile-only
+# Codex read when any such candidate is listed. An unmeasured launch store is
+# unknown quota, which this helper never selects; a config/codex-account the
+# read refuses exits 2.
 # For each --candidate in order, it maps <harness> to its primary provider
 # family, then applies the matched row's provider-wide scopes and exact model
 # or product scopes for <model>. A candidate is eligible only when no
@@ -368,6 +374,19 @@ for c in "${CANDIDATES[@]}"; do
     omp) die "omp quota mapping covers only the openai-codex and claude-bridge prefixes: $model" ;;
     *) die "unknown harness: $harness" ;;
   esac
+done
+
+# A native Codex candidate is measured on the store its worker launches on,
+# through bin/fm-quota-axi-lib.sh, never on the snapshot's own codex rows.
+for c in "${CANDIDATES[@]}"; do
+  [ "${c%%:*}" = codex ] || continue
+  QUOTA_JSON=$(printf '%s\n' "$QUOTA_JSON" | fm_quota_with_codex_launch_store)
+  case $? in
+    0) ;;
+    2) exit 2 ;;
+    *) die "cannot read the native Codex launch store's quota" ;;
+  esac
+  break
 done
 
 chosen="none"

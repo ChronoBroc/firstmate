@@ -17,22 +17,35 @@
 # than one account). Schema 5 keeps its exact pre-schema-6 rules so an older
 # quota-axi keeps working unchanged. FM_QUOTA_ROW_JQ is the one join used to
 # bind a candidate to its row under either schema.
+#
+# Native Codex launch store: a shared snapshot's codex rows measure the
+# snapshot process's own CODEX_HOME or ~/.codex, not the store a native Codex
+# worker launches on. A caller with a native Codex candidate passes its
+# snapshot through fm_quota_with_codex_launch_store, which adds that store's
+# own profile-only codex row under FM_QUOTA_CODEX_LAUNCH_LANE, and quota_lane
+# binds `harness=codex` to that lane alone. bin/fm-codex-account-quota.sh owns
+# which store that is (pin, else inherited CODEX_HOME, else ~/.codex) and its
+# read. A store it cannot measure becomes an unknown-quota row there, so the
+# candidate is unmeasured and never falls back to another store's row.
 
 FM_QUOTA_AXI_MIN=0.1.51
 FM_QUOTA_PROVIDER_ID_RE='^[a-z0-9]+(-[a-z0-9]+)*\z'
+FM_QUOTA_CODEX_LAUNCH_LANE=fm-codex-launch-store
+FM_QUOTA_AXI_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # The eligibility section of .agents/skills/quota-array-dispatch/SKILL.md
 # owns the account-matching contract these jq definitions implement.
 # Prepend them to a consumer's program:
 #   quota_lane($harness; $model)   the candidate's account key, or "" when none
-#                                  is identified by the contract.
+#                                  is identified by the contract; native Codex
+#                                  is the launch-store lane described above.
 #   quota_row($snapshot; $provider; $lane)
 #                                  the one provider row the candidate binds to,
 #                                  or null; schema 5 ignores $lane.
 # shellcheck disable=SC2016,SC2034  # jq program text, not shell expansion; read by the sourcing consumers
 FM_QUOTA_ROW_JQ='
   def quota_lane($harness; $model):
-    if $harness == "codex" then "codex-home"
+    if $harness == "codex" then "'"$FM_QUOTA_CODEX_LAUNCH_LANE"'"
     elif ($harness == "pi" or $harness == "pi-signed") and (($model // "") | contains("/"))
     then ($model | split("/") | first | if . == "codex-native" then "codex-home" else . end)
     else "" end;
@@ -44,6 +57,36 @@ FM_QUOTA_ROW_JQ='
     else ($rows | first) // null
     end;
 '
+
+# fm_quota_with_codex_launch_store
+# Reads one validated quota-axi JSON snapshot (schema 5 or 6) on stdin and
+# prints it as schema 6 with the native Codex launch store's own codex row
+# under FM_QUOTA_CODEX_LAUNCH_LANE. Schema 5 rows gain accountKey "default",
+# which quota_row binds exactly as schema 5 did. Returns 2 when
+# bin/fm-codex-account-quota.sh refuses config/codex-account (its message is
+# on stderr), and 1 when the result cannot be built.
+fm_quota_with_codex_launch_store() {
+  local snapshot store rc
+  snapshot=$(cat) || return 1
+  store=$("$FM_QUOTA_AXI_LIB_DIR/fm-codex-account-quota.sh" --json </dev/null)
+  rc=$?
+  [ "$rc" -eq 0 ] || { [ "$rc" -eq 2 ] && return 2; return 1; }
+  printf '%s\n' "$snapshot" | jq -ce --argjson store "$store" --arg lane "$FM_QUOTA_CODEX_LAUNCH_LANE" '
+    (if $store.snapshot then
+       [$store.snapshot.providers[]? | select(.provider == "codex")] | first
+     else null end) as $row |
+    ($row // {
+      provider: "codex",
+      state: {status: "unavailable",
+        error: ($store.error // "the launch store snapshot has no codex row")},
+      quotaSemantics: {status: "unknown", effectiveAvailability: []}
+    }) as $row |
+    .providers |= (map(if has("accountKey") then . else .accountKey = "default" end
+                       | select(.accountKey != $lane))
+                   + [$row + {accountKey: $lane}]) |
+    .schemaVersion = 6
+  ' | { IFS= read -r merged && printf '%s\n' "$merged" | fm_quota_json_valid && printf '%s\n' "$merged"; }
+}
 
 # fm_quota_axi_version_compatible <version-output>
 # True when the printed `quota-axi --version` text meets FM_QUOTA_AXI_MIN.
