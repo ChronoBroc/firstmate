@@ -455,7 +455,7 @@ assert_contains "$argv" 'https://api.typesafe.ai/v1/systemone' "the request defa
 assert_contains "$argv" $'--max-time\n5' "the request uses the fixed five-second timeout"
 assert_contains "$argv" '@/dev/fd/3' "the header is read from a file descriptor"
 assert_equals "Authorization: Bearer $KEY" "$(cat "$LOG/header")" "curl receives the bearer header on fd 3"
-assert_equals $'curl:clean\nquota-axi:clean\nquota-axi-store:clean' "$(cat "$LOG/child-env")" "the API key is absent from every child environment"
+assert_equals $'curl:clean\nquota-axi:clean' "$(cat "$LOG/child-env")" "the API key is absent from every child environment"
 body=$(cat "$LOG/body")
 printf '%s\n' "$body" > "$TMP_ROOT/typesafe-body.json"
 assert_equals 'jev-latest' "$(jq -r .model <<<"$body")" "default model is jev-latest"
@@ -481,7 +481,7 @@ while IFS='|' read -r base endpoint; do
   assert_contains "$(cat "$LOG/argv")" $'--globoff\n' "custom base disables curl URL expansion"
   assert_equals "Authorization: Bearer $KEY" "$(cat "$LOG/header")" "custom base keeps the fd header transport"
   assert_not_contains "$(cat "$LOG/argv")" "$KEY" "custom base keeps the key out of argv"
-  assert_equals $'curl:clean\nquota-axi:clean\nquota-axi-store:clean' "$(cat "$LOG/child-env")" "custom base keeps the key out of child environments"
+  assert_equals $'curl:clean\nquota-axi:clean' "$(cat "$LOG/child-env")" "custom base keeps the key out of child environments"
 done <<'BASE_ENDPOINTS'
 https://gateway.example/typesafe/|https://gateway.example/typesafe/v1/systemone
 http://localhost:8080/proxy///|http://localhost:8080/proxy/v1/systemone
@@ -616,7 +616,7 @@ assert_contains "$(cat "$LOG/argv")" 'https://openrouter.ai/api/alpha/decisions'
 assert_contains "$(cat "$LOG/argv")" $'--max-time\n10' "OpenRouter timeout"
 assert_not_contains "$(cat "$LOG/argv")" "$OR_KEY" "OpenRouter key never appears in curl argv"
 assert_equals "Authorization: Bearer $OR_KEY" "$(cat "$LOG/header")" "OpenRouter key reaches curl only through fd 3"
-assert_equals $'curl:clean\nquota-axi:clean\nquota-axi-store:clean' "$(cat "$LOG/child-env")" "OpenRouter key is absent from child environments"
+assert_equals $'curl:clean\nquota-axi:clean' "$(cat "$LOG/child-env")" "OpenRouter key is absent from child environments"
 assert_equals 'typesafe/jev-1.13' "$(jq -r .model "$LOG/body")" "OpenRouter model is explicit"
 assert_equals 'pager' "$(jq -r .state.task.project "$LOG/body")" "project reaches the model"
 assert_equals 'choice' "$(jq -r .questions.rule.type "$LOG/body")" "OpenRouter uses the native Choice request"
@@ -920,7 +920,7 @@ assert_not_contains "$err" "$SECRET" "the key never reaches stderr"
 assert_not_contains "$(cat "$LOG/argv")" "$SECRET" "the key never appears on curl argv"
 assert_not_contains "$(cat "$LOG/security.argv")" "$SECRET" "the key never appears on security argv"
 assert_not_contains "$(cat "$LOG/body")" "$SECRET" "the key never rides in the request body"
-assert_equals $'security:clean\ncurl:clean\nquota-axi:clean\nquota-axi-store:clean' "$(cat "$LOG/child-env")" "the key is in no child environment, and in no file the tool holds while the request is in flight"
+assert_equals $'security:clean\ncurl:clean\nquota-axi:clean' "$(cat "$LOG/child-env")" "the key is in no child environment, and in no file the tool holds while the request is in flight"
 ! grep -rqF -- "$SECRET" "$HOME_DIR" || fail "the key was written under the home"
 ! grep -rqF -- "$SECRET" "$SCAN_TMP" || fail "the key was left in the temporary directory"
 rm -f "$CRED"
@@ -992,7 +992,7 @@ assert_contains "$out" '  status: clear' "systemone with a key is clear"
 assert_contains "$(cat "$LOG/argv")" 'https://so.example.test/v1/systemone' "systemone https base URL"
 assert_not_contains "$(cat "$LOG/argv")" "$SO_KEY" "systemone key never appears in curl argv"
 assert_equals "Authorization: Bearer $SO_KEY" "$(cat "$LOG/header")" "systemone key reaches curl only through fd 3"
-assert_equals $'curl:clean\nquota-axi:clean\nquota-axi-store:clean' "$(cat "$LOG/child-env")" "systemone key is absent from child environments"
+assert_equals $'curl:clean\nquota-axi:clean' "$(cat "$LOG/child-env")" "systemone key is absent from child environments"
 printf '%s\n' 'FM_DISPATCH_PROVIDER=systemone' 'FM_DISPATCH_MODEL=clef' 'FM_DISPATCH_BASE_URL=http://10.0.0.5:8080' \
   "FM_DISPATCH_API_KEY=$SO_KEY" > "$HOME_DIR/.env"
 reset_log
@@ -1078,7 +1078,7 @@ assert_contains "$(cat "$LOG/argv")" 'https://api.openai.com/v1/decisions' "open
 assert_contains "$(cat "$LOG/argv")" $'--max-time\n10' "openai timeout"
 assert_not_contains "$(cat "$LOG/argv")" "$OA_KEY" "openai key never appears in curl argv"
 assert_equals "Authorization: Bearer $OA_KEY" "$(cat "$LOG/header")" "openai key reaches curl only through fd 3"
-assert_equals $'curl:clean\nquota-axi:clean\nquota-axi-store:clean' "$(cat "$LOG/child-env")" "openai key is absent from child environments"
+assert_equals $'curl:clean\nquota-axi:clean' "$(cat "$LOG/child-env")" "openai key is absent from child environments"
 body=$(cat "$LOG/body")
 assert_equals 'gpt-6-luna' "$(jq -r .model <<<"$body")" "openai model is explicit"
 assert_equals "$(jq -c .state "$TMP_ROOT/typesafe-body.json")" "$(jq -c '.input | fromjson' <<<"$body")" "openai input carries the same state as JSON text"
@@ -1854,6 +1854,22 @@ reset_log
 TYPESAFE_API_KEY=$KEY QUOTA_AXI_FIXTURE="$TMP_ROOT/schema6-all-exhausted.json" run code out err "$BRIEF"
 expect_code 2 "$code" "a refused Codex pin is a configuration error"
 assert_contains "$err" 'config/codex-account is refused' "the refused pin is named"
+
+# A matched rule with no native Codex candidate never reads a Codex store, so
+# a pin naming a removed directory cannot abort it, even though an unrelated
+# rule holds Codex.
+printf '%s\n' "$TMP_ROOT/removed-codex-store" > "$HOME_DIR/config/codex-account"
+cp "$RESPONSE" "$TMP_ROOT/lane-response.json"
+cp "$BASE_RULES" "$RULES"
+write_response "$RESPONSE" rule_4 0.9
+reset_log
+TYPESAFE_API_KEY=$KEY run code out err "$BRIEF"
+expect_code 0 "$code" "a Codex-free rule resolves despite a missing Codex pin"
+assert_contains "$out" '  status: clear' "the Codex-free rule is clear"
+assert_contains "$out" "  profile: --harness 'cursor' --model 'cursor-grok-4.6-medium'" "the Codex-free rule picks its own argmax"
+[ ! -e "$LOG/store-reads" ] || fail "a Codex-free rule read a Codex store"
+cp "$LANE_RULES" "$RULES"
+cp "$TMP_ROOT/lane-response.json" "$RESPONSE"
 rm -f "$HOME_DIR/config/codex-account" "$CODEX_STORE/quota.json"
 pass "native Codex is measured on its launch store: pin, else inherited CODEX_HOME, never the snapshot's rows"
 
