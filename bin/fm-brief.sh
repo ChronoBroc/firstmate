@@ -796,6 +796,7 @@ If the top-level path is the primary checkout or not the worktree you were launc
 # Rules
 $RULE1
 2. Keep project edits inside this worktree; keep proof and scratch output outside it, under \`$DATA/$ID/\` or a temporary directory.
+   Point any tool's output directory at a subdirectory such as \`$DATA/$ID/<tool>/\`, never at \`$DATA/$ID/\` itself, because tools like Playwright empty their output directory before every run.
    Outside the worktree, write only that task material and the status and steering-inbox records authorized below.
    Leave the worktree clean before reporting done.
 3. $FORGE_RULE_LINE

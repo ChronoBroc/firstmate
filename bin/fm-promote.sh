@@ -74,6 +74,8 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
+# shellcheck source=bin/fm-task-brief-lib.sh
+. "$SCRIPT_DIR/fm-task-brief-lib.sh"
 # shellcheck source=bin/fm-public-followup-lib.sh
 . "$SCRIPT_DIR/fm-public-followup-lib.sh"
 # shellcheck source=bin/fm-secondmate-parent-lib.sh
@@ -192,12 +194,23 @@ META=
 SCOUT_BRIEF=
 BRIEF_ORIGINAL=
 BRIEF_REPLACEMENT=
+BRIEF_COPY=
+BRIEF_COPY_ORIGINAL=
+BRIEF_COPY_STAGED=0
 promote_cleanup() {
   local status=$?
   [ -z "$TMP" ] || rm -f -- "$TMP" 2>/dev/null || true
   [ -z "$BRIEF_REPLACEMENT" ] || rm -f -- "$BRIEF_REPLACEMENT" 2>/dev/null || true
   if [ -n "$BRIEF_ORIGINAL" ] && [ -e "$BRIEF_ORIGINAL" ]; then
     mv -f -- "$BRIEF_ORIGINAL" "$SCOUT_BRIEF" 2>/dev/null || true
+  fi
+  if [ "$BRIEF_COPY_STAGED" = 1 ]; then
+    BRIEF_COPY_STAGED=0
+    if [ -e "$BRIEF_COPY_ORIGINAL" ] || [ -L "$BRIEF_COPY_ORIGINAL" ]; then
+      mv -f -- "$BRIEF_COPY_ORIGINAL" "$BRIEF_COPY" 2>/dev/null || true
+    else
+      rm -f -- "$BRIEF_COPY" 2>/dev/null || true
+    fi
   fi
   if [ "$META_LOCK_HELD" = 1 ]; then
     META_LOCK_HELD=0
@@ -282,6 +295,7 @@ PROMOTE_CONSENT_WORDS=
 [ -z "$UPSTREAM_CONSENT" ] || PROMOTE_CONSENT_WORDS=" upstream-consent=$UPSTREAM_CONSENT"
 
 SCOUT_BRIEF="$DATA/$ID/brief.md"
+fm_task_brief_restore "$DATA" "$STATE" "$ID" || exit 1
 if fm_brief_task_placeholders_present "$SCOUT_BRIEF"; then
   echo "error: $SCOUT_BRIEF still contains {TASK} or {FIRSTMATE_SPEC}; preserve the original ask in ## Captain's intent and fill the scout-time ## Firstmate spec; promotion generates a separate ship-time spec" >&2
   exit 1
@@ -397,6 +411,16 @@ if ! mv "$BRIEF_REPLACEMENT" "$SCOUT_BRIEF"; then
   exit 1
 fi
 BRIEF_REPLACEMENT=
+BRIEF_COPY=$(fm_task_brief_copy_path "$STATE" "$ID")
+BRIEF_COPY_ORIGINAL="$STATE/.$ID.brief.scout.${BASHPID:-$$}"
+if [ -e "$BRIEF_COPY" ] || [ -L "$BRIEF_COPY" ]; then
+  mv -f -- "$BRIEF_COPY" "$BRIEF_COPY_ORIGINAL" || {
+    echo "error: could not stage task $ID's protected scout instructions for promotion: $BRIEF_COPY" >&2
+    exit 1
+  }
+fi
+BRIEF_COPY_STAGED=1
+fm_task_brief_protect "$DATA" "$STATE" "$ID" || exit 1
 
 TMP="$STATE/.$ID.meta.promote.${BASHPID:-$$}"
 grep -v -e '^kind=' -e '^mode=' -e '^yolo=' -e '^branch=' -e '^upstream_consent=' "$META" > "$TMP"
@@ -416,6 +440,8 @@ fi
 TMP=
 rm -f -- "$BRIEF_ORIGINAL" 2>/dev/null || true
 BRIEF_ORIGINAL=
+BRIEF_COPY_STAGED=0
+rm -f -- "$BRIEF_COPY_ORIGINAL" 2>/dev/null || true
 fm_lock_release "$META_LOCK"
 META_LOCK_HELD=0
 

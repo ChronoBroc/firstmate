@@ -2078,6 +2078,40 @@ test_missing_instructions_refuse_before_stopping_anything() {
   pass "fm-control relaunch: a worker with nothing to work from is never launched"
 }
 
+# A worker that points a tool's output directory at its evidence directory
+# (data/<id>/) can empty it, as Playwright does with its outputDir before every
+# run. Relaunch and the next spawn must still find the instructions.
+test_relaunch_survives_an_emptied_evidence_directory() {
+  local dir out rc brief snapshot
+  dir=$(new_case wiped rl11w)
+  add_ship_task "$dir" rl11w claude
+  printf 'zsh' > "$dir/fake/command"
+  out=$(run_spawn "$dir" rl11w --relaunch); rc=$?
+  expect_code 0 "$rc" "the initial launch should succeed"$'\n'"$out"
+  brief="$dir/home/data/rl11w/brief.md"
+  snapshot="$dir/home/state/rl11w.brief"
+  [ -f "$snapshot" ] && [ ! -w "$snapshot" ] \
+    || fail "a launch should keep a read-only copy of the instructions outside the evidence directory"
+  rm -rf "$dir/home/data/rl11w"
+  mkdir -p "$dir/home/data/rl11w"
+  printf 'claude' > "$dir/fake/command"
+  out=$(run_control "$dir" rl11w relaunch --note "the evidence directory was emptied"); rc=$?
+  expect_code 0 "$rc" "relaunch should recover the instructions from the protected copy"$'\n'"$out"
+  assert_contains "$out" "restored" "the recovery should be reported, not silent"
+  assert_grep "Exercise relaunch behavior for rl11w." "$brief" "the original instructions must be restored"
+  assert_grep "the evidence directory was emptied" "$brief" "the progress note must reach the restored instructions"
+  assert_grep "Exercise relaunch behavior for rl11w." "$dir/home/data/rl11w/launch-brief.md" \
+    "the replacement must launch from the restored instructions"
+  assert_grep "the evidence directory was emptied" "$snapshot" \
+    "the protected copy must follow the instructions the replacement was launched with"
+  rm -rf "$dir/home/data/rl11w"
+  printf 'zsh' > "$dir/fake/command"
+  out=$(run_spawn "$dir" rl11w --relaunch); rc=$?
+  expect_code 0 "$rc" "a spawn relaunch should also recover the instructions"$'\n'"$out"
+  assert_grep "the evidence directory was emptied" "$brief" "the latest instructions must be restored"
+  pass "fm-control/fm-spawn relaunch: a worker emptying its evidence directory cannot destroy its instructions"
+}
+
 test_checkpoint_refusal_leaves_the_record_byte_identical() {
   local dir before after
   dir=$(new_case bytes rl12)
@@ -3594,6 +3628,7 @@ test_relaunch_refuses_a_recorded_worktree_that_is_the_primary_home
 test_relaunch_refuses_a_recorded_worktree_that_is_the_project_primary_checkout
 test_relaunch_refuses_the_primary_checkout_under_inherited_git_overrides
 test_missing_instructions_refuse_before_stopping_anything
+test_relaunch_survives_an_emptied_evidence_directory
 test_checkpoint_refusal_leaves_the_record_byte_identical
 test_checkpoint_refuses_uninspectable_head_and_status
 test_launch_failure_keeps_the_prior_record_and_reports_it

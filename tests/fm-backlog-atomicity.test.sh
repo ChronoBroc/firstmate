@@ -1380,12 +1380,102 @@ test_reused_id_refuses_a_finished_brief() {
   pass "a reused id cannot launch the finished task's brief, and launches once it has its own"
 }
 
+# A worker's tool that empties data/<id>/ before its run (Playwright's outputDir)
+# must not erase the record of what the task ran: teardown restores the brief
+# from its protected copy before recording it, then removes that copy.
+test_teardown_restores_a_brief_deleted_from_the_evidence_directory() {
+  local case_dir home id out
+  id=atomic-wiped-brief
+  case_dir=$(make_home wiped-brief "$id")
+  home=$(home_of "$case_dir")
+  printf '%s\n' 'WIPED-INSTRUCTIONS for this task.' >> "$home/data/$id/brief.md"
+  add_item "$case_dir" "$id"
+  out=$(run_ship_spawn "$case_dir" "$id") || fail "spawn failed: $out"
+  assert_present "$home/state/$id.brief" "spawn kept no protected copy of the instructions"
+  rm -rf "$home/data/$id"
+  mkdir -p "$home/data/$id"
+  out=$(run_teardown "$case_dir" "$id" --force) || fail "teardown after the wipe failed: $out"
+  assert_contains "$out" "restored" "teardown did not report restoring the instructions"
+  assert_grep 'WIPED-INSTRUCTIONS' "$home/data/$id/brief.md" "teardown did not restore the deleted brief"
+  assert_present "$home/data/$id/finished-briefs" "teardown did not record the restored brief as finished"
+  assert_absent "$home/state/$id.brief" "teardown left the protected copy behind"
+  pass "teardown restores a brief a worker's tool deleted and records it as finished"
+}
+
+# A restore that runs out of space part way must not leave a truncated
+# launch-brief.md: a retry would keep it, and a brief that no longer matches
+# the start of launch-brief.md slips past the previous-launch guard.
+test_failed_restore_leaves_no_partial_launch_brief() {
+  local dir out
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-restore-partial.XXXXXX")
+  mkdir -p "$dir/data/t" "$dir/state"
+  printf 'FULL-INSTRUCTIONS line one\nline two\n' > "$dir/state/t.brief"
+  out=$(
+    # shellcheck source=bin/fm-task-brief-lib.sh
+    . "$ROOT/bin/fm-task-brief-lib.sh"
+    calls=0
+    cp() {
+      calls=$((calls + 1))
+      if [ "$calls" -eq 2 ]; then
+        head -c 5 "$2" > "$3"
+        return 1
+      fi
+      command cp "$@"
+    }
+    fm_task_brief_restore "$dir/data" "$dir/state" t 2>&1
+  ) && fail "restore reported success after its copy failed: $out"
+  assert_absent "$dir/data/t/launch-brief.md" "a failed restore left a partial launch-brief.md"
+  assert_absent "$dir/data/t/brief.md" "a failed restore published brief.md"
+  out=$(. "$ROOT/bin/fm-task-brief-lib.sh"; fm_task_brief_restore "$dir/data" "$dir/state" t 2>&1) \
+    || fail "retry after the failed restore failed: $out"
+  cmp -s "$dir/state/t.brief" "$dir/data/t/launch-brief.md" || fail "retry did not restore the full launch-brief.md"
+  cmp -s "$dir/state/t.brief" "$dir/data/t/brief.md" || fail "retry did not restore the full brief.md"
+  [ -z "$(find "$dir/data/t" -name '.*restore*')" ] || fail "a restore left temporary files behind"
+  rm -rf "$dir"
+  pass "a restore that fails part way leaves no partial launch-brief.md for a retry to keep"
+}
+
+# A promotion that fails after publishing the ship instructions' protected copy
+# must leave the scout copy in place even when state/ has no room for another
+# copy; otherwise an evidence wipe restores ship instructions for a scout.
+test_failed_promotion_keeps_the_scout_protected_copy() {
+  local case_dir home id out rc=0 real_cp
+  id=atomic-promote-rollback
+  case_dir=$(make_home promote-rollback "$id")
+  home=$(home_of "$case_dir")
+  add_item "$case_dir" "$id" scout
+  out=$(run_spawn "$case_dir" "$id" "$case_dir/project" --scout) || fail "scout spawn failed: $out"
+  cp "$home/state/$id.brief" "$case_dir/scout-copy"
+  cp "$home/data/$id/brief.md" "$case_dir/scout-brief"
+  break_meta_publication "$case_dir" "$home/state/$id.meta"
+  real_cp=$(command -v cp)
+  cat > "$case_dir/fakebin/cp" <<SH
+#!/usr/bin/env bash
+case "\${*: -1}" in
+  "$home/state/$id.brief.tmp."*)
+    if [ -e "$case_dir/state-copy-made" ]; then exit 1; fi
+    : > "$case_dir/state-copy-made" ;;
+esac
+exec "$real_cp" "\$@"
+SH
+  chmod +x "$case_dir/fakebin/cp"
+  out=$(FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" \
+    "$ROOT/bin/fm-promote.sh" "$id" --mode local-only --yolo off 2>&1) || rc=$?
+  rm -f "$case_dir/fakebin/cp" "$case_dir/fakebin/mv"
+  [ "$rc" -ne 0 ] || fail "promotion succeeded without publishing its task record: $out"
+  assert_present "$case_dir/state-copy-made" "promotion never published the ship instructions' protected copy: $out"
+  grep -qx 'kind=scout' "$home/state/$id.meta" || fail "failed promotion changed the task kind"
+  cmp -s "$case_dir/scout-brief" "$home/data/$id/brief.md" || fail "failed promotion left the ship brief in place"
+  cmp -s "$case_dir/scout-copy" "$home/state/$id.brief" || fail "failed promotion left a protected copy that is not the scout instructions"
+  [ -z "$(find "$home/state" -name ".$id.brief.*")" ] || fail "failed promotion left a staged protected copy behind"
+  pass "a failed promotion keeps the scout instructions' protected copy without recopying it"
+}
 
 test_retained_task_requires_confirmed_continuation() {
-  local kind=$1 case_dir home id out
+  local kind=$1 wipe=${2:-} case_dir home id out
   local -a flags=(--mode no-mistakes --yolo off)
-  id="atomic-retained-$kind"
-  case_dir=$(make_home "retained-$kind" "$id")
+  id="atomic-retained-$kind${wipe:+-$wipe}"
+  case_dir=$(make_home "retained-$kind${wipe:+-$wipe}" "$id")
   home=$(home_of "$case_dir")
   [ "$kind" != scout ] || flags=(--scout)
   add_item "$case_dir" "$id" "$kind"
@@ -1393,6 +1483,10 @@ test_retained_task_requires_confirmed_continuation() {
   cp "$home/data/$id/brief.md" "$case_dir/original-brief.md"
   out=$(FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-captain-hold.sh" hold "$id" --reason 'Continue after approval') \
     || fail "could not hold the task: $out"
+  if [ "$wipe" = wiped ]; then
+    rm -rf "$home/data/$id"
+    mkdir -p "$home/data/$id"
+  fi
   out=$(run_teardown "$case_dir" "$id" --force) || fail "retain teardown failed: $out"
   assert_absent "$home/state/$id.meta" "retain teardown left metadata"
   assert_absent "$home/data/$id/finished-briefs" "retain teardown recorded an unfinished brief"
@@ -1432,7 +1526,7 @@ test_retained_task_requires_confirmed_continuation() {
   assert_absent "$home/state/$id.meta" "released new item created metadata"
   [ "$(row_state "$case_dir" "$id")" = queued ] || fail "refusal moved the released new item"
   cmp -s "$case_dir/original-brief.md" "$home/data/$id/brief.md" || fail "refusal changed the old brief"
-  pass "retained $kind needs confirmed continuation; releasing a new item cannot authorize an old brief"
+  pass "retained $kind${wipe:+ ($wipe evidence directory)} needs confirmed continuation; releasing a new item cannot authorize an old brief"
 }
 
 test_unrun_launch_brief_can_be_retried() {
@@ -3255,9 +3349,14 @@ test_dispatch_refuses_a_closed_item
 test_reused_id_refuses_a_finished_brief
 test_reused_id_refuses_a_finished_brief role-first
 test_reused_id_refuses_a_finished_brief brief-first
+test_teardown_restores_a_brief_deleted_from_the_evidence_directory
 test_unrun_launch_brief_can_be_retried
 test_retained_task_requires_confirmed_continuation ship
 test_retained_task_requires_confirmed_continuation scout
+test_retained_task_requires_confirmed_continuation ship wiped
+test_failed_restore_leaves_no_partial_launch_brief
+test_failed_promotion_keeps_the_scout_protected_copy
+test_retained_task_requires_confirmed_continuation scout wiped
 test_dispatch_refuses_to_commit_without_a_published_record
 test_dispatch_leaves_no_record_when_the_transition_fails
 test_dispatch_reports_an_incomplete_record_rollback

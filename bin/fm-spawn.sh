@@ -34,7 +34,9 @@
 #   bin/fm-herdr-lab.sh or a listed Herdr session/server lifecycle command must
 #   carry the Herdr isolation contract emitted by bin/fm-brief.sh --herdr-lab;
 #   the refusal names the first such match.
-#   Every ship or scout spawn renders `launch-brief.md`; for a no-mistakes ship
+#   Every ship or scout spawn renders `launch-brief.md` and refreshes the
+#   protected copy of `brief.md`, and a relaunch first restores a `brief.md` a
+#   worker's tool deleted (bin/fm-task-brief-lib.sh); for a no-mistakes ship
 #   it also carries the current `--intent` contract and the extracted captain
 #   intent. A legacy mixed Task is accepted there only under bin/fm-dod-lib.sh's
 #   provenance-marking rules; unmarked legacy Tasks stop for migration rather
@@ -784,6 +786,8 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
+# shellcheck source=bin/fm-task-brief-lib.sh
+. "$SCRIPT_DIR/fm-task-brief-lib.sh"
 
 resolve_directory_input() {
   local name=$1 path=$2 resolved raw_bytes
@@ -4321,6 +4325,9 @@ if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ -e "$CONFIG/lane-capa
       ;;
   esac
 fi
+if [ "$RELAUNCH" -eq 1 ] && { [ "$KIND" = ship ] || [ "$KIND" = scout ]; }; then
+  fm_task_brief_restore "$DATA" "$STATE" "$ID" || exit 1
+fi
 [ -f "$BRIEF" ] || {
   echo "error: task $ID has no brief at inaccessible data path $BRIEF" >&2
   exit 1
@@ -4404,6 +4411,7 @@ if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
     echo "error: could not publish current launch contract for $SOURCE_BRIEF" >&2
     exit 1
   fi
+  fm_task_brief_protect "$DATA" "$STATE" "$ID" || exit 1
 fi
 
 delivery_rigor_rank() { # <mode> -> 3 (most rigor) .. 1 (least); 0 = not a task mode

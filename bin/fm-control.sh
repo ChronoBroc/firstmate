@@ -206,6 +206,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-omp-profile-lib.sh"
 # shellcheck source=bin/fm-exclude-tools-lib.sh
 . "$SCRIPT_DIR/fm-exclude-tools-lib.sh"
+# shellcheck source=bin/fm-task-brief-lib.sh
+. "$SCRIPT_DIR/fm-task-brief-lib.sh"
 
 POLL=${FM_CONTROL_POLL:-0.5}
 SETTLE_WAIT=${FM_CONTROL_SETTLE_WAIT:-5}
@@ -1228,6 +1230,8 @@ do_relaunch() {
   case "$KIND" in
     ship|scout)
       RELAUNCH_BRIEF="$DATA/$ID/brief.md"
+      fm_task_brief_restore "$DATA" "$STATE" "$ID" \
+        || die "could not restore task $ID's instructions; refusing to relaunch"
       [ -f "$RELAUNCH_BRIEF" ] \
         || die "task $ID has no instructions at $RELAUNCH_BRIEF; refusing to relaunch a worker with nothing to work from"
       [ "$NOTE_SET" = 1 ] && [ -n "$NOTE" ] \
