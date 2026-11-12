@@ -1,0 +1,12 @@
+== data/lab4a2905111871-worker before wipe
+total 56
+drwxr-xr-x@ 4 broc-macmini  wheel    128 Nov 11 19:32 .
+drwxr-xr-x@ 5 broc-macmini  wheel    160 Nov 11 19:32 ..
+-rw-r--r--@ 1 broc-macmini  wheel  11426 Nov 11 19:32 brief.md
+-rw-r--r--@ 1 broc-macmini  wheel  12914 Nov 11 19:32 launch-brief.md
+== state/lab4a2905111871-worker.brief
+-r--r--r--@ 1 broc-macmini  wheel  11426 Nov 11 19:32 /private/tmp/fmlab.2c5loD/home/state/lab4a2905111871-worker.brief
+protected copy == brief.md
+== scaffold rule in brief
+/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/brief.md:27:   Point any tool's output directory at a subdirectory such as `/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/<tool>/`, never at `/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/` itself, because tools like Playwright empty their output directory before every run.
+/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/launch-brief.md:37:   Point any tool's output directory at a subdirectory such as `/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/<tool>/`, never at `/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/` itself, because tools like Playwright empty their output directory before every run.

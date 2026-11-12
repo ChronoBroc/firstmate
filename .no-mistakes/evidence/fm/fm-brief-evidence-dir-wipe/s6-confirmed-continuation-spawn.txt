@@ -1,0 +1,6 @@
+$ rm data/lab4a2905111871-worker/launch-brief.md   # operator confirms same retained task
+$ bin/fm-spawn.sh lab4a2905111871-worker /private/tmp/fmlab.2c5loD/home/projects/notes --mode local-only --yolo on
+spawned lab4a2905111871-worker harness=claude kind=ship mode=local-only yolo=on window=firstmate:fm-lab4a2905111871-worker worktree=/private/tmp/fmlab.2c5loD/treehouse/.treehouse/notes-dd9572/1/notes
+exit=0
+-r--r--r--@ 1 broc-macmini  wheel  12018 Nov 11 19:37 /private/tmp/fmlab.2c5loD/home/state/lab4a2905111871-worker.brief
+fresh launch refreshed the protected copy

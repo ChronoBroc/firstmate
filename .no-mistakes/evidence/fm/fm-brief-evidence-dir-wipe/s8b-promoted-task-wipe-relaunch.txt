@@ -1,0 +1,9 @@
+module.exports = { testDir: '.', outputDir: '/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-scout' };
+  1 passed (650ms)
+.last-run.json
+$ bin/fm-control.sh lab4a2905111871-scout relaunch --note 'promoted then wiped'
+warning: task lab4a2905111871-scout's instructions were missing from /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-scout/brief.md (its evidence directory was emptied); restored them from /private/tmp/fmlab.2c5loD/home/state/lab4a2905111871-scout.brief
+relaunched lab4a2905111871-scout harness=claude from=claude model=sonnet effort=low backend=tmux endpoint=firstmate:fm-lab4a2905111871-scout worktree=/private/tmp/fmlab.2c5loD/treehouse/.treehouse/notes-dd9572/1/notes
+exit=0
+/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-scout/brief.md:120:Delivery contract: mode=local-only
+/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-scout/launch-brief.md:130:Delivery contract: mode=local-only

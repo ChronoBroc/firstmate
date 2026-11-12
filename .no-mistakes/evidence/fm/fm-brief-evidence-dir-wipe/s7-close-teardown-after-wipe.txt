@@ -1,0 +1,25 @@
+$ (cd /tmp/fm-pw.2DmBPm && npx playwright test)  # outputDir = data/lab4a2905111871-worker
+  1 passed (659ms)
+.last-run.json
+$ bin/fm-teardown.sh lab4a2905111871-worker --force
+warning: task lab4a2905111871-worker's instructions were missing from /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/brief.md (its evidence directory was emptied); restored them from /private/tmp/fmlab.2c5loD/home/state/lab4a2905111871-worker.brief
+teardown: reaping leaked worktree process(es) for lab4a2905111871-worker: 50783 82135 85435
+teardown: force-killing leaked worktree process(es) for lab4a2905111871-worker: 50783
+🌳 Worktree returned to pool.
+teardown lab4a2905111871-worker complete (window firstmate:fm-lab4a2905111871-worker, worktree /private/tmp/fmlab.2c5loD/treehouse/.treehouse/notes-dd9572/1/notes)
+Backlog: lab4a2905111871-worker is closed in /private/tmp/fmlab.2c5loD/home/data/backlog.md. Run bin/fm-tasks-axi.sh ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due.
+exit=0
+-rw-r--r--@ 1 broc-macmini  wheel  65 Nov 11 19:38 /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/finished-briefs
+
+/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker:
+total 80
+drwxr-xr-x@ 6 broc-macmini  wheel    192 Nov 11 19:38 .
+drwxr-xr-x@ 6 broc-macmini  wheel    192 Nov 11 19:38 ..
+-rw-r--r--@ 1 broc-macmini  wheel     45 Nov 11 19:38 .last-run.json
+-rw-r--r--@ 1 broc-macmini  wheel  12578 Nov 11 19:38 brief.md
+-rw-r--r--@ 1 broc-macmini  wheel     65 Nov 11 19:38 finished-briefs
+-rw-r--r--@ 1 broc-macmini  wheel  12578 Nov 11 19:38 launch-brief.md
+ls: /private/tmp/fmlab.2c5loD/home/state/lab4a2905111871-worker.brief: No such file or directory
+$ bin/fm-spawn.sh lab4a2905111871-worker ... (reused id, finished brief)
+error: spawn refused: /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/brief.md is the brief of a finished task that already ran under the id lab4a2905111871-worker, so launching it would run the old instructions for a new item; keep /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/ (it holds that task's proof) and either move it aside and scaffold a new brief with bin/fm-brief.sh, or file the new item under a fresh id
+exit=1

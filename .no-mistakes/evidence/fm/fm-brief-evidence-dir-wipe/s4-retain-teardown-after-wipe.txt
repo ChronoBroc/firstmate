@@ -1,0 +1,33 @@
+$ bin/fm-captain-hold.sh hold lab4a2905111871-worker --reason 'Continue after approval'
+lab4a2905111871-worker
+exit=0
+$ (cd /tmp/fm-pw.2DmBPm && npx playwright test)  # outputDir = data/lab4a2905111871-worker
+  1 passed (3.4s)
+.last-run.json
+$ bin/fm-teardown.sh lab4a2905111871-worker --force
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no live watcher process holds this home lock (last beat: 39s ago).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  After draining queued wakes, repair missing watcher supervision according to the session-start block for this harness; do not use shell &.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+warning: task lab4a2905111871-worker's instructions were missing from /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/brief.md (its evidence directory was emptied); restored them from /private/tmp/fmlab.2c5loD/home/state/lab4a2905111871-worker.brief
+teardown: reaping leaked worktree process(es) for lab4a2905111871-worker: 53775 72818
+teardown: force-killing leaked worktree process(es) for lab4a2905111871-worker: 53775
+🌳 Worktree returned to pool.
+teardown lab4a2905111871-worker complete (window firstmate:fm-lab4a2905111871-worker, worktree /private/tmp/fmlab.2c5loD/treehouse/.treehouse/notes-dd9572/1/notes)
+Backlog: lab4a2905111871-worker stays open in /private/tmp/fmlab.2c5loD/home/data/backlog.md, still held for the captain with its deliverable recorded. Relay the question and close it only with bin/fm-captain-hold.sh answer.
+exit=
+== after retain teardown
+total 56
+drwxr-xr-x@ 5 broc-macmini  wheel    160 Nov 11 19:36 .
+drwxr-xr-x@ 5 broc-macmini  wheel    160 Nov 11 19:36 ..
+-rw-r--r--@ 1 broc-macmini  wheel     45 Nov 11 19:36 .last-run.json
+-rw-r--r--@ 1 broc-macmini  wheel  12018 Nov 11 19:36 brief.md
+-rw-r--r--@ 1 broc-macmini  wheel  12018 Nov 11 19:36 launch-brief.md
+(eval):8: no matches found: /private/tmp/fmlab.2c5loD/home/state/lab4a2905111871-worker.*
+brief.md restored byte-identical
+launch-brief.md present (continuation guard record)
+ls: /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/finished-briefs: No such file or directory

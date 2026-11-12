@@ -1,0 +1,15 @@
+$ bin/fm-spawn.sh lab4a2905111871-scout projects/notes --scout --harness claude --model sonnet --effort low
+spawned lab4a2905111871-scout harness=claude kind=scout window=firstmate:fm-lab4a2905111871-scout worktree=/private/tmp/fmlab.2c5loD/treehouse/.treehouse/notes-dd9572/1/notes
+1
+kind=scout
+$ bin/fm-promote.sh lab4a2905111871-scout --mode local-only --yolo on
+promoted lab4a2905111871-scout to ship mode=local-only yolo=on (teardown protection restored)
+wrote ship instructions for mode=local-only: /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-scout/ship-instructions.md
+next: FM_HOME=/private/tmp/fmlab.2c5loD/home bin/fm-send.sh fm-lab4a2905111871-scout "$(cat /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-scout/ship-instructions.md)"
+exit=0
+kind=ship
+protected copy == promoted (ship) brief.md
+protected copy changed from scout instructions
+120:Delivery contract: mode=local-only
+-r--r--r--@ 1 broc-macmini  wheel  13492 Nov 11 19:39 /private/tmp/fmlab.2c5loD/home/state/lab4a2905111871-scout.brief
+no staged copies left

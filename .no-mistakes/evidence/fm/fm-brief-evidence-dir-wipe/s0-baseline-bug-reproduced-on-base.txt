@@ -1,0 +1,10 @@
+# BASELINE: lab home bin/ switched to base commit a6fef129 (before the fix)
+a6fef129
+$ (cd /tmp/fm-pw.2DmBPm && npx playwright test)  # outputDir = data/lab4a2905111871-worker
+  1 passed (2.3s)
+data/lab4a2905111871-worker now:
+.last-run.json
+$ bin/fm-control.sh lab4a2905111871-worker relaunch --note 'baseline'
+error: task lab4a2905111871-worker has no instructions at /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/brief.md; refusing to relaunch a worker with nothing to work from
+exit=1
+# lab home bin/ restored to target 588cd00

@@ -1,0 +1,12 @@
+# TARGET 588cd00, same emptied evidence directory:
+.last-run.json
+$ bin/fm-control.sh lab4a2905111871-worker relaunch --note 'after fix'
+warning: task lab4a2905111871-worker's instructions were missing from /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/brief.md (its evidence directory was emptied); restored them from /private/tmp/fmlab.2c5loD/home/state/lab4a2905111871-worker.brief
+relaunched lab4a2905111871-worker harness=claude from=claude model=default effort=default backend=tmux endpoint=firstmate:fm-lab4a2905111871-worker worktree=/private/tmp/fmlab.2c5loD/treehouse/.treehouse/notes-dd9572/1/notes
+exit=0
+total 72
+drwxr-xr-x@ 5 broc-macmini  wheel    160 Nov 11 19:38 .
+drwxr-xr-x@ 6 broc-macmini  wheel    192 Nov 11 19:38 ..
+-rw-r--r--@ 1 broc-macmini  wheel     45 Nov 11 19:38 .last-run.json
+-rw-r--r--@ 1 broc-macmini  wheel  12578 Nov 11 19:38 brief.md
+-rw-r--r--@ 1 broc-macmini  wheel  14066 Nov 11 19:38 launch-brief.md

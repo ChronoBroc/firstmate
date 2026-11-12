@@ -1,0 +1,20 @@
+$ FM_HOME=/private/tmp/fmlab.2c5loD/home bin/fm-control.sh lab4a2905111871-worker relaunch --note 'Playwright emptied the evidence directory'
+warning: task lab4a2905111871-worker's instructions were missing from /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/brief.md (its evidence directory was emptied); restored them from /private/tmp/fmlab.2c5loD/home/state/lab4a2905111871-worker.brief
+relaunched lab4a2905111871-worker harness=claude from=claude model=sonnet effort=low backend=tmux endpoint=firstmate:fm-lab4a2905111871-worker worktree=/private/tmp/fmlab.2c5loD/treehouse/.treehouse/notes-dd9572/1/notes
+exit=0
+== data/lab4a2905111871-worker after relaunch
+total 64
+drwxr-xr-x@ 5 broc-macmini  wheel    160 Nov 11 19:35 .
+drwxr-xr-x@ 5 broc-macmini  wheel    160 Nov 11 19:34 ..
+-rw-r--r--@ 1 broc-macmini  wheel     45 Nov 11 19:34 .last-run.json
+-rw-r--r--@ 1 broc-macmini  wheel  12018 Nov 11 19:34 brief.md
+-rw-r--r--@ 1 broc-macmini  wheel  13506 Nov 11 19:35 launch-brief.md
+cmp: EOF on /dev/fd/11
+/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/brief.md:1
+/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/launch-brief.md:1
+/private/tmp/fmlab.2c5loD/home/state/lab4a2905111871-worker.brief:1
+4:## Captain's intent
+5-Lab gated worker for a live supervision lab. Add count_notes(), which returns how many notes are stored, to notes/__init__.py with a unit test, but only after the gate file /private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker/gate exists and you receive a message to resume.
+6-
+window=firstmate:fm-lab4a2905111871-worker
+harness=claude

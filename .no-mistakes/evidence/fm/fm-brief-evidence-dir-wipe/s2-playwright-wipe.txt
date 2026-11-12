@@ -1,0 +1,19 @@
+$ npx playwright test   # playwright.config.js outputDir=/private/tmp/fmlab.2c5loD/home/data/lab4a2905111871-worker
+(node:34132) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:44368) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+  ✓  1 a.spec.js:2:1 › no browser needed (27ms)
+
+  1 passed (3.1s)
+exit=0
+== data/lab4a2905111871-worker after Playwright run
+total 8
+drwxr-xr-x@ 3 broc-macmini  wheel   96 Nov 11 19:34 .
+drwxr-xr-x@ 5 broc-macmini  wheel  160 Nov 11 19:34 ..
+-rw-r--r--@ 1 broc-macmini  wheel   45 Nov 11 19:34 .last-run.json
+== state copy
+-r--r--r--@ 1 broc-macmini  wheel  11426 Nov 11 19:32 /private/tmp/fmlab.2c5loD/home/state/lab4a2905111871-worker.brief
