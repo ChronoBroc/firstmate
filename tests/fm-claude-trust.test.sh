@@ -921,6 +921,61 @@ test_lock_left_by_a_killed_registration_is_reclaimed() {
   pass "fm-claude-trust.sh: a lock left by a killed registration is reclaimed"
 }
 
+# A registration killed while its writer is between the moved-store check and
+# the rename must not let that writer land after a later registration: the
+# killed registration's lock is reclaimed, so any surviving writer would rename
+# its stale snapshot over the later one and drop its entry.
+test_killed_registration_writer_cannot_overwrite_a_later_one() {
+  local rec preload pause holder writer wt2 out i
+  rec=$(make_case killed-writer)
+  read_case "$rec"
+  wt2="$CASE_DIR/wt2"
+  git -C "$PROJ" worktree add -q -b wt-killed-writer-2 "$wt2" >/dev/null 2>&1 \
+    || fail "could not create the second worktree"
+  wt2=$(cd -P "$wt2" && pwd -P)
+  pause="$CASE_DIR/pause"
+  mkdir -p "$pause"
+  preload="$CASE_DIR/pause-rename.cjs"
+  cat > "$preload" <<'JS'
+const fs = require("node:fs");
+const path = require("node:path");
+const dir = process.env.FM_TEST_PAUSE_DIR;
+const rename = fs.renameSync;
+fs.renameSync = (from, to) => {
+  if (String(to).endsWith(".claude.json")) {
+    fs.writeFileSync(path.join(dir, "writer"), `${process.pid}\n`);
+    const cell = new Int32Array(new SharedArrayBuffer(4));
+    for (let i = 0; i < 200 && !fs.existsSync(path.join(dir, "go")); i += 1) Atomics.wait(cell, 0, 0, 50);
+  }
+  return rename(from, to);
+};
+JS
+  (FM_TEST_PAUSE_DIR="$pause" NODE_OPTIONS="--require $preload" run_trust "$CONFIG" "$WT" "$PROJ" >/dev/null) 2>/dev/null &
+  for i in $(seq 1 100); do
+    [ -s "$pause/writer" ] && break
+    sleep 0.1
+  done
+  [ -s "$pause/writer" ] || fail "the first registration never reached its rename"
+  writer=$(cat "$pause/writer")
+  holder=$(cat "$CONFIG/.claude.json.fm-trust.lock/pid" 2>/dev/null || true)
+  [ -n "$holder" ] || fail "the first registration did not hold the lock while writing"
+  kill -9 "$holder" 2>/dev/null
+  wait 2>/dev/null
+  out=$(run_trust "$CONFIG" "$wt2" "$PROJ")
+  expect_code 0 $? "the registration after a killed one was refused: $out"
+  touch "$pause/go"
+  for i in $(seq 1 100); do
+    kill -0 "$writer" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -0 "$writer" 2>/dev/null && fail "the killed registration's writer never exited"
+  assert_trusted "$CONFIG/.claude.json" "$wt2" \
+    "the killed registration's writer renamed over a later registration and dropped its entry"
+  [ ! -e "$CONFIG/.claude.json.fm-trust.lock" ] && [ ! -L "$CONFIG/.claude.json.fm-trust.lock" ] \
+    || fail "the later registration left its lock behind"
+  pass "fm-claude-trust.sh: a killed registration's writer cannot overwrite a later registration"
+}
+
 test_fresh_worktree_is_trusted
 test_fresh_worktree_also_trusts_the_project_root_without_import_consent
 test_registration_carries_forward_existing_import_consent
@@ -954,3 +1009,4 @@ test_worktree_mode_still_refuses_a_secondmate_home
 test_secondmate_spawn_fails_closed_when_home_trust_cannot_be_recorded
 test_concurrent_registrations_all_land
 test_lock_left_by_a_killed_registration_is_reclaimed
+test_killed_registration_writer_cannot_overwrite_a_later_one
