@@ -312,7 +312,10 @@ test_ring_skips_dead_agent() {
 # A fake tmux whose pane is a Claude-style composer that keeps its content in
 # FM_FAKE_COMPOSER: literal input appends to it, capture renders it wrapped
 # between rules, and Enter submits it (logged as SUBMIT) unless
-# FM_FAKE_DROP_ENTERS still holds a count of Enters to swallow.
+# FM_FAKE_DROP_ENTERS still holds a count of Enters to swallow, or
+# FM_FAKE_NEWLINE_ENTERS still holds a count of Enters to turn into a newline
+# the way Codex's paste-burst heuristic does when text and Enter reach it in
+# one read: the composer then ends in an empty row holding the cursor.
 make_composer_stub() {  # <dir>
   mkdir -p "$1/fakebin"
   cat > "$1/fakebin/tmux" <<'SH'
@@ -333,8 +336,12 @@ case "${1:-}" in
       printf '%s' "$1" >> "$FM_FAKE_COMPOSER"
     elif [ "${1:-}" = Enter ]; then
       drops=$(cat "$FM_FAKE_DROP_ENTERS" 2>/dev/null || echo 0)
+      newlines=$(cat "${FM_FAKE_NEWLINE_ENTERS:-/nonexistent}" 2>/dev/null || echo 0)
       if [ "$drops" -gt 0 ]; then
         echo $((drops - 1)) > "$FM_FAKE_DROP_ENTERS"
+      elif [ "$newlines" -gt 0 ] && [ -s "$FM_FAKE_COMPOSER" ]; then
+        echo $((newlines - 1)) > "$FM_FAKE_NEWLINE_ENTERS"
+        printf '\n' >> "$FM_FAKE_COMPOSER"
       elif [ -s "$FM_FAKE_COMPOSER" ]; then
         printf 'SUBMIT: %s\n' "$(cat "$FM_FAKE_COMPOSER")" >> "$FM_SEND_LOG"
         : > "$FM_FAKE_COMPOSER"
@@ -342,13 +349,24 @@ case "${1:-}" in
     fi
     exit 0 ;;
   display-message)
-    case "$*" in *cursor_y*) printf '2\n'; exit 0 ;; esac
+    case "$*" in
+      *cursor_y*)
+        # The cursor sits on the composer's last row: below a trailing
+        # newline that is an empty row, as in a real Codex composer.
+        rows=1
+        if [ -s "$FM_FAKE_COMPOSER" ]; then
+          rows=$(fold -w 60 "$FM_FAKE_COMPOSER" | awk 'END { print NR }')
+          [ -n "$(tail -c 1 "$FM_FAKE_COMPOSER")" ] || rows=$((rows + 1))
+        fi
+        printf '%s\n' $((rows + 1)); exit 0 ;;
+    esac
     printf 'fakepane\n'; exit 0 ;;
   capture-pane)
     rule=$(printf '─%.0s' $(seq 64))
     printf '● done\n%s\n' "$rule"
     if [ -s "$FM_FAKE_COMPOSER" ]; then
       fold -w 60 "$FM_FAKE_COMPOSER" | awk 'NR == 1 { print "❯ " $0; next } { print "  " $0 }'
+      [ -n "$(tail -c 1 "$FM_FAKE_COMPOSER")" ] || printf '  \n'
     else
       printf '❯ \n'
     fi
@@ -408,6 +426,58 @@ test_ring_submits_its_own_stuck_doorbell() {
     || fail "the retry Enter should submit the doorbell once:"$'\n'"$(cat "$log")"
   [ ! -s "$composer" ] || fail "a lost Enter left the doorbell unsubmitted"
   pass "inbox: the ring submits its own stuck doorbell, skips other pending text, and retries a lost Enter once on both paths"
+}
+
+# The stacked-doorbell deadlock (Codex): when a worker's event loop reads the
+# typed doorbell and its Enter in one batch, the paste-burst heuristic turns
+# that Enter into a newline. The doorbell then sits unsubmitted with the
+# cursor on an empty row, a composer the classifier cannot call pending, so a
+# later ring typed another copy on top; every swallowed Enter stacked one more,
+# and once the stack read pending it never matched a single doorbell, so every
+# later ring skipped it and only a human Enter could submit it. The ring now
+# submits any composer holding only copies of its own doorbell with a lone
+# Enter and never types over them, confirms its own typed doorbell left the
+# composer, and reports a doorbell it could not submit as not delivered.
+test_ring_never_stacks_unsubmitted_doorbells() {
+  local dir state rec doorbell log composer newlines rc held
+  dir="$TMP_ROOT/ring-stacked"
+  state="$dir/state"
+  mkdir -p "$state"
+  make_composer_stub "$dir"
+  rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  doorbell=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$rec")
+  log="$dir/send.log"; composer="$dir/composer"; newlines="$dir/newlines"
+  ring() {
+    PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" FM_FAKE_COMPOSER="$composer" \
+      FM_FAKE_DROP_ENTERS="$dir/drops" FM_FAKE_NEWLINE_ENTERS="$newlines" \
+      inbox_lib "$state" fm_task_inbox_ring tmux sess:fm-t1 "$rec" fm-t1
+  }
+
+  for held in "$doorbell"$'\n' "$doorbell$doorbell" "$doorbell"$'\n'"$doorbell"$'\n'"$doorbell"$'\n'; do
+    : > "$log"; printf '%s' "$held" > "$composer"; echo 0 > "$newlines"
+    rc=0; ring || rc=$?
+    [ "$rc" = 0 ] || fail "a composer holding only our own unsubmitted doorbells should be submitted, got rc $rc"
+    [ "$(cat "$log")" = "$(printf 'SUBMIT: %s' "$held")" ] \
+      || fail "our own unsubmitted doorbells should be submitted as held, with no copy typed on top:"$'\n'"$(cat "$log")"
+    [ ! -s "$composer" ] || fail "our own unsubmitted doorbells were left in the composer"
+  done
+
+  : > "$log"; : > "$composer"; echo 1 > "$newlines"
+  rc=0; ring || rc=$?
+  [ "$rc" = 0 ] || fail "a doorbell whose Enter became a newline should be submitted by a lone retry Enter, got rc $rc"
+  [ "$(cat "$log")" = "SUBMIT: $doorbell" ] \
+    || fail "a swallowed Enter should be followed by one lone Enter, never a retyped doorbell:"$'\n'"$(cat "$log")"
+  [ ! -s "$composer" ] || fail "a swallowed Enter left the doorbell unsubmitted in the composer"
+
+  : > "$log"; : > "$composer"; echo 99 > "$newlines"
+  rc=0; ring || rc=$?
+  [ "$rc" = 2 ] || fail "a doorbell that never leaves the composer must be reported as not delivered, got rc $rc"
+  rc=0; ring || rc=$?
+  [ "$rc" = 2 ] || fail "a re-ring over a doorbell that still never submits must report not delivered, got rc $rc"
+  [ ! -s "$log" ] || fail "nothing should have been submitted:"$'\n'"$(cat "$log")"
+  [ "$(tr -d '[:space:]' < "$composer")" = "$(printf '%s' "$doorbell" | tr -d '[:space:]')" ] \
+    || fail "re-rings stacked doorbell copies in the composer:"$'\n'"$(cat "$composer")"
+  pass "inbox: the ring submits stacked or newline-swallowed doorbells with a lone Enter, never types over them, and reports one it cannot submit"
 }
 
 test_idempotent_write_dedups_exact_body() {
@@ -1377,6 +1447,7 @@ test_doorbell_is_a_shell_noop
 test_doorbell_rejects_terminal_controls
 test_ring_skips_dead_agent
 test_ring_submits_its_own_stuck_doorbell
+test_ring_never_stacks_unsubmitted_doorbells
 test_idempotent_write_dedups_exact_body
 test_idempotent_write_prefilters_history
 test_idempotent_write_prefilter_preserves_exact_bodies

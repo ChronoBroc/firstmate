@@ -64,7 +64,10 @@
 # escalation policy for ordinary and fire-and-forget records.
 # On pane backends, the composer pre-check before the ring is ADVISORY only: when
 # the composer visibly holds pending text the ring is skipped with a notice and
-# the watcher re-rings an ordinary record later; no composer verdict is
+# the watcher re-rings an ordinary record later; a composer holding only copies
+# of this doorbell is submitted rather than typed over, and a doorbell left
+# unsubmitted in the composer is reported as not reaching the target (the
+# ring's contract is owned by bin/fm-task-inbox-lib.sh); no composer verdict is
 # delivery proof on this plane, and a failed ring never fails the send.
 #
 # TYPED - the LOCAL text submitted directly instead of through the inbox. On a
