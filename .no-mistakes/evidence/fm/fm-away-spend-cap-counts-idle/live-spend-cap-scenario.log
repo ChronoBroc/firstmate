@@ -1,0 +1,64 @@
+=== S1: reported failure - 5 idle builders (PRs ready) + 1 idle board-hosting scout, away entry with no --spend ===
+worker readings (real fm-crew-state.sh):
+  builder-1    state: blocked · source: status-log · PR https://github.com/o/r/pull/1 ready
+  builder-2    state: blocked · source: status-log · PR https://github.com/o/r/pull/2 ready
+  builder-3    state: blocked · source: status-log · PR https://github.com/o/r/pull/3 ready
+  builder-4    state: blocked · source: status-log · PR https://github.com/o/r/pull/4 ready
+  builder-5    state: blocked · source: status-log · PR https://github.com/o/r/pull/5 ready
+  mate         state: unknown · source: none · no current-state source available
+  scout-board  state: unknown · source: none · no current-state source available
+$ fm-afk-contract.sh enter --words 'start reviewers for the open PRs'
+Away posture recorded at 2026-11-12T23:46:41Z: hold-for-return only. No phone channel is configured; anything that needs you waits for your return. Your away instructions are recorded verbatim; the away session will carry them out where it can, and anything it is unsure of, or that needs you, waits for your return. Destructive, irreversible, and security-sensitive actions are never pre-authorizable, whatever the words say. Expected return: not given. Spend cap: 4 actively working workers (idle, parked, finished, and dead workers are not counted; one whose state cannot be read is).
+  spend cap: 4 actively working workers (idle, parked, finished, and dead workers are not counted; one whose state cannot be read is)
+recorded cap: 4
+live-workers: 0  (records: 7)
+$ fm-spawn.sh reviewer-1 ... (supervision branch, away)
+  fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.rJUsNJ
+  note: new-task spawn (fm-spawn) proceeds for the supervision branch under the away-posture record: main is parked and its standing authority is relocated; this script's own gate still applies (docs/pi-supervision-branch.md "Postures")
+  note: new-task spawn (fm-spawn) proceeds for the supervision branch under the away-posture record: main is parked and its standing authority is relocated; this script's own gate still applies (docs/pi-supervision-branch.md "Postures")
+  error: spawn refused - the supervision branch under the away-posture record may dispatch only queued unblocked work (already queued, or filed by the branch from the captain's away words); task reviewer-1 has no dispatchable backlog item in this home
+S1: PASS
+
+=== S2: adversarial - 4 actively working workers alongside the 6 idle ones must still refuse ===
+worker readings:
+  builder-1    state: blocked · source: status-log · PR https://github.com/o/r/pull/1 ready
+  builder-2    state: blocked · source: status-log · PR https://github.com/o/r/pull/2 ready
+  builder-3    state: blocked · source: status-log · PR https://github.com/o/r/pull/3 ready
+  builder-4    state: blocked · source: status-log · PR https://github.com/o/r/pull/4 ready
+  builder-5    state: blocked · source: status-log · PR https://github.com/o/r/pull/5 ready
+  busy-1       state: working · source: pane · harness busy (claude-hook)
+  busy-2       state: working · source: pane · harness busy (claude-hook)
+  busy-3       state: working · source: pane · harness busy (claude-hook)
+  busy-4       state: working · source: pane · harness busy (claude-hook)
+  mate         state: unknown · source: none · no current-state source available
+  scout-board  state: unknown · source: none · no current-state source available
+live-workers: 4
+$ fm-spawn.sh reviewer-2 ...
+  fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.rJUsNJ
+  note: new-task spawn (fm-spawn) proceeds for the supervision branch under the away-posture record: main is parked and its standing authority is relocated; this script's own gate still applies (docs/pi-supervision-branch.md "Postures")
+  error: spawn refused - the away-posture record caps actively working workers at 4 and 4 ordinary worker(s) are actively working in this home (idle, parked, finished, and dead workers are not counted; one whose state cannot be read is); task reviewer-2 stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)
+S2: PASS
+
+=== S3: a busy worker goes idle (turn ends, PR ready) -> room under the cap reopens ===
+busy-4: state: blocked · source: status-log · PR https://github.com/o/r/pull/9 ready
+live-workers: 3
+  fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.rJUsNJ
+  note: new-task spawn (fm-spawn) proceeds for the supervision branch under the away-posture record: main is parked and its standing authority is relocated; this script's own gate still applies (docs/pi-supervision-branch.md "Postures")
+  note: new-task spawn (fm-spawn) proceeds for the supervision branch under the away-posture record: main is parked and its standing authority is relocated; this script's own gate still applies (docs/pi-supervision-branch.md "Postures")
+  error: spawn refused - the supervision branch under the away-posture record may dispatch only queued unblocked work (already queued, or filed by the branch from the captain's away words); task reviewer-3 has no dispatchable backlog item in this home
+S3: PASS
+
+=== S4: adversarial - a worker whose state cannot be read counts (fail closed) ===
+unreadable: state: unknown · source: pane · harness state unavailable (unknown malformed)
+live-workers: 4
+  fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.rJUsNJ
+  note: new-task spawn (fm-spawn) proceeds for the supervision branch under the away-posture record: main is parked and its standing authority is relocated; this script's own gate still applies (docs/pi-supervision-branch.md "Postures")
+  error: spawn refused - the away-posture record caps actively working workers at 4 and 4 ordinary worker(s) are actively working in this home (idle, parked, finished, and dead workers are not counted; one whose state cannot be read is); task reviewer-4 stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)
+S4: PASS
+
+=== S5: a dead worker (pane gone) does not count ===
+busy-1: state: unknown · source: none · backend target gone: crew:fm-busy-1
+live-workers: 3
+S5: PASS
+
+SUMMARY S1=PASS S2=PASS S3=PASS S4=PASS S5=PASS
