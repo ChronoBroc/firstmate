@@ -1,0 +1,17 @@
+20:12:31 [base] hooks fm-spawn wrote: ["SessionEnd","Stop","StopFailure","UserPromptSubmit"]
+20:12:31 [base] claude started in lab:worker at 1794514351; meta: window=lab:worker endpoint_task_id=long-turn worktree=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.WFGnJA/wt project=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T
+20:13:13 [base] t+42s WAKE: stale: lab:worker (idle 10s, possible wedge, escalation 1)
+20:13:27 [base] t+56s WAKE: stale: lab:worker (idle 10s, possible wedge, escalation 2)
+20:13:42 [base] t+71s WAKE: stale: lab:worker (idle 12s, possible wedge, escalation 3, demand-deep-inspection: same pane has wedge-escalated 3 times in a row - do not re-absorb on the run-step/pane state alone)
+20:13:58 [base] t+87s WAKE: stale: lab:worker (idle 11s, possible wedge, escalation 4, demand-deep-inspection: same pane has wedge-escalated 4 times in a row - do not re-absorb on the run-step/pane state alone)
+20:14:12 [base] t+101s WAKE: stale: lab:worker (idle 11s, possible wedge, escalation 5, demand-deep-inspection: same pane has wedge-escalated 5 times in a row - do not re-absorb on the run-step/pane state alone)
+20:14:27 [base] t+116s WAKE: stale: lab:worker (idle 11s, possible wedge, escalation 6, demand-deep-inspection: same pane has wedge-escalated 6 times in a row - do not re-absorb on the run-step/pane state alone)
+20:14:42 [base] t+131s WAKE: stale: lab:worker (idle 12s, possible wedge, escalation 7, demand-deep-inspection: same pane has wedge-escalated 7 times in a row - do not re-absorb on the run-step/pane state alone)
+20:14:57 [base] t+146s WAKE: stale: lab:worker (idle 10s, possible wedge, escalation 8, demand-deep-inspection: same pane has wedge-escalated 8 times in a row - do not re-absorb on the run-step/pane state alone)
+20:15:04 [base] t+153s busy record: v1 gen=g1794514349.25994.6778 seq=2 state=busy source=claude-hook event=user-prompt-submit ts=1794514351
+20:15:04 [base] classify: busy claude-hook
+20:15:04 [base] progress marker: absent
+20:15:04 [base] meta (turn start proxy) age: 153s
+20:15:04 [base] crew-state: state: working · source: pane · harness busy (claude-hook) 
+20:15:04 [base] pane: 
+20:15:04 [base] RESULT wakes=8 possible_wedge=8 over 150s of one claude turn

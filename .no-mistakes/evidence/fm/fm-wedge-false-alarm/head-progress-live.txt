@@ -1,0 +1,1 @@
+ok - Claude Code 2.1.322 (Claude Code): a tool call inside a busy turn refreshes native progress, and Stop still closes the turn

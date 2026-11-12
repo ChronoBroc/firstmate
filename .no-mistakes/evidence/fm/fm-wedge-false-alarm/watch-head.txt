@@ -1,0 +1,27 @@
+20:09:48 [head] hooks fm-spawn wrote: ["PreToolUse","SessionEnd","Stop","StopFailure","UserPromptSubmit"]
+20:09:48 [head] claude started in lab:worker at 1794514188; meta: window=lab:worker endpoint_task_id=long-turn worktree=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/wt project=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T
+20:12:20 [head] t+152s busy record: v1 gen=g1794514186.89458.10905 seq=2 state=busy source=claude-hook event=user-prompt-submit ts=1794514188
+20:12:20 [head] classify: busy claude-hook
+20:12:20 [head] progress marker age: 3s
+20:12:20 [head] meta (turn start proxy) age: 152s
+20:12:20 [head] crew-state: state: working · source: pane · harness busy (claude-hook) 
+20:12:20 [head] pane: 
+20:12:20 [head] RESULT wakes=0 possible_wedge=0 over 150s of one claude turn
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/pre-rebase: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/pre-applypatch: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/pre-auto-gc: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/pre-merge-commit: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/post-commit: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/sendemail-validate: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/applypatch-msg: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/prepare-commit-msg: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/post-checkout: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/post-applypatch: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/post-rewrite: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/commit-msg: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/pre-push: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/post-merge: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks/pre-commit: Permission denied
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state/long-turn.git-hooks: Directory not empty
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab/state: Directory not empty
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.DIjIJP/lab: Directory not empty

@@ -1,0 +1,1 @@
+not ok - claude 2.1.322 (Claude Code) ran a tool call without firing the PreToolUse progress hook

@@ -1,0 +1,13 @@
+20:18:11 [head-silent-tool] hooks fm-spawn wrote: ["PreToolUse","SessionEnd","Stop","StopFailure","UserPromptSubmit"]
+20:18:11 [head-silent-tool] claude started in lab:worker at 1794514691; meta: window=lab:worker endpoint_task_id=long-turn worktree=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-watch-drive.jlfQh9/wt project=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T
+20:18:59 [head-silent-tool] t+48s WAKE: stale: lab:worker (idle 11s, possible wedge, escalation 1)
+20:19:18 [head-silent-tool] t+67s WAKE: stale: lab:worker (idle 12s, possible wedge, escalation 2)
+20:19:37 [head-silent-tool] t+86s WAKE: stale: lab:worker (idle 12s, possible wedge, escalation 3, demand-deep-inspection: same pane has wedge-escalated 3 times in a row - do not re-absorb on the run-step/pane state alone)
+20:20:38 [head-silent-tool] t+147s WAKE: stale: lab:worker (idle 12s, possible wedge, escalation 1)
+20:20:41 [head-silent-tool] t+150s busy record: v1 gen=g1794514687.11414.24611 seq=2 state=busy source=claude-hook event=user-prompt-submit ts=1794514692
+20:20:41 [head-silent-tool] classify: busy claude-hook
+20:20:41 [head-silent-tool] progress marker age: 48s
+20:20:41 [head-silent-tool] meta (turn start proxy) age: 150s
+20:20:42 [head-silent-tool] crew-state: state: working · source: pane · harness busy (claude-hook) 
+20:20:42 [head-silent-tool] pane: 
+20:20:42 [head-silent-tool] RESULT wakes=4 possible_wedge=4 over 150s of one claude turn
