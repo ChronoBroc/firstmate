@@ -1228,7 +1228,8 @@ Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-30
 ```
 
 Pi's bash tool runs a command with no time limit unless the call passes `timeout`, so the brief asks for at most 2700 seconds, which stays under the watcher's 3600-second busy-turn bound.
-Codex yields a still-running command back to the model, and one empty `write_stdin` poll then waits up to 300000 ms.
+Codex yields a still-running command back to the model, and one empty `write_stdin` poll then waits up to 300000 ms only when its `exec` cell lifts the cell's own 30-second yield.
+Observed on 2026-11-11 with codex-cli 0.167.0 in three `codex exec` sessions timed from their transcripts: `exec_command` with `yield_time_ms` 300000 returned after 30.2 seconds with or without the pragma, an empty `write_stdin` poll with `yield_time_ms` 300000 returned after 31.0 seconds in a plain cell and held 300.0 seconds in a cell whose first line was `// @exec: {"yield_time_ms": 300000}`, and `wait` with `yield_time_ms` 300000 on a yielded cell was accepted and held until the inner poll returned.
 Claude Code's Bash tool defaults to 120000 ms and accepts at most 600000 ms; `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS` override those two values.
 
 Claude Code also constrains the shape of a wait, not only its length, so the brief has to name the shape that is allowed rather than only forbid the ones that are not.
