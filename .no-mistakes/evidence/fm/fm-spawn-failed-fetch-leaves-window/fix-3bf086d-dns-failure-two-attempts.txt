@@ -1,0 +1,41 @@
+=== fix attempt 1: fm-spawn.sh fetchfail-a1 <proj> --mode no-mistakes --yolo off
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home
+warning: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home/data/fetchfail-a1/launch-brief.md records no ship branch; defaulting to legacy branch fm/fetchfail-a1
+warning: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home/data/fetchfail-a1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: treehouse get did not enter an isolated worktree within 60s (last seen '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/proj': it is the spawning project itself; spawning project '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/proj'); window primary:fm-fetchfail-a1 is closed on exit, returning any pool slot it held
+last output in primary:fm-fetchfail-a1 before the failed spawn closed it:
+  | treehouse get
+  | broc-macmini@Brocs-Mac-mini proj % treehouse get
+  | 🌳 Setting up worktree...
+  | fetch failed: git fetch origin: ssh: Could not resolve hostname git.example.invalid: nodename nor servname provided, or not known
+  | fatal: Could not read from remote repository.
+  | Please make sure you have the correct access rights
+  | and the repository exists.
+  | broc-macmini@Brocs-Mac-mini proj %
+exit=1
+--- tmux windows after attempt 1:
+1 drive.sh {run-worktree}
+2 runner {run-worktree}
+--- state/: .last-watcher-beat fetchfail-a1.brief 
+--- data/fetchfail-a1/: brief.md 
+=== fix attempt 2: fm-spawn.sh fetchfail-a1 <proj> --mode no-mistakes --yolo off
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home
+warning: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home/data/fetchfail-a1/launch-brief.md records no ship branch; defaulting to legacy branch fm/fetchfail-a1
+warning: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home/data/fetchfail-a1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: treehouse get did not enter an isolated worktree within 60s (last seen '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/proj': it is the spawning project itself; spawning project '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/proj'); window primary:fm-fetchfail-a1 is closed on exit, returning any pool slot it held
+last output in primary:fm-fetchfail-a1 before the failed spawn closed it:
+  | treehouse get
+  | broc-macmini@Brocs-Mac-mini proj % treehouse get
+  | 🌳 Setting up worktree...
+  | fetch failed: git fetch origin: ssh: Could not resolve hostname git.example.invalid: nodename nor servname provided, or not known
+  | fatal: Could not read from remote repository.
+  | Please make sure you have the correct access rights
+  | and the repository exists.
+  | broc-macmini@Brocs-Mac-mini proj %
+exit=1
+--- tmux windows after attempt 2:
+1 drive.sh {run-worktree}
+2 runner {run-worktree}
+--- state/: .last-watcher-beat fetchfail-a1.brief 
+--- data/fetchfail-a1/: brief.md 
+DONE

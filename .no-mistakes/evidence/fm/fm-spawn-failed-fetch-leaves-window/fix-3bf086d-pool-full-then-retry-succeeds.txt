@@ -1,0 +1,49 @@
+=== attempt 1 with the 1-slot pool held by other-task
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home
+warning: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home/data/fetchfail-a1/launch-brief.md records no ship branch; defaulting to legacy branch fm/fetchfail-a1
+warning: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home/data/fetchfail-a1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+error: treehouse get did not enter an isolated worktree within 60s (last seen '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/proj': it is the spawning project itself; spawning project '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/proj'); window primary:fm-fetchfail-a1 is closed on exit, returning any pool slot it held
+last output in primary:fm-fetchfail-a1 before the failed spawn closed it:
+  | treehouse get
+  | broc-macmini@Brocs-Mac-mini proj % treehouse get
+  | 🌳 Setting up worktree...
+  | all 1 worktrees are in use or dirty (max_trees = 1). Run 'treehouse status' to see details, or increase max_trees in treehouse.toml
+  | broc-macmini@Brocs-Mac-mini proj %
+exit=1
+--- tmux windows:
+1 drive.sh {run-worktree}
+2 runner {run-worktree}
+--- state/: .last-watcher-beat fetchfail-a1.brief 
+--- data/fetchfail-a1/: brief.md 
+=== returning other-task's slot (cause cleared): treehouse return
+🌳 Worktree returned to pool.
+=== attempt 2 (retry, no manual cleanup)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home
+warning: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home/data/fetchfail-a1/launch-brief.md records no ship branch; defaulting to legacy branch fm/fetchfail-a1
+warning: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home/data/fetchfail-a1/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned fetchfail-a1 harness=claude kind=ship mode=no-mistakes yolo=off window=primary:fm-fetchfail-a1 worktree=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/pool/.treehouse/proj-91c1ba/1/proj
+exit=0
+--- tmux windows:
+1 drive.sh {run-worktree}
+2 runner {run-worktree}
+3 fm-fetchfail-a1 /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/pool/.treehouse/proj-91c1ba/1/proj
+--- state/: .last-watcher-beat fetchfail-a1.brief fetchfail-a1.busy-gen fetchfail-a1.busy-state fetchfail-a1.git-hooks fetchfail-a1.inbox fetchfail-a1.meta home-summary.json operational-inbox 
+--- data/fetchfail-a1/: brief.md launch-brief.md 
+--- state/fetchfail-a1.meta worktree line: worktree=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/pool/.treehouse/proj-91c1ba/1/proj
+DONE
+=== worker pane after successful retry (tail):
+❯ : Firstmate operational input waiting: read '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.WYUtfO/home/state/operational-inbox/1794465719-df19f60fbca67f1f.msg' and handle its
+  contents as Firstmate operational input.
+  Read 1 file
+⏺ The spec is "Do nothing." Let me check the steering inbox.
+  Listed 1 directory
+⏺ I made no changes, because the task was to do nothing.
+  - Brief: The captain's intent was "Exercise a failed worktree fetch for fetchfail-a1", and the spec said "Do nothing."
+  - Steering inbox: It holds only an empty handled folder, so there were no messages to acknowledge.
+  - Worktree: It is still clean on cf2d0d1, with no commits, no push and no no-mistakes run.
+✻ Worked for 10s · done 12:42 AM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 5.5  context 3%
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
