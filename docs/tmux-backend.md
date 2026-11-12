@@ -24,6 +24,7 @@ tmux new -s firstmate
 
 Crew tasks become windows in that session, even while another client is attached through a grouped session (`tmux new-session -t <session>`).
 `tmux display-message -p '#S'` prints its name unless a grouped session was used more recently.
+When that session is a grouped viewer, for example because the primary harness's pane was opened from one, tasks go to the session the group is named after while it still exists, so closing the viewer leaves every recorded task window reachable.
 If the primary harness runs outside tmux, Firstmate creates or reuses a detached session named `firstmate`:
 
 ```sh

@@ -292,11 +292,40 @@ got=$(TMUX="/fake,0,$OWN_SID" fm_backend_tmux_container_ensure)
   || fail "container_ensure chose '$got' instead of the pane's own session '$SESSION' beside a grouped session"
 pass "real tmux: container_ensure names the pane's own session, not a more recent grouped session"
 
+# A pane opened from the live viewer carries the viewer's id in $TMUX. A task
+# window recorded under the viewer reads as missing once the viewer closes, so
+# the container must be the session the group is named after.
+VIEWER_SID=$(tmux display-message -p -t smoke-viewer '#{session_id}')
+VIEWER_SID=${VIEWER_SID#\$}
+[ "$(tmux display-message -p -t smoke-viewer '#{session_group}')" = "$SESSION" ] \
+  || fail "real tmux: the grouped viewer's group is not named after '$SESSION'"
+got=$(TMUX="/fake,0,$VIEWER_SID" fm_backend_tmux_container_ensure)
+[ "$got" = "$SESSION" ] \
+  || fail "container_ensure chose '$got' instead of the group's base session '$SESSION' for a pane opened from a live viewer"
+pass "real tmux: container_ensure names the group's base session for a pane opened from a live grouped viewer"
+
+# An ungrouped session resolves to itself.
+OTHER_SID=$(tmux display-message -p -t "$OTHER_SESSION" '#{session_id}')
+got=$(TMUX="/fake,0,${OTHER_SID#\$}" fm_backend_tmux_container_ensure)
+[ "$got" = "$OTHER_SESSION" ] \
+  || fail "container_ensure chose '$got' instead of the ungrouped session '$OTHER_SESSION'"
+pass "real tmux: container_ensure names an ungrouped session unchanged"
+
+# When the session the group is named after is gone, the viewer is the only
+# session left to name, so it is kept.
+tmux new-session -d -s smoke-gone-base -x 200 -y 50 || fail "real tmux: second base session failed"
+tmux new-session -d -s smoke-gone-viewer -t smoke-gone-base || fail "real tmux: second grouped viewer failed"
+GONE_VIEWER_SID=$(tmux display-message -p -t smoke-gone-viewer '#{session_id}')
+tmux kill-session -t =smoke-gone-base || fail "real tmux: killing the second base session failed"
+got=$(TMUX="/fake,0,${GONE_VIEWER_SID#\$}" fm_backend_tmux_container_ensure)
+[ "$got" = smoke-gone-viewer ] \
+  || fail "container_ensure chose '$got' instead of the viewer 'smoke-gone-viewer' whose group base is gone"
+pass "real tmux: container_ensure keeps a grouped viewer whose group base session is gone"
+tmux kill-session -t =smoke-gone-viewer || fail "real tmux: killing the second grouped viewer failed"
+
 # A pane opened from the viewer's session keeps the viewer's id in $TMUX after
 # the viewer closes; tmux answers that stale id with empty output and exit 0,
 # so the container must come from the pane's surviving session instead.
-VIEWER_SID=$(tmux display-message -p -t smoke-viewer '#{session_id}')
-VIEWER_SID=${VIEWER_SID#\$}
 OWN_PANE=$(tmux display-message -p -t "$SESSION:0" '#{pane_id}')
 tmux kill-session -t smoke-viewer || fail "real tmux: killing the grouped viewer session failed"
 got=$(TMUX="/fake,0,$VIEWER_SID" TMUX_PANE="$OWN_PANE" fm_backend_tmux_container_ensure)

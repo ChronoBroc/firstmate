@@ -73,17 +73,28 @@ fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> 
 # created in, which stays unambiguous across the group; fall back to the
 # untargeted lookup when it is absent, malformed, or stale (tmux answers a
 # killed session's id with empty output and exit 0).
+#
+# The name printed is the session a task window is recorded under, so it must
+# outlive any viewer. A pane opened from a viewer carries the viewer's id, and a
+# window recorded as <viewer>:fm-<id> reads as missing once that viewer closes
+# although the window lives on in the rest of the group. So a grouped session
+# resolves to the session the group is named after (tmux names a group after
+# the session `new-session -t` first grouped), provided that session still
+# exists in the same group; otherwise, and for an ungrouped session, the
+# resolved session itself is printed unchanged.
 fm_backend_tmux_own_session() {
-  local sid=${TMUX##*,} name=
+  local sid=${TMUX##*,} name='' group
   case "$sid" in
   ''|*[!0-9]*) ;;
   *) name=$(tmux display-message -p -t "\$$sid" '#S' 2>/dev/null) ;;
   esac
-  if [ -n "$name" ]; then
-    printf '%s\n' "$name"
-  else
-    tmux display-message -p '#S'
+  [ -n "$name" ] || name=$(tmux display-message -p '#S') || return 1
+  group=$(tmux display-message -p -t "=$name:" '#{?session_grouped,#{session_group},}' 2>/dev/null) || group=
+  if [ -n "$group" ] && [ "$group" != "$name" ] \
+      && [ "$(tmux display-message -p -t "=$group:" '#{session_name}|#{session_group}' 2>/dev/null)" = "$group|$group" ]; then
+    name=$group
   fi
+  printf '%s\n' "$name"
 }
 
 # fm_backend_tmux_container_ensure: reuse the current tmux session when
