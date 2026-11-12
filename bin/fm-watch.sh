@@ -94,8 +94,11 @@
 #                          only up to BUSY_TURN_MAX_SECS with no completed turn,
 #                          explicit native-harness progress, or opted-in model
 #                          progress (state/<id>.turn-ended, the native progress
-#                          marker beside it, or the spawn record before either
-#                          exists); an opted-in Pi model stream silent past
+#                          marker beside it - which a Claude worker's PreToolUse
+#                          hook refreshes on every tool call, so one long turn is
+#                          aged from its latest tool call, not its start - or the
+#                          spawn record before either exists); an opted-in Pi
+#                          model stream silent past
 #                          FM_STREAM_SILENT_MAX_SECS crosses that bound early.
 #                          Past that bound, a declared external
 #                          wait or verified captain-held transfer uses the long
