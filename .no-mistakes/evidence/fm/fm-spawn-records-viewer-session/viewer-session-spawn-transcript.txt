@@ -1,0 +1,53 @@
+# Fixed code (d1c68fe0): spawn from pane in grouped viewer crew-view-68217
+pane TMUX=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.poyjgv/tmux/tmux-501/fm-lab,99822,1
+own session per tmux: crew-view-68217
+spawned scout-v1 harness=sleep kind=scout window=crew:fm-scout-v1 worktree=~/.treehouse/demo-e08d1d/1/demo
+exit=0
+
+## state/scout-v1.meta
+window=crew:fm-scout-v1
+endpoint_task_id=scout-v1
+worktree=~/.treehouse/demo-e08d1d/1/demo
+project=/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.poyjgv/projects/demo
+harness=sleep
+kind=scout
+tasktmp=/tmp/fm-scout-v1
+model=default
+effort=default
+spawn_gen=s1794494738.11453.22770
+tmux_socket=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.poyjgv/tmux/tmux-501/fm-lab
+tmux_server=99822:1794494726
+
+# Base code (8bfdd7e2): same spawn from viewer pane
+pane TMUX=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.poyjgv/tmux/tmux-501/fm-lab,99822,2
+own session per tmux: crew-view-68217
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+spawned scout-v0 harness=sleep kind=scout window=crew-view-68217:fm-scout-v0 worktree=~/.treehouse/demo-e08d1d/2/demo
+exit=0
+## state/scout-v0.meta window line
+window=crew-view-68217:fm-scout-v0
+
+# After kill-session =crew-view-68217, live windows:
+crew:zsh
+crew:primary-pane
+crew:fm-scout-v1
+crew:primary-pane-2
+crew:fm-scout-v0
+
+# fm-peek after viewer closed
+--- viewer-closed scout-v0 (base code)
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+can't find session: crew-view-68217
+peek exit=1
+--- viewer-closed scout-v1 (fixed code)
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+treehouse get
+broc-macmini@Brocs-Mac-mini demo % treehouse get
+🌳 Setting up worktree...
+🌳 Entered worktree at ~/.treehouse/demo-e08d1d/1/demo. Type 'exit' to return.
+broc-macmini@Brocs-Mac-mini demo % cd -- '~/.treehouse/demo-e08d1d/1/demo'
+broc-macmini@Brocs-Mac-mini demo % export GOTMPDIR=/tmp/fm-scout-v1/gotmp
+broc-macmini@Brocs-Mac-mini demo % export COMPACT_ADVISER_DISABLE=1
+broc-macmini@Brocs-Mac-mini demo % export FM_TASK_ID=scout-v1
+broc-macmini@Brocs-Mac-mini demo % . '/tmp/fm-scout-v1+e872648931e8c35d772b49ad4cfd147005431f49715161d10abedeee843fa67e/launch.s1794494738.11453.22770.sh'
+peek exit=0
