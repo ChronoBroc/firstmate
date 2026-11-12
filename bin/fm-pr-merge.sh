@@ -218,6 +218,10 @@
 # explicit captain instruction and never skips the live green check, the
 # away-record read, or a captain hold.
 #
+# A GitHub pull request no fleet worker opened is merged the same way once
+# bin/fm-pr-check.sh adopt has given it a worker-less task record; every rule
+# above applies to it unchanged, and only the head proof at recording differs.
+#
 # Usage: fm-pr-merge.sh <task-id> <pr-url> [--attended-override] [--update-branch] [--expected-head <full-sha>] [--allow-red <check-name>] [--allow-missing <check-name>] [--allow-no-pipeline] [-- <extra forge merge args>]
 #
 # On GitLab, this script confirms the MR is actually merged before reporting it;

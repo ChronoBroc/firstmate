@@ -48,7 +48,25 @@
 # cannot take the whole budget on every sweep. Registrations
 # stop FM_CHECK_TIMEOUT (default 30) minus 5 seconds after the scan starts; a
 # registration cut at that bound prints nothing and is retried.
+#
+# adopt registers a GitHub pull request no fleet worker opened, such as a
+# project owner's own, so bin/fm-pr-merge.sh can merge it under every guard it
+# applies to a fleet task. It first publishes a new worker-less task record
+# (kind=adopted-pr and project= only, bin/fm-pr-lib.sh fm_pr_adopted_record)
+# under the task-set and meta locks a spawn takes, moving this home's queued
+# backlog item <task-id> In flight in the same step, then registers the pull
+# request through the ordinary path above. It refuses, recording nothing, a
+# non-GitHub URL, a relative or non-git --project, an id that already has a
+# task record, a pull request another task already records or whose head
+# branch is a task's recorded branch, a pull request that is not open, a
+# draft, an unreadable head, and an id with no filed backlog item when the
+# automatic backlog transition applies. Because the record has no worker copy,
+# bin/fm-dod-lib.sh fm_dod_accept_adopted_pr replaces the named-head gate with
+# the live head GitHub reports, and refuses any adopted record that names a
+# worker. If registration fails after the record is published, re-run the
+# plain form for the same id and URL.
 # Usage: fm-pr-check.sh <task-id> <pr-url>
+#        fm-pr-check.sh adopt <task-id> <pr-url> --project <project-dir>
 #        fm-pr-check.sh scan
 set -eu
 
@@ -69,6 +87,11 @@ DEGRADED_WATCH_ENABLED=0
 . "$SCRIPT_DIR/fm-dod-lib.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-tasks-axi-lib.sh
+. "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+# shellcheck source=bin/fm-backlog-transition-lib.sh
+. "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
+ADOPT_KIND=$FM_PR_ADOPTED_KIND
 
 pr_check_reported_url() {  # <status-file>
   local line token found=
@@ -159,6 +182,17 @@ if [ "$#" -eq 1 ] && [ "$1" = scan ]; then
   exit 0
 fi
 
+ADOPT=0
+ADOPT_PROJECT=
+if [ "${1:-}" = adopt ]; then
+  if [ "$#" -ne 5 ] || [ "$4" != --project ] || [ -z "$5" ]; then
+    echo "error: invalid PR adoption request; usage: fm-pr-check.sh adopt <task-id> <pr-url> --project <project-dir>" >&2
+    exit 2
+  fi
+  ADOPT=1
+  ADOPT_PROJECT=$5
+  set -- "$2" "$3"
+fi
 
 if [ "$#" -ne 2 ]; then
   echo "error: invalid PR check request" >&2
@@ -185,6 +219,110 @@ fi
 
 # Task-derived paths are constructed only after the canonical ID validation.
 META="$STATE/$ID.meta"
+
+# Adoption publishes a new worker-less record for a pull request no fleet
+# worker opened, then falls through to the ordinary registration below. Every
+# precondition is read before anything is written, and the record is published
+# under the task-set and meta locks a spawn takes, with this home's backlog row
+# moved In flight in the same step (bin/fm-backlog-transition-lib.sh).
+pr_check_adopt() {
+  local view state draft head head_ref other other_url other_branch tmp \
+    data config set_lock meta_lock gate=0 rc=0
+  if [ "$PROVIDER" != github ]; then
+    echo "error: adopting a pull request is supported only for GitHub pull requests; $URL is a $PROVIDER URL" >&2
+    return 1
+  fi
+  if ! command -v gh >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    echo "error: adopting a GitHub pull request requires gh and jq on PATH" >&2
+    return 1
+  fi
+  case "$ADOPT_PROJECT" in
+    /*) ;;
+    *) echo "error: --project must be an absolute path to the project's local clone" >&2; return 1 ;;
+  esac
+  if [ ! -d "$ADOPT_PROJECT" ] || ! git -C "$ADOPT_PROJECT" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "error: --project $ADOPT_PROJECT is not a git clone" >&2
+    return 1
+  fi
+  if [ -e "$META" ] || [ -L "$META" ]; then
+    echo "error: task $ID already has a task record; adoption only creates a new record for a pull request no fleet worker opened, and a fleet task registers its own pull request with fm-pr-check.sh $ID <pr-url>" >&2
+    return 1
+  fi
+  view=$(gh pr view "$URL" --json state,isDraft,headRefOid,headRefName 2>/dev/null) || {
+    echo "error: $URL could not be read from GitHub, so its head cannot be proven from the forge; nothing was recorded" >&2
+    return 1
+  }
+  state=$(printf '%s\n' "$view" | jq -r '.state // empty' 2>/dev/null || true)
+  draft=$(fm_pr_json_draft_state "$view")
+  head=$(printf '%s\n' "$view" | jq -r '.headRefOid // empty' 2>/dev/null || true)
+  head_ref=$(printf '%s\n' "$view" | jq -r '.headRefName // empty' 2>/dev/null || true)
+  if [ "$state" != OPEN ]; then
+    echo "error: $URL is ${state:-in an unreadable state}, not open; only an open pull request can be adopted" >&2
+    return 1
+  fi
+  if [ "$draft" = true ]; then
+    echo "error: $URL is a draft pull request; a draft cannot be merged - mark it ready for review and adopt it again" >&2
+    return 1
+  fi
+  if ! fm_pr_head_valid "$head"; then
+    echo "error: GitHub reported no valid head commit for $URL, so its head cannot be proven from the forge; nothing was recorded" >&2
+    return 1
+  fi
+  # A pull request a fleet task already owns, or one whose head branch is a
+  # fleet task's branch, is that task's to register through its own named-head
+  # gate, never adoptable around it.
+  for other in "$STATE"/*.meta; do
+    [ -f "$other" ] || continue
+    other_url=$(fm_dod_meta_value "$other" pr)
+    other_branch=$(fm_dod_meta_value "$other" branch)
+    if [ "$other_url" = "$URL" ]; then
+      echo "error: $URL is already recorded by task $(basename "$other" .meta); register it through that task" >&2
+      return 1
+    fi
+    if [ -n "$head_ref" ] && [ "$other_branch" = "$head_ref" ]; then
+      echo "error: $URL's head branch $head_ref belongs to fleet task $(basename "$other" .meta); register it through that task" >&2
+      return 1
+    fi
+  done
+  data="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
+  config="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
+  fm_backlog_transition_applies "$config" "$data" "$ADOPT_KIND" || gate=$?
+  if [ "$gate" -eq 2 ]; then
+    echo "error: adoption refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
+    return 1
+  fi
+  set_lock=$(fm_task_set_lock_path "$STATE") || return 1
+  fm_lock_try_acquire "$set_lock" || {
+    echo "error: this home's task set is locked by another operation; refusing to create task $ID rather than racing it" >&2
+    return 1
+  }
+  fm_lock_set_role "$set_lock" task-spawn || { fm_lock_release "$set_lock" || true; return 1; }
+  meta_lock=$(fm_meta_lock_path "$META") || { fm_lock_release "$set_lock" || true; return 1; }
+  fm_lock_acquire_wait "$meta_lock" || { fm_lock_release "$set_lock" || true; return 1; }
+  tmp=$(umask 077; mktemp "$STATE/.$ID.meta.adopt.XXXXXX") || rc=1
+  if [ "$rc" -eq 0 ]; then
+    if [ -e "$META" ] || [ -L "$META" ]; then
+      echo "error: task $ID gained a task record while adoption was preparing; nothing was recorded" >&2
+      rc=1
+    elif ! printf '%s\n' "kind=$ADOPT_KIND" "project=$ADOPT_PROJECT" > "$tmp" \
+      || ! fm_backlog_atomic_transition publish "$tmp" "$META" "task record" "$STATE"; then
+      echo "error: the adopted task record could not be published${FM_BACKLOG_TRANSITION_ERROR:+ ($FM_BACKLOG_TRANSITION_ERROR)}" >&2
+      rc=1
+    elif [ "$gate" -eq 0 ] && ! fm_backlog_atomic_transition dispatch "$META" "$data" "$ID" "$STATE"; then
+      echo "error: adoption refused: $FM_BACKLOG_TRANSITION_ERROR; file the work item $ID first" >&2
+      fm_backlog_record_remove "$META" "task record" "$STATE" || true
+      rc=1
+    fi
+  fi
+  [ -z "$tmp" ] || rm -f -- "$tmp"
+  fm_lock_release "$meta_lock" || true
+  fm_lock_release "$set_lock" || true
+  return "$rc"
+}
+if [ "$ADOPT" = 1 ]; then
+  pr_check_adopt || exit 1
+fi
+
 if [ ! -f "$META" ] || [ -L "$META" ] || [ "$(fm_pr_file_link_count "$META")" != 1 ]; then
   echo "error: task metadata is unavailable" >&2
   exit 1
@@ -290,8 +428,12 @@ fi
 # authoritative.
 WT=$(grep '^worktree=' "$META" | tail -1 | cut -d= -f2- || true)
 PR_HEAD=
-if [ "$PROVIDER" = github ] && [ -n "$WT" ] && [ -d "$WT" ] && command -v gh >/dev/null 2>&1; then
-  if REMOTE_HEAD=$(cd "$WT" && gh pr view "$URL" --json headRefOid -q .headRefOid 2>/dev/null) \
+# An adopted record has no copy to run in, and the full URL already names the
+# repository, so its head is read from wherever this runs.
+if [ "$PROVIDER" = github ] && { [ "$KIND" = "$ADOPT_KIND" ] || { [ -n "$WT" ] && [ -d "$WT" ]; }; } \
+  && command -v gh >/dev/null 2>&1; then
+  if REMOTE_HEAD=$(if [ "$KIND" = "$ADOPT_KIND" ]; then gh pr view "$URL" --json headRefOid -q .headRefOid; \
+      else cd "$WT" && gh pr view "$URL" --json headRefOid -q .headRefOid; fi 2>/dev/null) \
     && fm_pr_head_valid "$REMOTE_HEAD"; then
     PR_HEAD=$REMOTE_HEAD
   fi
@@ -306,7 +448,12 @@ case "$PROVIDER:$MODE" in
   *:no-mistakes|*:) DONE_LINE="done: PR $URL checks green" ;;
   *) DONE_LINE="done: PR $URL" ;;
 esac
-if { [ -z "$PR_HEAD" ] || ! fm_dod_forge_head_is_named_head "$MODE"; } \
+if [ "$KIND" = "$ADOPT_KIND" ]; then
+  if ! GATE_REASON=$(fm_dod_accept_adopted_pr "$META" "$PROVIDER" "$PR_HEAD"); then
+    echo "error: $GATE_REASON" >&2
+    exit 1
+  fi
+elif { [ -z "$PR_HEAD" ] || ! fm_dod_forge_head_is_named_head "$MODE"; } \
   && ! GATE_REASON=$(fm_dod_accept_ship_done "${KIND:-ship}" "$MODE" "$WT" "$PROJECT" "$DONE_LINE" "$STATE" "$ID" "$META"); then
   echo "error: $GATE_REASON" >&2
   exit 1

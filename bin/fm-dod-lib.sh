@@ -36,6 +36,8 @@
 # bin/fm-pr-check.sh (PR registration), and bin/fm-inactive-reconcile.sh
 # (secondmate ledger-first publish of a child done). A ship `done:` is not
 # accepted while the named head exists only in the worker's disposable copy.
+# An adopted pull request record has no worker copy, so registration proves its
+# head from GitHub instead (fm_dod_accept_adopted_pr below).
 # The check tests that head, not whether some branch moved. In no-mistakes
 # mode a pre-validation `done: {summary}` is not a ready signal and is
 # not gated; only the later CI-ready `done: PR <url> checks green` is, or on a
@@ -829,6 +831,30 @@ fm_dod_pr_url_from_done_note() {  # <note>
 # The last recorded <key>= value in <meta>, or empty.
 fm_dod_meta_value() {  # <meta> <key>
   grep "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2-
+}
+
+# The named-head gate's one exception. An adopted record
+# (bin/fm-pr-lib.sh fm_pr_adopted_record) has no worker copy, so its named head
+# is the head GitHub itself reports for the pull request, read live by the
+# caller; that head is stored on the forge by definition, which is what the gate
+# exists to prove. Accepted only for a GitHub pull request whose live head was
+# read, and only while the record names no worker, so a fleet task record never
+# passes as adopted. 1 when refused; stdout then holds a one-line reason.
+fm_dod_accept_adopted_pr() {  # <meta> <provider> <live-forge-head>
+  local meta=$1 provider=$2 head=$3
+  if ! fm_pr_adopted_record "$meta"; then
+    printf '%s\n' "an adopted pull request record must name no worker (none of: $FM_PR_ADOPTED_WORKER_FIELDS); a fleet task registers its pull request through its own named-head gate"
+    return 1
+  fi
+  if [ "$provider" != github ]; then
+    printf '%s\n' "an adopted pull request must be a GitHub pull request; its head cannot be proven from the forge here"
+    return 1
+  fi
+  if ! fm_pr_head_valid "$head"; then
+    printf '%s\n' "named head cannot be verified: GitHub did not report the adopted pull request's head"
+    return 1
+  fi
+  return 0
 }
 
 # Read the single owned local landing identity. Never accept rev expressions,

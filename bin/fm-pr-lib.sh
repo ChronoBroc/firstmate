@@ -348,6 +348,26 @@ fm_pr_head_valid() {
   [[ "$head" =~ ^[0-9a-f]{40}$|^[0-9a-f]{64}$ ]]
 }
 
+# The kind of a worker-less task record that `bin/fm-pr-check.sh adopt`
+# publishes for a GitHub pull request no fleet worker opened.
+# shellcheck disable=SC2034 # Read by the scripts that source this library.
+FM_PR_ADOPTED_KIND=adopted-pr
+
+# 0 when <meta> is an adopted pull request record that names no worker: its
+# kind is FM_PR_ADOPTED_KIND and it carries none of the fields a launched
+# worker's record has. A record that fails this is never treated as adopted.
+fm_pr_adopted_record() {  # <meta>
+  local meta=$1 key
+  [ -f "$meta" ] && [ ! -L "$meta" ] || return 1
+  [ "$(grep '^kind=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2-)" = "$FM_PR_ADOPTED_KIND" ] || return 1
+  [ "$(grep -c '^kind=' "$meta" 2>/dev/null)" = 1 ] || return 1
+  for key in $FM_PR_ADOPTED_WORKER_FIELDS; do
+    ! grep -q "^$key=" "$meta" 2>/dev/null || return 1
+  done
+}
+# The fields whose presence marks a launched worker's record.
+FM_PR_ADOPTED_WORKER_FIELDS='worktree window terminal branch harness tasktmp backend home spawn_gen busy_gen endpoint_task_id'
+
 # Resolve the PR number for a task copy's branch via gh-axi, run inside that
 # copy so gh-axi resolves the copy's own repository. Echoes the number on a
 # single match and returns 0; returns non-zero on no match or any lookup

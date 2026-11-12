@@ -10,6 +10,8 @@
 # current state from a tail of the log: it reads the authoritative source (a
 # no-mistakes run-step attributed under bin/fm-nm-run-lib.sh's contract, else
 # the pane busy-signature) and reconciles the possibly-stale log against it.
+# An adopted pull request record (bin/fm-pr-check.sh adopt) has no worker to
+# read and reports done once its pull request is recorded.
 # A ship `done:` is current-state done only when bin/fm-dod-lib.sh accepts the
 # named head as reachable outside the worker's disposable copy; otherwise blocked.
 #
@@ -305,6 +307,15 @@ KIND=$(meta_value kind)
 HARNESS=$(meta_value harness)
 REMOTE_HOST=$(meta_value remote_host)
 [ -n "$KIND" ] || KIND=ship
+
+# An adopted pull request record (bin/fm-pr-check.sh adopt) never has a worker
+# to read: it is ready for the merge decision once its pull request is recorded.
+if fm_pr_adopted_record "$META"; then
+  ADOPTED_PR=$(meta_value pr)
+  [ -n "$ADOPTED_PR" ] \
+    || emit blocked none "adopted pull request record has no registered pull request; register it with bin/fm-pr-check.sh $ID <pr-url>"
+  emit "done" none "adopted pull request, no worker; merge through bin/fm-pr-merge.sh${SEP}pr=$ADOPTED_PR"
+fi
 
 # A torn-down (or never-created) worktree has no current state to read. A
 # remote secondmate's recorded worktree is a path on ITS host, so the local
