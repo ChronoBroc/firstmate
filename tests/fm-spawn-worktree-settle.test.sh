@@ -65,7 +65,8 @@ case "${1:-}" in
     done
     printf '%s\n' "$name" > "$window_file"
     exit 0 ;;
-  kill-window) : > "$window_file"; exit 0 ;;
+  kill-window) printf '%s\n' "$*" >> "$window_file.killed"; : > "$window_file"; exit 0 ;;
+  capture-pane) [ -z "${FM_FAKE_PANE_CAPTURE:-}" ] || printf '%s\n' "$FM_FAKE_PANE_CAPTURE"; exit 0 ;;
   has-session|new-session) exit 0 ;;
   send-keys) exit 0 ;;
 esac
@@ -253,10 +254,64 @@ test_unborn_head_project_is_refused_at_once() {
   pass "a project with an unborn HEAD is refused at once with its cause named"
 }
 
+# The incident: treehouse get fails in the pane (a fetch that cannot resolve the
+# git host, or a full pool), so the pane never leaves the project. The failed
+# spawn must close the window it opened and print the pane's last output, and
+# leave nothing a retry trips over; the retry then succeeds once the cause clears.
+test_failed_worktree_acquisition_leaves_nothing_for_the_retry() {
+  local rec id out status
+  id=settle-acquire-fails-z6
+  rec=$(make_settle_case settle-acquire-fails "$id" 100000)
+  read_settle_record "$rec"
+  STALE_DIR=$PROJ_DIR
+  fm_test_fake_sleep_noop "$FAKEBIN_DIR"
+
+  out=$(FM_FAKE_PANE_CAPTURE="fetch failed: ssh: Could not resolve hostname git.example.invalid" run_settle_spawn "$id")
+  status=$?
+  expect_code 1 "$status" "spawn whose pane never reached a worktree should fail"$'\n'"$out"
+  assert_contains "$out" "did not enter an isolated worktree" "the refusal did not name the acquisition failure"
+  assert_contains "$out" "is closed on exit" "the refusal still points at a window that is gone"
+  assert_contains "$out" "Could not resolve hostname git.example.invalid" \
+    "the pane's diagnostic did not survive the closed window"$'\n'"$out"
+  [ ! -s "$COUNTFILE.window" ] || fail "failed spawn left its window open: $(cat "$COUNTFILE.window")"
+  assert_grep "fm-$id" "$COUNTFILE.window.killed" "failed spawn did not close the window it opened"
+  [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "failed spawn published task metadata"
+  [ ! -e "$HOME_DIR/data/$id/launch-brief.md" ] || fail "failed spawn left the launch-brief record a retry refuses on"
+
+  rm -f "$COUNTFILE"
+  STALE_READS=0
+  out=$(run_settle_spawn "$id")
+  status=$?
+  expect_code 0 "$status" "retry should succeed once the worktree can be acquired"$'\n'"$out"
+  assert_grep "worktree=$WT_DIR" "$HOME_DIR/state/$id.meta" "retry did not record the acquired worktree"
+  pass "a spawn whose worktree acquisition fails closes its window, keeps the diagnostic, and the retry succeeds"
+}
+
+# A window of the task's name that this spawn did not open still refuses, and
+# the refusal never closes it.
+test_preexisting_window_is_refused_and_left_open() {
+  local rec id out status
+  id=settle-window-exists-z7
+  rec=$(make_settle_case settle-window-exists "$id" 0)
+  read_settle_record "$rec"
+  printf 'fm-%s\n' "$id" > "$COUNTFILE.window"
+
+  out=$(run_settle_spawn "$id")
+  status=$?
+  expect_code 1 "$status" "spawn over an existing window should be refused"
+  assert_contains "$out" "already exists" "the refusal did not name the existing window"
+  assert_grep "fm-$id" "$COUNTFILE.window" "the refusal removed a window it did not open"
+  [ ! -e "$COUNTFILE.window.killed" ] || fail "the refusal closed a window: $(cat "$COUNTFILE.window.killed")"
+  [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "refused spawn published task metadata"
+  pass "a pre-existing window of the task's name is refused and left open"
+}
+
 test_single_stale_first_read_is_not_accepted
 test_already_settled_pane_costs_one_confirm_read
 test_transient_primary_checkout_is_not_accepted
 test_primary_checkout_that_never_settles_fails_at_the_deadline
 test_unborn_head_project_is_refused_at_once
+test_failed_worktree_acquisition_leaves_nothing_for_the_retry
+test_preexisting_window_is_refused_and_left_open
 
 echo "# all fm-spawn-worktree-settle tests passed"

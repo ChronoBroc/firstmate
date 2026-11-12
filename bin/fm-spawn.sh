@@ -35,7 +35,9 @@
 #   carry the Herdr isolation contract emitted by bin/fm-brief.sh --herdr-lab;
 #   the refusal names the first such match.
 #   Every ship or scout spawn renders `launch-brief.md` and refreshes the
-#   protected copy of `brief.md`, and a relaunch first restores a `brief.md` a
+#   protected copy of `brief.md` (a fresh spawn that fails before any record or
+#   launch removes the `launch-brief.md` it rendered, so its retry is not
+#   refused as a previous launch), and a relaunch first restores a `brief.md` a
 #   worker's tool deleted (bin/fm-task-brief-lib.sh); for a no-mistakes ship
 #   it also carries the current `--intent` contract and the extracted captain
 #   intent. A legacy mixed Task is accepted there only under bin/fm-dod-lib.sh's
@@ -224,11 +226,18 @@
 #   could later be released out from under its successor. A spawn that aborts
 #   while it still holds the allocation lock drops its own claim; an abort after
 #   metadata publication has released that lock leaves the claim in place, and
-#   the next spawn's claim replaces it. A fresh polytoken spawn that fails and
-#   leaves no task record restores the pool as it found it: it retakes that lock
-#   once to drop its claim after metadata publication too, and before its launch
-#   is delivered it closes the endpoint whose `treehouse get` shell leases the
-#   slot and removes the wiring, task temp root, and staged launch file it wrote.
+#   the next spawn's claim replaces it. A fresh spawn that fails before its
+#   launch is delivered and leaves no task record, such as one whose
+#   `treehouse get` cannot fetch or finds the pool full, closes the endpoint it
+#   opened, returning the slot its shell leased, and first prints that
+#   endpoint's last output to stderr so the pane's diagnostic survives it; a
+#   window or tab of the task's name that it did not open still refuses and is
+#   never closed. Past the start of harness wiring only polytoken still closes
+#   it, so every other harness keeps the window for inspection there. A fresh
+#   polytoken spawn that fails and leaves no task record restores the pool as it
+#   found it: it retakes that lock once to drop its claim after metadata
+#   publication too, and before its launch is delivered it also removes the
+#   wiring, task temp root, and staged launch file it wrote.
 #   The local root is whatever bin/fm-wake-lib.sh's
 #   fm_firstmate_root_home resolves, so a home seeded from another machine anchors
 #   that lock itself rather than failing to resolve one;
@@ -1728,6 +1737,8 @@ SPAWN_LANE_ADMISSION_LOCK_HELD=0
 SPAWN_SLOT_CLAIMED=0
 SPAWN_FRESH_ENDPOINT_OPENED=0
 SPAWN_FRESH_WIRING_PENDING=0
+SPAWN_WIRING_STARTED=0
+SPAWN_LAUNCH_BRIEF_PUBLISHED=0
 SPAWN_TASK_TMP_CREATED=0
 RELAUNCH_REPLACEMENT_PENDING=0
 RELAUNCH_REPLACEMENT_BUSY_GEN=
@@ -1920,6 +1931,17 @@ spawn_abort_cleanup() {
         || echo "warning: could not return the leased worktree $WT for $ID; run 'treehouse return --force $WT' from $PROJ_ABS" >&2
     fi
   fi
+  # The launch-brief record this fresh spawn published would make its retry
+  # refuse as a previous launch (fm_finished_brief_check), so a spawn that ends
+  # before any record or launch removes it while the per-id lock still guards
+  # the path. A record or a delivered launch keeps it: a worker may read it.
+  if [ "$status" -ne 0 ] && [ "$SPAWN_LAUNCH_BRIEF_PUBLISHED" = 1 ] &&
+    [ "$SPAWN_TASK_LOCK_HELD" = 1 ] && [ "$SPAWN_LAUNCH_SENT" = 0 ] &&
+    [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
+    SPAWN_LAUNCH_BRIEF_PUBLISHED=0
+    rm -f -- "$DATA/$ID/launch-brief.md" 2>/dev/null ||
+      echo "warning: could not remove $DATA/$ID/launch-brief.md after the failed spawn of $ID; remove only that file before spawning again" >&2
+  fi
   if [ "$SPAWN_TASK_LOCK_HELD" = 1 ]; then
     SPAWN_TASK_LOCK_HELD=0
     fm_lock_release "$SPAWN_TASK_LOCK" || true
@@ -1933,28 +1955,34 @@ spawn_abort_cleanup() {
     SPAWN_META_LOCK_HELD=0
     fm_lock_release "$SPAWN_META_LOCK" || true
   fi
-  # A fresh polytoken spawn that fails and leaves no record must leave the pool
-  # as it found it. Before its launch is delivered, the endpoint it opened holds nothing but
-  # the shell whose `treehouse get` leases the slot, so closing it returns the
-  # slot to the pool and leaves no window or tab for a retry to trip over; the
-  # Firstmate wiring, task temp root, and staged launch file it wrote go with it.
-  # Once a launch was delivered into an endpoint still open, a worker may be
-  # running there, so those stay for the operator, as the refusal says.
+  # A fresh spawn that fails and leaves no record closes the endpoint it opened
+  # (spawn_endpoint_closes_on_abort owns when), so no window or tab is left for
+  # a retry to trip over. Until then it holds nothing but the shell whose
+  # `treehouse get` leases the slot, so closing it also returns the slot to the
+  # pool; Treehouse keeps a slot's files and holds a dirty one out of the pool.
+  # The pane's last output is printed first, since it may hold the only
+  # diagnostic. A fresh polytoken spawn also removes the Firstmate wiring, task
+  # temp root, and staged launch file it wrote. Once a launch was delivered into
+  # an endpoint still open, a worker may be running there, so those stay for the
+  # operator, as the refusal says.
+  if [ "$status" -ne 0 ] && [ "$RELAUNCH" -eq 0 ] && [ -n "${T:-}" ] &&
+    [ "$SPAWN_FRESH_ENDPOINT_OPENED" = 1 ] && spawn_endpoint_closes_on_abort &&
+    [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
+    SPAWN_FRESH_ENDPOINT_OPENED=0
+    spawn_abort_endpoint_report
+    local abort_tab_id=
+    [ "$BACKEND" != zellij ] || abort_tab_id=${ZELLIJ_TAB_ID:-}
+    if fm_backend_kill "$BACKEND" "$T" "$abort_tab_id" "fm-$ID" 2>/dev/null; then
+      SPAWN_ENDPOINT_CLOSED=1
+    else
+      echo "warning: could not close endpoint $T after the failed spawn of $ID; close it by hand so its slot returns to the pool and a retry can open it again" >&2
+    fi
+  fi
   if [ "$status" -ne 0 ] && [ "${HARNESS:-}" = polytoken ] &&
-    { [ "$SPAWN_FRESH_ENDPOINT_OPENED" = 1 ] || [ "$SPAWN_FRESH_WIRING_PENDING" = 1 ] ||
+    { [ "$SPAWN_FRESH_WIRING_PENDING" = 1 ] ||
       [ "$SPAWN_TASK_TMP_CREATED" = 1 ] || [ -n "$SPAWN_STAGED_LAUNCH_FILE" ]; } &&
     [ "$RELAUNCH" -eq 0 ] &&
     [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
-    if [ "$SPAWN_FRESH_ENDPOINT_OPENED" = 1 ] && [ "$SPAWN_LAUNCH_SENT" = 0 ] && [ -n "${T:-}" ]; then
-      SPAWN_FRESH_ENDPOINT_OPENED=0
-      local abort_tab_id=
-      [ "$BACKEND" != zellij ] || abort_tab_id=${ZELLIJ_TAB_ID:-}
-      if fm_backend_kill "$BACKEND" "$T" "$abort_tab_id" "fm-$ID" 2>/dev/null; then
-        SPAWN_ENDPOINT_CLOSED=1
-      else
-        echo "warning: could not close endpoint $T after the failed spawn of $ID; close it by hand so its slot returns to the pool" >&2
-      fi
-    fi
     # These paths are per task id, so the per-id spawn lock is retaken for them
     # exactly as for the strip dir below: a retry of the same id that took the
     # lock meanwhile may already be reusing them.
@@ -4411,6 +4439,7 @@ if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
     echo "error: could not publish current launch contract for $SOURCE_BRIEF" >&2
     exit 1
   fi
+  [ "$RELAUNCH" -eq 1 ] || SPAWN_LAUNCH_BRIEF_PUBLISHED=1
   fm_task_brief_protect "$DATA" "$STATE" "$ID" || exit 1
 fi
 
@@ -4688,11 +4717,27 @@ spawn_worktree_isolated() { # <path>
   return 0
 }
 
-# spawn_endpoint_hint: the operator pointer for a pre-launch refusal. Only a
-# fresh polytoken spawn closes its endpoint on abort, so only it points away
-# from the window; every other harness keeps the plain inspect pointer.
+# spawn_endpoint_hint: the operator pointer for a pre-launch refusal. A fresh
+# spawn closes the endpoint it opened when it fails before its launch is sent,
+# so the refusal points away from the window. Past the point where it starts
+# writing harness wiring into the worktree, only polytoken, which also removes
+# that wiring, still closes it; every other harness keeps the plain inspect
+# pointer there, so a slot is never handed back holding a half-written wiring.
 spawn_endpoint_closes_on_abort() {
-  [ "$SPAWN_FRESH_ENDPOINT_OPENED" = 1 ] && [ "$SPAWN_LAUNCH_SENT" = 0 ]
+  [ "$SPAWN_FRESH_ENDPOINT_OPENED" = 1 ] && [ "$SPAWN_LAUNCH_SENT" = 0 ] &&
+    { [ "$SPAWN_WIRING_STARTED" = 0 ] || [ "${HARNESS:-}" = polytoken ]; }
+}
+
+# spawn_abort_endpoint_report: print the endpoint's last non-blank output to
+# stderr before a failed spawn closes it, so a cause shown only in the pane,
+# such as treehouse get's fetch error or full pool, outlives the pane.
+spawn_abort_endpoint_report() {
+  local out
+  out=$(fm_backend_capture "$BACKEND" "${WT_TARGET:-$T}" 40 "fm-$ID" 2>/dev/null) || return 0
+  out=$(printf '%s\n' "$out" | sed -e '/^[[:space:]]*$/d' | tail -n 20)
+  [ -n "$out" ] || return 0
+  printf 'last output in %s before the failed spawn closed it:\n' "$T" >&2
+  printf '%s\n' "$out" | sed -e 's/^/  | /' >&2
 }
 
 spawn_endpoint_hint() {
@@ -5500,10 +5545,11 @@ EOF
     T3CODE_ABORT_CLEANUP=1
     ;;
   esac
-  # Orca and the Herdr projection own their own abort cleanup above; every other
-  # endpoint a fresh polytoken spawn opened is closed by spawn_abort_cleanup when
-  # the spawn ends with no record before its launch is delivered.
-  if [ "$HARNESS" = polytoken ] && [ "$BACKEND" != orca ] && [ "${HERDR_PROJECTED:-0}" -ne 1 ]; then
+  # Orca, T3 Code, and the Herdr projection own their own abort cleanup above;
+  # every other endpoint a fresh spawn opened is closed by spawn_abort_cleanup
+  # when the spawn ends with no record (spawn_endpoint_closes_on_abort owns when).
+  if [ "$BACKEND" != orca ] && [ "${HERDR_PROJECTED:-0}" -ne 1 ] &&
+    { [ "$BACKEND" != t3code ] || [ "$HARNESS" = polytoken ]; }; then
     SPAWN_FRESH_ENDPOINT_OPENED=1
   fi
 fi
@@ -6433,6 +6479,7 @@ if [ "$HARNESS" = polytoken ] && [ "$RAW_LAUNCH" -eq 0 ]; then
   fm_polytoken_require_hooks_free "$WT" || exit 1
   fm_polytoken_require_handler_path "$(fm_polytoken_busy_script "$STATE_REAL" "$ID")" || exit 1
 fi
+[ "$RELAUNCH" -eq 1 ] || SPAWN_WIRING_STARTED=1
 [ "$RELAUNCH" -eq 1 ] || [ "$HARNESS" != polytoken ] || SPAWN_FRESH_WIRING_PENDING=1
 if [ "$RELAUNCH" -eq 1 ]; then
   RELAUNCH_REPLACEMENT_PENDING=1
