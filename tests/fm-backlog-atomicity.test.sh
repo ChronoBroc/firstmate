@@ -1403,10 +1403,10 @@ test_teardown_restores_a_brief_deleted_from_the_evidence_directory() {
 }
 
 test_retained_task_requires_confirmed_continuation() {
-  local kind=$1 case_dir home id out
+  local kind=$1 wipe=${2:-} case_dir home id out
   local -a flags=(--mode no-mistakes --yolo off)
-  id="atomic-retained-$kind"
-  case_dir=$(make_home "retained-$kind" "$id")
+  id="atomic-retained-$kind${wipe:+-$wipe}"
+  case_dir=$(make_home "retained-$kind${wipe:+-$wipe}" "$id")
   home=$(home_of "$case_dir")
   [ "$kind" != scout ] || flags=(--scout)
   add_item "$case_dir" "$id" "$kind"
@@ -1414,6 +1414,10 @@ test_retained_task_requires_confirmed_continuation() {
   cp "$home/data/$id/brief.md" "$case_dir/original-brief.md"
   out=$(FM_HOME="$home" PATH="$case_dir/fakebin:$PATH" "$ROOT/bin/fm-captain-hold.sh" hold "$id" --reason 'Continue after approval') \
     || fail "could not hold the task: $out"
+  if [ "$wipe" = wiped ]; then
+    rm -rf "$home/data/$id"
+    mkdir -p "$home/data/$id"
+  fi
   out=$(run_teardown "$case_dir" "$id" --force) || fail "retain teardown failed: $out"
   assert_absent "$home/state/$id.meta" "retain teardown left metadata"
   assert_absent "$home/data/$id/finished-briefs" "retain teardown recorded an unfinished brief"
@@ -1453,7 +1457,7 @@ test_retained_task_requires_confirmed_continuation() {
   assert_absent "$home/state/$id.meta" "released new item created metadata"
   [ "$(row_state "$case_dir" "$id")" = queued ] || fail "refusal moved the released new item"
   cmp -s "$case_dir/original-brief.md" "$home/data/$id/brief.md" || fail "refusal changed the old brief"
-  pass "retained $kind needs confirmed continuation; releasing a new item cannot authorize an old brief"
+  pass "retained $kind${wipe:+ ($wipe evidence directory)} needs confirmed continuation; releasing a new item cannot authorize an old brief"
 }
 
 test_unrun_launch_brief_can_be_retried() {
@@ -3280,6 +3284,8 @@ test_teardown_restores_a_brief_deleted_from_the_evidence_directory
 test_unrun_launch_brief_can_be_retried
 test_retained_task_requires_confirmed_continuation ship
 test_retained_task_requires_confirmed_continuation scout
+test_retained_task_requires_confirmed_continuation ship wiped
+test_retained_task_requires_confirmed_continuation scout wiped
 test_dispatch_refuses_to_commit_without_a_published_record
 test_dispatch_leaves_no_record_when_the_transition_fails
 test_dispatch_reports_an_incomplete_record_rollback

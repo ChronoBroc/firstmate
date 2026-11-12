@@ -199,7 +199,8 @@ promote_cleanup() {
   [ -z "$TMP" ] || rm -f -- "$TMP" 2>/dev/null || true
   [ -z "$BRIEF_REPLACEMENT" ] || rm -f -- "$BRIEF_REPLACEMENT" 2>/dev/null || true
   if [ -n "$BRIEF_ORIGINAL" ] && [ -e "$BRIEF_ORIGINAL" ]; then
-    mv -f -- "$BRIEF_ORIGINAL" "$SCOUT_BRIEF" 2>/dev/null || true
+    mv -f -- "$BRIEF_ORIGINAL" "$SCOUT_BRIEF" 2>/dev/null &&
+      fm_task_brief_protect "$DATA" "$STATE" "$ID" 2>/dev/null || true
   fi
   if [ "$META_LOCK_HELD" = 1 ]; then
     META_LOCK_HELD=0
@@ -400,6 +401,7 @@ if ! mv "$BRIEF_REPLACEMENT" "$SCOUT_BRIEF"; then
   exit 1
 fi
 BRIEF_REPLACEMENT=
+fm_task_brief_protect "$DATA" "$STATE" "$ID" || exit 1
 
 TMP="$STATE/.$ID.meta.promote.${BASHPID:-$$}"
 grep -v -e '^kind=' -e '^mode=' -e '^yolo=' -e '^branch=' -e '^upstream_consent=' "$META" > "$TMP"
@@ -419,8 +421,6 @@ fi
 TMP=
 rm -f -- "$BRIEF_ORIGINAL" 2>/dev/null || true
 BRIEF_ORIGINAL=
-fm_task_brief_protect "$DATA" "$STATE" "$ID" ||
-  echo "warning: the promotion is published, but task $ID's protected instructions still hold the scout brief until its next launch" >&2
 fm_lock_release "$META_LOCK"
 META_LOCK_HELD=0
 
