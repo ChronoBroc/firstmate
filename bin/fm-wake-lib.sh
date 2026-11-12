@@ -781,7 +781,11 @@ fm_lock_try_create() {
     fm_lock_discard_owner "$ownerdir"
     return 1
   fi
-  ln -s "$ownerdir" "$lockdir" 2>/dev/null &
+  # -n: when another acquirer published the lock after the check above, a plain
+  # -s follows that symlink and plants this link inside the holder's owner
+  # directory, which the holder's release then cannot rmdir; -n fails instead
+  # (BSD, GNU and busybox ln alike).
+  ln -sn "$ownerdir" "$lockdir" 2>/dev/null &
   FM_LOCK_PENDING_PID=$!
   if wait "$FM_LOCK_PENDING_PID" && fm_lock_points_to_owner "$lockdir" "$ownerdir"; then
     if fm_lock_claim "$lockdir" "$ownerdir" "$allowed_steal_owner"; then

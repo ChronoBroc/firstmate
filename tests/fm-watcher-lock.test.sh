@@ -528,6 +528,37 @@ test_lock_single_winner_under_concurrency() {
   pass "concurrent fm_lock_try_acquire yields exactly one winner"
 }
 
+# A contender whose `ln -s` lands after another process published the lock
+# symlink must fail, not follow that symlink and plant its link inside the
+# holder's owner directory: the holder's release then cannot remove its
+# non-empty owner directory and leaves it behind for good. Contention is
+# driven hard enough that the window is hit on every run without the guard.
+test_lock_contention_leaves_no_owner_dirs() {
+  local dir state lockdir pids pid i leftovers
+  dir=$(make_case lock-owner-leak)
+  state="$dir/state"
+  lockdir="$state/.contend.lock"
+  pids=
+  i=1
+  while [ "$i" -le 16 ]; do
+    FM_STATE_OVERRIDE="$state" bash -c '
+      . "$1"
+      end=$((SECONDS + 3))
+      while [ "$SECONDS" -lt "$end" ]; do
+        if fm_lock_try_acquire "$2"; then fm_lock_release "$2"; fi
+      done
+    ' _ "$LIB" "$lockdir" &
+    pids="$pids $!"
+    i=$((i + 1))
+  done
+  for pid in $pids; do
+    wait "$pid" 2>/dev/null || true
+  done
+  leftovers=$(find "$state" -mindepth 1 -maxdepth 1 -name '.contend.lock*' -print)
+  [ -z "$leftovers" ] || fail "lock contention left owner directories behind: $leftovers"
+  pass "lock contention leaves no stray owner directories behind"
+}
+
 test_lock_steals_dead_pid_lock() {
   local dir state lockdir dead rc newpid
   dir=$(make_case lock-dead-steal)
@@ -2468,6 +2499,7 @@ test_watch_replaces_live_holder_with_legacy_local_time_identity
 test_watch_replaced_holder_stands_down_after_successor_exits
 test_guard_warnings
 test_lock_single_winner_under_concurrency
+test_lock_contention_leaves_no_owner_dirs
 test_lock_steals_dead_pid_lock
 test_lock_stale_steal_single_winner_under_concurrency
 test_lock_reclaims_dead_steal_owner_without_nested_markers
