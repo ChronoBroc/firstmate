@@ -1,0 +1,11 @@
+$ bin/fm-send.sh fm-no-such-task "check `touch $MARK` now"   # double quotes
+error: no-mistakes gate agent must not drive the fleet (NO_MISTAKES_GATE set)
+exit=3
+-rw-r--r--@ 1 broc-macmini  staff  0 Nov 12 07:15 ~/.no-mistakes/evidence/01M77XXMXH2CSTAXK50CY4D31X/dq-marker
+=> backtick span RAN as a command before fm-send saw the text
+
+$ bin/fm-send.sh fm-no-such-task 'check `touch $MARK` now'   # single quotes
+error: no-mistakes gate agent must not drive the fleet (NO_MISTAKES_GATE set)
+exit=3
+ls: ~/.no-mistakes/evidence/01M77XXMXH2CSTAXK50CY4D31X/sq-marker: No such file or directory
+=> single-quoted span stayed literal text
