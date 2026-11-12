@@ -72,7 +72,7 @@ test_readback_renders_words_verbatim_with_the_record_scalars() {
     || fail "entry with words failed: $out"
   assert_contains "$out" 'Away posture (recorded):' 'read-back title'
   assert_contains "$out" 'expected return: 2026-09-08T08:00Z' 'expected return rendered'
-  assert_contains "$out" 'spend cap: 3 concurrent workers' 'spend cap rendered'
+  assert_contains "$out" 'spend cap: 3 actively working workers (idle, parked, finished, and dead workers are not counted; one whose state cannot be read is)' 'spend cap rendered with what it counts'
   assert_contains "$out" 'reach: hold-for-return only. No phone channel is configured; anything that needs you waits for your return.' 'reach rendered'
   assert_contains "$out" '  your words (verbatim):' 'words header'
   assert_contains "$out" '    drive the windows fix to green and merge it,' 'words line 1'
@@ -127,7 +127,7 @@ test_enter_writes_a_v2_record_in_one_step_and_announces_hold_for_return() {
   assert_contains "$out" 'hold-for-return only. No phone channel is configured; anything that needs you waits for your return.' 'announcement says hold-for-return only, aloud'
   assert_contains "$out" 'Your away instructions are recorded verbatim; the away session will carry them out where it can, and anything it is unsure of, or that needs you, waits for your return.' 'announcement says the words will be carried out'
   assert_contains "$out" 'Destructive, irreversible, and security-sensitive actions are never pre-authorizable, whatever the words say.' 'announcement states the never-set'
-  assert_contains "$out" 'Expected return: not given. Spend cap: 4 concurrent workers.' 'announcement carries the defaults'
+  assert_contains "$out" 'Expected return: not given. Spend cap: 4 actively working workers (idle, parked, finished, and dead workers are not counted; one whose state cannot be read is).' 'announcement carries the defaults and what the cap counts'
   assert_contains "$out" 'Away posture (recorded):' 'the read-back follows the entry'
   assert_contains "$out" '    merge it when green' 'the read-back carries the words'
   assert_not_contains "$out" 'Say go' 'entry must never ask for a go'
@@ -473,7 +473,7 @@ test_version_1_record_still_validates_reads_and_archives() {
     || fail "words did not read the v1 words block bounded by its clauses section: $(contract "$home" words)"
   out=$(contract "$home" readback) || fail "readback of a version 1 record failed"
   assert_contains "$out" 'Away posture (recorded):' 'v1 read-back title'
-  assert_contains "$out" 'spend cap: 3 concurrent workers' 'v1 read-back spend cap'
+  assert_contains "$out" 'spend cap: 3 actively working workers (idle, parked, finished, and dead workers are not counted; one whose state cannot be read is)' 'v1 read-back spend cap'
   assert_contains "$out" 'expected return: 2026-09-20T09:00:00Z' 'v1 read-back expected return'
   assert_contains "$out" '    merge the windows fix when green' 'v1 read-back words'
   assert_not_contains "$out" 'task x1 PR' 'the ignored v1 clauses leaked into the read-back'
@@ -622,52 +622,144 @@ test_away_entry_over_quiet_mode_becomes_away_and_quiet_never_masks_away() {
   pass "an away entry over quiet mode records away, and a quiet entry never masks a standing away record"
 }
 
-# The spend cap entry records without --spend is the parallelism already
-# standing in this home, counted exactly the way the later refusal counts it, so
-# away mode never narrows work that is already under way. The earlier default
-# stays a floor, and a secondmate is a persistent home rather than spend.
-test_entry_without_spend_records_the_live_worker_count_never_below_the_floor() {
-  local home out i
-  home=$(make_home spend-live-above)
+# A stand-in for bin/fm-crew-state.sh (FM_AFK_CONTRACT_CREW_STATE_BIN): it
+# prints <state-dir>/<id>.reading, sleeps first when that file says SLEEP, and
+# prints nothing when the file is absent.
+make_reading_stub() {  # <home> -> prints the stub path
+  local stub="$1/crew-state-stub"
+  cat > "$stub" <<'SH'
+#!/usr/bin/env bash
+f="$FM_STATE_OVERRIDE/$1.reading"
+[ -f "$f" ] || exit 0
+if [ "$(cat "$f")" = SLEEP ]; then
+  sleep 30
+fi
+cat "$f"
+SH
+  chmod +x "$stub"
+  printf '%s\n' "$stub"
+}
+
+# The spend cap counts only workers that are actively working, through the real
+# current-state reader over real endpoints on a private tmux server: idle,
+# finished, parked-at-blocked, idle-without-declaration, and dead workers do
+# not count; busy workers and one whose state cannot be read do; a secondmate
+# never does.
+test_spend_cap_counts_only_actively_working_workers() {
+  command -v tmux >/dev/null 2>&1 || { printf 'ok - skip: tmux not found (actively working count over real endpoints)\n'; return 0; }
+  (
+    local home st tmp sock standin now id gen ident count
+    tmp=$(mktemp -d /tmp/fmafk.XXXXXX)
+    mkdir -m 700 "$tmp/tmux-$(id -u)"
+    sock="$tmp/tmux-$(id -u)/default"
+    trap 'tmux -S "$sock" kill-server >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
+    export TMUX_TMPDIR=$tmp
+    unset TMUX
+    standin=$(fm_agent_standin "$tmp/standin") || { printf 'ok - skip: no long-running stand-in binary survives a rename\n'; exit 0; }
+    mkdir -p "$tmp/bin" "$tmp/fakebin"
+    ln -s "$standin" "$tmp/bin/claude"
+    # No pipeline run is attributed, so each reading comes from the endpoint,
+    # the busy record, and the status log.
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$tmp/fakebin/no-mistakes"
+    chmod +x "$tmp/fakebin/no-mistakes"
+    export PATH="$tmp/fakebin:$PATH"
+    # shellcheck source=bin/fm-backend.sh
+    . "$ROOT/bin/fm-backend.sh"
+    fm_backend_source tmux || fail "the tmux backend should load"
+    home=$(make_home spend-working-real)
+    st="$home/state"
+    tmux -S "$sock" new-session -d -s crew -n keep || fail "a private tmux server should start"
+    now=$(date +%s)
+    worker() {  # <id> <kind> <busy|idle|corrupt> [status-line]
+      local wt="$tmp/wt-$1" i=0
+      git init -q -b "fm/$1" "$wt"
+      git -C "$wt" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
+      tmux -S "$sock" new-window -d -t crew: -n "fm-$1" "$tmp/bin/claude 600" || fail "worker window $1 should start"
+      while [ "$(fm_backend_agent_state tmux "crew:fm-$1")" != alive ]; do
+        i=$((i + 1))
+        [ "$i" -lt 50 ] || fail "worker window $1 never read alive"
+        sleep 0.1
+      done
+      ident=$(fm_backend_tmux_server_identity "crew:fm-$1") || fail "server identity unreadable for $1"
+      fm_write_meta "$st/$1.meta" "window=crew:fm-$1" "worktree=$wt" "project=$wt" "harness=claude" \
+        "kind=$2" "branch=fm/$1" "tmux_socket=${ident%%$'\t'*}" "tmux_server=${ident#*$'\t'}"
+      gen=$("$ROOT/bin/fm-busy-event.sh" arm "$st" "$1") || fail "busy record for $1 should arm"
+      case "$3" in
+        busy) "$ROOT/bin/fm-busy-event.sh" apply "$st" "$1" busy --gen "$gen" --source claude-hook --event user-prompt-submit >/dev/null ;;
+        idle) "$ROOT/bin/fm-busy-event.sh" apply "$st" "$1" idle --gen "$gen" --source claude-hook --event stop >/dev/null ;;
+        corrupt) printf 'not a busy record\n' > "$st/$1.busy-state" ;;
+      esac
+      [ -z "${4:-}" ] || printf '%s\n' "$4" > "$st/$1.status"
+    }
+    worker busy-1 ship busy "working [at=$now]: under way"
+    worker busy-2 scout busy
+    worker unreadable ship corrupt "working [at=$now]: under way"
+    worker idle-ready ship idle "blocked [at=$now]: PR https://github.com/o/r/pull/1 ready"
+    worker idle-paused ship idle "paused [at=$now]: waiting on review"
+    worker scout-done scout idle "done [at=$now]: report written"
+    worker idle-silent ship idle
+    worker dead ship busy "working [at=$now]: under way"
+    tmux -S "$sock" kill-window -t crew:fm-dead || fail "the dead worker's window should close"
+    worker mate secondmate busy
+    for id in busy-1 busy-2 unreadable idle-ready idle-paused scout-done idle-silent dead; do
+      printf '%s: %s\n' "$id" "$(FM_CREW_STATE_NO_FORGE=1 FM_STATE_OVERRIDE="$st" "$ROOT/bin/fm-crew-state.sh" "$id")"
+    done > "$home/readings"
+    count=$(contract "$home" live-workers)
+    [ "$count" = 3 ] || fail "live-workers counted $count, not the 2 busy workers plus the unreadable one; readings: $(cat "$home/readings")"
+    pass "the spend cap counts busy and unreadable workers, never idle, parked, finished, dead, or secondmate ones"
+  ) || exit 1
+}
+
+# A reading that never arrives, comes back empty, or is not a recognized state
+# counts as working, so an unreadable fleet can never exceed the cap; a
+# recognized non-working state does not count.
+test_spend_cap_counts_an_unreadable_worker_as_working() {
+  local home stub out
+  home=$(make_home spend-unreadable)
+  stub=$(make_reading_stub "$home")
+  fm_write_meta "$home/state/slow.meta" "window=fm-slow" "kind=ship"
+  printf 'SLEEP\n' > "$home/state/slow.reading"
+  fm_write_meta "$home/state/silent.meta" "window=fm-silent" "kind=ship"
+  fm_write_meta "$home/state/odd.meta" "window=fm-odd" "kind=ship"
+  printf 'state: unknown · source: pane · harness state unavailable (stale)\n' > "$home/state/odd.reading"
+  fm_write_meta "$home/state/parked.meta" "window=fm-parked" "kind=ship"
+  printf 'state: parked · source: run-step · awaiting_approval\n' > "$home/state/parked.reading"
+  fm_write_meta "$home/state/failed.meta" "window=fm-failed" "kind=ship"
+  printf 'state: failed · source: run-step · review failed\n' > "$home/state/failed.reading"
+  out=$(FM_AFK_CONTRACT_CREW_STATE_BIN=$stub FM_AFK_CONTRACT_CREW_STATE_TIMEOUT=1 contract "$home" live-workers)
+  [ "$out" = 3 ] || fail "an unreadable reading did not count as working: counted $out, not 3"
+  pass "a timed-out, empty, or unrecognized reading counts as working, and parked or failed does not"
+}
+
+# Without --spend, entry records the default 4 whatever records stand, since
+# idle records no longer need covering; an explicit --spend is recorded
+# unchanged.
+test_entry_without_spend_records_the_default() {
+  local home stub out i
+  home=$(make_home spend-default)
+  stub=$(make_reading_stub "$home")
   for i in 1 2 3 4 5 6; do
     fm_write_meta "$home/state/task-$i.meta" "window=fm-task-$i" "kind=ship"
+    printf 'state: working · source: pane · harness busy (claude-hook)\n' > "$home/state/task-$i.reading"
   done
-  fm_write_meta "$home/state/mate-1.meta" "window=remote:mate-1" "kind=secondmate"
-  [ "$(contract "$home" live-workers)" = 6 ] \
-    || fail "live-workers counted the secondmate or miscounted: $(contract "$home" live-workers)"
-  out=$(contract "$home" enter --words 'keep the lane busy' 2>&1) || fail "entry failed: $out"
-  [ "$(contract "$home" field spend_max_concurrent_workers)" = 6 ] \
-    || fail "entry did not take the live count as the cap: $(contract "$home" field spend_max_concurrent_workers)"
-  assert_contains "$out" 'Spend cap: 6 concurrent workers.' 'the announcement carries the live count'
-  assert_contains "$out" '  spend cap: 6 concurrent workers' 'the read-back carries the live count'
-
-  home=$(make_home spend-live-below)
-  fm_write_meta "$home/state/task-1.meta" "window=fm-task-1" "kind=ship"
-  fm_write_meta "$home/state/mate-1.meta" "window=remote:mate-1" "kind=secondmate"
-  out=$(contract "$home" enter --words 'quiet lane' 2>&1) || fail "entry failed: $out"
+  [ "$(FM_AFK_CONTRACT_CREW_STATE_BIN=$stub contract "$home" live-workers)" = 6 ] || fail "six working workers did not count six"
+  out=$(FM_AFK_CONTRACT_CREW_STATE_BIN=$stub contract "$home" enter --words 'keep the lane busy' 2>&1) || fail "entry failed: $out"
   [ "$(contract "$home" field spend_max_concurrent_workers)" = 4 ] \
-    || fail "a home below the floor did not keep the default cap: $(contract "$home" field spend_max_concurrent_workers)"
+    || fail "a default entry recorded $(contract "$home" field spend_max_concurrent_workers), not 4"
+  assert_contains "$out" '  spend cap: 4 actively working workers' 'the read-back carries the default'
 
-  home=$(make_home spend-live-empty)
-  out=$(contract "$home" enter --words 'nothing running' 2>&1) || fail "entry failed: $out"
-  [ "$(contract "$home" live-workers)" = 0 ] || fail "an empty home did not count zero workers"
-  [ "$(contract "$home" field spend_max_concurrent_workers)" = 4 ] \
-    || fail "an empty home recorded a cap other than the default floor"
-
-  home=$(make_home spend-live-explicit)
-  for i in 1 2 3 4 5 6; do
-    fm_write_meta "$home/state/task-$i.meta" "window=fm-task-$i" "kind=ship"
-  done
-  contract "$home" enter --words 'hold it down' --spend 2 >/dev/null 2>&1 || fail "explicit entry failed"
-  [ "$(contract "$home" field spend_max_concurrent_workers)" = 2 ] \
-    || fail "an explicit --spend lost to the live count"
-  pass "entry without --spend records the live worker count, never below the default floor, and an explicit --spend still wins"
+  home=$(make_home spend-explicit)
+  contract "$home" enter --words 'hold it down' --spend 9 >/dev/null 2>&1 || fail "explicit entry failed"
+  [ "$(contract "$home" field spend_max_concurrent_workers)" = 9 ] || fail "an explicit --spend was not recorded unchanged"
+  pass "entry without --spend records the default 4 whatever records stand, and an explicit --spend is recorded unchanged"
 }
 
 test_readback_renders_words_verbatim_with_the_record_scalars
 test_words_preserve_final_newline_shape
 test_enter_writes_a_v2_record_in_one_step_and_announces_hold_for_return
-test_entry_without_spend_records_the_live_worker_count_never_below_the_floor
+test_spend_cap_counts_only_actively_working_workers
+test_spend_cap_counts_an_unreadable_worker_as_working
+test_entry_without_spend_records_the_default
 test_retired_two_step_entry_is_refused_by_name
 test_enter_removes_a_legacy_proposal_without_promoting_it
 test_same_turn_entry_pre_authorizes_nothing_on_the_never_set
