@@ -1694,12 +1694,15 @@ announce_source_once() {  # <marker> <generation> <key> <payload> [marker-record
 }
 
 # The reused-pid strand: the recorded pid is alive under a different identity
-# while the runner's process group still has members. The claim path does not
-# consult the process group, so a deliberate `start` reclaims this - provided
-# the dead generation's reservation records can still be tidied, because that
-# tidy-up is only waived for a generation proven gone, and this one is not.
+# while the runner's process group still has members. That pid may have been
+# reused, or may still be the recorded runner under an identity no format this
+# code knows can confirm, so the wake says so rather than calling it dead. The
+# claim path does not consult the process group, so a deliberate `start`
+# reclaims this - provided the dead generation's reservation records can still
+# be tidied, because that tidy-up is only waived for a generation proven gone,
+# and this one is not.
 stranded_reused_pid_detail() {  # <source-id>
-  printf '%s' "its claim names a dead runner whose process group still has members, so reconcile preserves that claim and starts no replacement. Check that nothing is still polling the source, then reclaim it with: bin/fm-procevent.sh start $1 - that reclaims it provided the dead generation's reservation records can still be tidied, and otherwise refuses with: cannot claim source"
+  printf '%s' "its claim's recorded runner pid is alive but no longer matches the recorded process identity, and that runner's process group still has members, so reconcile preserves that claim and starts no replacement. The pid may have been reused by another process, or it may still be the original runner under an identity this code cannot confirm; nothing will signal it. Check that nothing in that process group is still polling the source; only then reclaim it with: bin/fm-procevent.sh start $1 - that reclaims it provided the dead generation's reservation records can still be tidied, and otherwise refuses with: cannot claim source"
 }
 
 # The leaderless strand: the runner leader is gone and its group still has
@@ -2251,7 +2254,7 @@ cmd_retire() {
       stop_state=$?
       if [ "$stop_state" -eq 2 ]; then
         fm_procevent_source_lock_release "$id"
-        die "cannot confirm runner identity; source remains registered: $id"
+        die "cannot confirm runner identity; source remains registered: $id (the runner its claim records, pid $pid, could not be proved to be that runner or proved stopped; check whether process group $pid is still polling the source before acting)"
       fi
       if [ -n "$extension_binding_digest" ] \
         && ! cleanup_extension_binding_invocations "$extension_binding_digest"; then

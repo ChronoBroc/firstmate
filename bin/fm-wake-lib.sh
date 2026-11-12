@@ -131,10 +131,40 @@ fm_pid_identity() {
   # autoarm abandonment proof already reclaims a mismatched claim, at the cost of
   # the one-extra-continuation residual docs/turnend-guard.md describes. Only the
   # supervise-daemon lock (fm_afk_daemon_owns_supervision, daemon_pid_matches)
-  # keeps the residual by design.
+  # keeps the residual by design. A process-event runner claim outlives every
+  # restart, so it confirms a pre-pin identity through
+  # fm_pid_identity_matches_pre_utc_pin instead of carrying the residual.
   out=$(COLUMNS=10000 LC_ALL=C TZ=UTC0 ps -p "$pid" -o lstart= -o command= 2>/dev/null) || return 1
   [ -n "$out" ] || return 1
   printf '%s\n' "$out" | sed 's/^[[:space:]]*//'
+}
+
+# fm_pid_identity_matches_pre_utc_pin <pid> <recorded-identity>
+# True only when <recorded-identity> is byte-for-byte what fm_pid_identity's ps
+# fallback printed for this live pid before it pinned TZ=UTC0: the same
+# LC_ALL and COLUMNS pins, with lstart rendered in local time. The zone that
+# code ran under is not recorded, so this renders in the caller's TZ and, when
+# TZ is set, also in the host's default zone; each is an exact rendering of the
+# same start second and full command, never a looser comparison. A host with
+# Linux-compatible /proc never wrote a zoned identity, so it never matches here.
+fm_pid_identity_matches_pre_utc_pin() {
+  local pid=$1 expected=$2 proc_root out
+  case "$pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ -n "$expected" ] || return 1
+  proc_root=${FM_PROC_ROOT_OVERRIDE:-/proc}
+  if [ -r "$proc_root/$pid/stat" ] && [ -r "$proc_root/$pid/cmdline" ]; then
+    return 1
+  fi
+  out=$(COLUMNS=10000 LC_ALL=C ps -p "$pid" -o lstart= -o command= 2>/dev/null) \
+    && [ -n "$out" ] \
+    && [ "$(printf '%s\n' "$out" | sed 's/^[[:space:]]*//')" = "$expected" ] \
+    && return 0
+  [ -n "${TZ+x}" ] || return 1
+  out=$(env -u TZ COLUMNS=10000 LC_ALL=C ps -p "$pid" -o lstart= -o command= 2>/dev/null) \
+    && [ -n "$out" ] \
+    && [ "$(printf '%s\n' "$out" | sed 's/^[[:space:]]*//')" = "$expected" ]
 }
 
 # fm_pid_start_time <pid>
