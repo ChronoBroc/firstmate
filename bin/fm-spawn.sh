@@ -2301,7 +2301,7 @@ spawn_refuse_if_away_spend_cap() {
     ;;
   esac
   if [ "$live" -ge "$cap" ]; then
-    echo "error: spawn refused - the away-posture record caps actively working workers at $cap and $live ordinary worker(s) are actively working in this home (idle, parked, finished, and dead workers are not counted; one whose state cannot be read is); task $ID stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)" >&2
+    echo "error: spawn refused - the away-posture record caps actively working workers at $cap and $live ordinary worker(s) are actively working in this home (a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does); task $ID stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)" >&2
     exit 1
   fi
 }
