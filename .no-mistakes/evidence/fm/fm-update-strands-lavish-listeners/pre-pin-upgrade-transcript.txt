@@ -1,0 +1,63 @@
+
+===== A. pre-pin runner, then BASE code f38253d7 (reproduce the strand) =====
+reconciled: published=0 started=1 stopped=0 uncertain=0 failed=0
+claim (written by pre-pin code, host zone CST):
+  71495
+  Thu Nov 12 15:18:23 2026     bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-pe-lab.12Z5Y0/old/bin/fm-procevent.sh _start lavish-a
+$ list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-a                     lavish       orphaned   0
+$ reconcile
+reconciled: published=0 started=0 stopped=0 uncertain=1 failed=0
+$ retire
+error: cannot confirm runner identity; source remains registered: lavish-a
+exit=1
+runner group 71495 still alive (stranded)
+listener executions:        1
+
+===== B. pre-pin runner, then NEW code (HEAD) in host default zone =====
+reconciled: published=0 started=1 stopped=0 uncertain=0 failed=0
+claim (written by pre-pin code, host zone CST):
+  76607
+  Thu Nov 12 15:18:25 2026     bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-pe-lab.12Z5Y0/old/bin/fm-procevent.sh _start lavish-b
+$ list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-b                     lavish       live       0
+$ reconcile
+reconciled: published=0 started=0 stopped=0 uncertain=0 failed=0
+listener executions:        1
+$ retire
+retired: lavish-b
+exit=0
+runner group 76607 stopped
+claim removed
+
+===== C. pre-pin runner (host zone), NEW code invoked with TZ=UTC exported (host-default fallback) =====
+reconciled: published=0 started=1 stopped=0 uncertain=0 failed=0
+claim (written by pre-pin code, host zone CST):
+  83026
+  Thu Nov 12 15:18:28 2026     bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-pe-lab.12Z5Y0/old/bin/fm-procevent.sh _start lavish-c
+$ TZ=UTC list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-c                     lavish       live       0
+$ TZ=UTC reconcile
+reconciled: published=0 started=0 stopped=0 uncertain=0 failed=0
+$ TZ=UTC retire
+retired: lavish-c
+exit=0
+runner group 83026 stopped
+
+===== D. adversarial: pre-pin record not an exact rendering of the live runner (1s skew) -> stays unproven =====
+reconciled: published=0 started=1 stopped=0 uncertain=0 failed=0
+claim (written by pre-pin code, host zone CST):
+  87999
+  Thu Nov 12 15:18:31 2026     bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-pe-lab.12Z5Y0/old/bin/fm-procevent.sh _start lavish-d
+tampered record: Thu Nov 12 15:18:32 2026 bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-pe-lab.12Z5Y0/old/bin/fm-procevent.sh _start lavish-d
+$ list
+SOURCE                       ADAPTER      OWNER      PENDING
+lavish-d                     lavish       orphaned   0
+$ retire
+error: cannot confirm runner identity; source remains registered: lavish-d (the runner its claim records, pid 87999, could not be proved to be that runner or proved stopped; check whether process group 87999 is still polling the source before acting)
+exit=1
+runner group 87999 still alive (not signalled)
+listener executions:        1
