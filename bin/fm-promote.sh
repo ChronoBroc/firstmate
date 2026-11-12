@@ -74,6 +74,8 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
+# shellcheck source=bin/fm-task-brief-lib.sh
+. "$SCRIPT_DIR/fm-task-brief-lib.sh"
 # shellcheck source=bin/fm-public-followup-lib.sh
 . "$SCRIPT_DIR/fm-public-followup-lib.sh"
 # shellcheck source=bin/fm-secondmate-parent-lib.sh
@@ -282,6 +284,7 @@ PROMOTE_CONSENT_WORDS=
 [ -z "$UPSTREAM_CONSENT" ] || PROMOTE_CONSENT_WORDS=" upstream-consent=$UPSTREAM_CONSENT"
 
 SCOUT_BRIEF="$DATA/$ID/brief.md"
+fm_task_brief_restore "$DATA" "$STATE" "$ID" || exit 1
 if fm_brief_task_placeholders_present "$SCOUT_BRIEF"; then
   echo "error: $SCOUT_BRIEF still contains {TASK} or {FIRSTMATE_SPEC}; preserve the original ask in ## Captain's intent and fill the scout-time ## Firstmate spec; promotion generates a separate ship-time spec" >&2
   exit 1
@@ -416,6 +419,8 @@ fi
 TMP=
 rm -f -- "$BRIEF_ORIGINAL" 2>/dev/null || true
 BRIEF_ORIGINAL=
+fm_task_brief_protect "$DATA" "$STATE" "$ID" ||
+  echo "warning: the promotion is published, but task $ID's protected instructions still hold the scout brief until its next launch" >&2
 fm_lock_release "$META_LOCK"
 META_LOCK_HELD=0
 

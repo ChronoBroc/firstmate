@@ -120,7 +120,9 @@
 # - or a version 1 attempt whose workspace is still present or unreadable - may
 # name a live quarantined space and is retained for that sweep.
 # data/<id>/ is deliberately left in place: a successor spawn reads brief.md
-# from it. Finished-brief recording and successor-spawn safeguards are owned
+# from it. A ship or scout brief.md deleted from that evidence directory is first
+# restored from its protected copy, which teardown then removes
+# (bin/fm-task-brief-lib.sh). Finished-brief recording and successor-spawn safeguards are owned
 # by FINISHED BRIEFS in bin/fm-backlog-transition-lib.sh.
 # Worktree-slot ownership (teardown-slot-collision): a treehouse pool slot is
 # reused across tasks, so a stale, duplicated, or drifted worktree= record can
@@ -414,6 +416,8 @@ unset _teardown_source
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
+# shellcheck source=bin/fm-task-brief-lib.sh
+. "$SCRIPT_DIR/fm-task-brief-lib.sh"
 # Pending replies load the shared backend dispatcher and status classifier.
 # Import those graphs once rather than initializing and analyzing them twice.
 # shellcheck source=bin/fm-pending-reply-lib.sh
@@ -3835,6 +3839,12 @@ fi
 # that reuses the id cannot launch it (FINISHED BRIEFS in
 # bin/fm-backlog-transition-lib.sh). A failure refuses while every record and
 # the endpoint are still intact for a plain rerun.
+if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
+  fm_task_brief_restore "$DATA" "$STATE" "$ID" || {
+    echo "error: refusing destructive teardown while task $ID's protected instructions can still be restored by a rerun" >&2
+    exit 1
+  }
+fi
 if [ "$BACKLOG_TRANSITION" = close ] && { [ "$KIND" = ship ] || [ "$KIND" = scout ]; }; then
   fm_finished_brief_record "$DATA" "$ID" || {
     echo "error: $FM_FINISHED_BRIEF_ERROR; refusing destructive teardown" >&2
@@ -4204,6 +4214,7 @@ rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
   "$STATE/$ID.muse-session-current" "$STATE/$ID.cursor-session" \
   "$STATE/$ID.control-relaunch" "$STATE/$ID.control-relaunch.meta-prior" \
   "$STATE/$ID.control-relaunch.brief-prior" "$STATE/$ID.control-relaunch.note" \
+  "$(fm_task_brief_copy_path "$STATE" "$ID")" \
   "$STATE/$ID.reconcile-nudged" "$STATE/$ID.gemini-settings.json" \
   "$STATE/$ID.claude-settings.json" "$STATE/$ID.devin-config.json" \
   "$STATE/$ID.polytoken-busy.sh" "$STATE/$ID.pr-register-refused" \

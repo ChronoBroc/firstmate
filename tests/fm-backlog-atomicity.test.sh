@@ -1380,6 +1380,27 @@ test_reused_id_refuses_a_finished_brief() {
   pass "a reused id cannot launch the finished task's brief, and launches once it has its own"
 }
 
+# A worker's tool that empties data/<id>/ before its run (Playwright's outputDir)
+# must not erase the record of what the task ran: teardown restores the brief
+# from its protected copy before recording it, then removes that copy.
+test_teardown_restores_a_brief_deleted_from_the_evidence_directory() {
+  local case_dir home id out
+  id=atomic-wiped-brief
+  case_dir=$(make_home wiped-brief "$id")
+  home=$(home_of "$case_dir")
+  printf '%s\n' 'WIPED-INSTRUCTIONS for this task.' >> "$home/data/$id/brief.md"
+  add_item "$case_dir" "$id"
+  out=$(run_ship_spawn "$case_dir" "$id") || fail "spawn failed: $out"
+  assert_present "$home/state/$id.brief" "spawn kept no protected copy of the instructions"
+  rm -rf "$home/data/$id"
+  mkdir -p "$home/data/$id"
+  out=$(run_teardown "$case_dir" "$id" --force) || fail "teardown after the wipe failed: $out"
+  assert_contains "$out" "restored" "teardown did not report restoring the instructions"
+  assert_grep 'WIPED-INSTRUCTIONS' "$home/data/$id/brief.md" "teardown did not restore the deleted brief"
+  assert_present "$home/data/$id/finished-briefs" "teardown did not record the restored brief as finished"
+  assert_absent "$home/state/$id.brief" "teardown left the protected copy behind"
+  pass "teardown restores a brief a worker's tool deleted and records it as finished"
+}
 
 test_retained_task_requires_confirmed_continuation() {
   local kind=$1 case_dir home id out
@@ -3255,6 +3276,7 @@ test_dispatch_refuses_a_closed_item
 test_reused_id_refuses_a_finished_brief
 test_reused_id_refuses_a_finished_brief role-first
 test_reused_id_refuses_a_finished_brief brief-first
+test_teardown_restores_a_brief_deleted_from_the_evidence_directory
 test_unrun_launch_brief_can_be_retried
 test_retained_task_requires_confirmed_continuation ship
 test_retained_task_requires_confirmed_continuation scout

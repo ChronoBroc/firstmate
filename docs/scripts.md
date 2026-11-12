@@ -131,6 +131,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-config-inherit-lib.sh` | Shared primary-to-secondmate inherited local-material propagation and config-reread delivery |
 | `fm-tasks-axi.sh`        | Run `tasks-axi` against this home's backlog from any working directory               |
 | `fm-tasks-axi-lib.sh`    | Shared backlog-backend selector and `tasks-axi` compatibility probe                  |
+| `fm-task-brief-lib.sh` | Keep a protected copy of a live ship or scout task's instructions under `state/` and restore `brief.md` when the evidence directory was emptied |
 | `fm-backlog-transition-lib.sh` | Pair task-record changes with their backlog transitions, replay interrupted closes, and keep a reused task id from launching a finished brief |
 | `fm-quota-axi-lib.sh`    | Shared `quota-axi` compatibility floor and quota snapshot schema validation           |
 | `fm-credential-source-lib.sh` | Single owner of the declared credential-source schema and its adapters, read by `fm-dispatch-resolve.sh` and checked by `fm-bootstrap.sh` |
