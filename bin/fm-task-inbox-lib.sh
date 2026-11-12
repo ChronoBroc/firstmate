@@ -93,7 +93,6 @@
 #   FM_TASK_INBOX_GRACE_SECS   default 90; delivery-attempt grace and spacing
 #   FM_TASK_INBOX_RING_MAX     default 3; delivery attempts before escalation
 #   FM_TASK_INBOX_BUSY_MAX     default 2; consecutive busy-deferred due polls before escalation
-#   FM_TASK_INBOX_SUBMIT_TRIES default 3; spaced lone Enters for a doorbell left in the composer
 
 _FM_TASK_INBOX_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Both dependencies are canonical lint roots in their own right. Keep them as
@@ -394,9 +393,10 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 # one more copy per ring, and a stack never matched a single doorbell once it
 # read `pending`, so every later ring skipped it until a human pressed Enter.
 # A lone Enter cannot join a paste burst. On both paths a doorbell still in
-# the composer after FM_TASK_INBOX_SUBMIT_TRIES spaced lone Enters returns 2,
-# so the caller reports it undelivered and the re-ring ladder retries and
-# escalates it.
+# the composer after three spaced lone Enters returns 2, so the caller reports
+# it undelivered and the re-ring ladder retries and escalates it, unless
+# fm_composer_queued_enter_verdict reads it as accepted and queued by a busy
+# agent (OpenCode keeps a queued message visible), which is rung.
 fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
   local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
@@ -424,7 +424,8 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
   # (empty, pending, unknown, ...) is deliberately ignored, never proof. The
   # composer itself says whether the Enter was swallowed.
   [ "$verdict" != send-failed ] || return 2
-  if fm_task_inbox_composer_holds "$backend" "$target" "$line" "$label"; then
+  if [ "$verdict" != empty ] \
+    && fm_task_inbox_composer_holds "$backend" "$target" "$line" "$label"; then
     fm_task_inbox_submit_held "$backend" "$target" "$line" "$label"
     return
   fi
@@ -432,18 +433,22 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
 }
 
 # Submit our own doorbell copies already in the composer with spaced lone
-# Enters until the composer no longer holds them. 0 submitted, 2 a key send
-# failed or they are still held after the budget.
+# Enters until the composer no longer holds them. 0 submitted or queued by a
+# busy agent, 2 a key send failed or they are still held after the budget.
 fm_task_inbox_submit_held() {  # <backend> <target> <line> [expected-label]
-  local tries=${FM_TASK_INBOX_SUBMIT_TRIES:-3} i=0
-  case "$tries" in ''|*[!0-9]*|0) tries=3 ;; esac
-  while [ "$i" -lt "$tries" ]; do
+  local i=0 cstate busy
+  while [ "$i" -lt 3 ]; do
     fm_backend_send_key "$1" "$2" Enter "${4:-}" >/dev/null 2>&1 || return 2
     sleep 0.5
     fm_task_inbox_composer_holds "$1" "$2" "$3" "${4:-}" || return 0
     i=$((i + 1))
   done
-  return 2
+  cstate=$(fm_backend_composer_state "$1" "$2" "${4:-}" 2>/dev/null) || cstate=unknown
+  case "$1" in
+    tmux) busy=$(fm_pane_busy_state "$2" 2>/dev/null) ;;
+    *) busy=$(fm_backend_busy_state "$1" "$2" 2>/dev/null) ;;
+  esac
+  [ "$(fm_composer_queued_enter_verdict "$cstate" "$busy")" = empty ] || return 2
 }
 
 # Whether the composer's content, ignoring whitespace and line wrapping, is one

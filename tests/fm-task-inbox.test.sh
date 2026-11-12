@@ -315,7 +315,9 @@ test_ring_skips_dead_agent() {
 # FM_FAKE_DROP_ENTERS still holds a count of Enters to swallow, or
 # FM_FAKE_NEWLINE_ENTERS still holds a count of Enters to turn into a newline
 # the way Codex's paste-burst heuristic does when text and Enter reach it in
-# one read: the composer then ends in an empty row holding the cursor.
+# one read: the composer then ends in an empty row holding the cursor. With
+# FM_FAKE_BUSY=1 the pane shows a busy footer and Enter queues the composer
+# (logged as QUEUED) while its text stays visible, as OpenCode does mid-turn.
 make_composer_stub() {  # <dir>
   mkdir -p "$1/fakebin"
   cat > "$1/fakebin/tmux" <<'SH'
@@ -339,6 +341,8 @@ case "${1:-}" in
       newlines=$(cat "${FM_FAKE_NEWLINE_ENTERS:-/nonexistent}" 2>/dev/null || echo 0)
       if [ "$drops" -gt 0 ]; then
         echo $((drops - 1)) > "$FM_FAKE_DROP_ENTERS"
+      elif [ "${FM_FAKE_BUSY:-0}" = 1 ] && [ -s "$FM_FAKE_COMPOSER" ]; then
+        printf 'QUEUED\n' >> "$FM_SEND_LOG"
       elif [ "$newlines" -gt 0 ] && [ -s "$FM_FAKE_COMPOSER" ]; then
         echo $((newlines - 1)) > "$FM_FAKE_NEWLINE_ENTERS"
         printf '\n' >> "$FM_FAKE_COMPOSER"
@@ -371,6 +375,7 @@ case "${1:-}" in
       printf '❯ \n'
     fi
     printf '%s\n  ? for shortcuts\n' "$rule"
+    [ "${FM_FAKE_BUSY:-0}" != 1 ] || printf '  esc to interrupt\n'
     exit 0 ;;
   list-windows) printf 'fm-t1\n'; exit 0 ;;
 esac
@@ -478,6 +483,38 @@ test_ring_never_stacks_unsubmitted_doorbells() {
   [ "$(tr -d '[:space:]' < "$composer")" = "$(printf '%s' "$doorbell" | tr -d '[:space:]')" ] \
     || fail "re-rings stacked doorbell copies in the composer:"$'\n'"$(cat "$composer")"
   pass "inbox: the ring submits stacked or newline-swallowed doorbells with a lone Enter, never types over them, and reports one it cannot submit"
+}
+
+# A busy agent that accepts Enter and queues the message while keeping its
+# text visible (OpenCode mid-turn) has taken the doorbell: the queued-Enter
+# policy reads that as delivered, so the ring reports it rung, never as a
+# failed submission that would notify and re-ring a message already queued.
+test_ring_treats_busy_queued_doorbell_as_rung() {
+  local dir state rec doorbell log composer rc
+  dir="$TMP_ROOT/ring-queued"
+  state="$dir/state"
+  mkdir -p "$state"
+  make_composer_stub "$dir"
+  rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  doorbell=$(inbox_lib "$state" fm_task_inbox_doorbell_line "$rec")
+  log="$dir/send.log"; composer="$dir/composer"
+  ring() {
+    PATH="$dir/fakebin:$PATH" FM_SEND_LOG="$log" FM_FAKE_COMPOSER="$composer" \
+      FM_FAKE_DROP_ENTERS="$dir/drops" FM_FAKE_BUSY=1 \
+      inbox_lib "$state" fm_task_inbox_ring tmux sess:fm-t1 "$rec" fm-t1
+  }
+
+  : > "$log"; : > "$composer"
+  rc=0; ring || rc=$?
+  [ "$rc" = 0 ] || fail "a doorbell a busy agent queued should report rung, got rc $rc"
+  grep -q QUEUED "$log" || fail "the typed doorbell was never entered:"$'\n'"$(cat "$log")"
+
+  : > "$log"; printf '%s' "$doorbell" > "$composer"
+  rc=0; ring || rc=$?
+  [ "$rc" = 0 ] || fail "a held doorbell a busy agent queued should report rung, got rc $rc"
+  [ "$(tr -d '[:space:]' < "$composer")" = "$(printf '%s' "$doorbell" | tr -d '[:space:]')" ] \
+    || fail "a queued doorbell must never be typed over:"$'\n'"$(cat "$composer")"
+  pass "inbox: a doorbell a busy agent queued with its text still visible is reported rung"
 }
 
 test_idempotent_write_dedups_exact_body() {
@@ -1448,6 +1485,7 @@ test_doorbell_rejects_terminal_controls
 test_ring_skips_dead_agent
 test_ring_submits_its_own_stuck_doorbell
 test_ring_never_stacks_unsubmitted_doorbells
+test_ring_treats_busy_queued_doorbell_as_rung
 test_idempotent_write_dedups_exact_body
 test_idempotent_write_prefilters_history
 test_idempotent_write_prefilter_preserves_exact_bodies

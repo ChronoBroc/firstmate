@@ -51,6 +51,7 @@ LAB=$(cd "$LAB" && pwd)
 TIMEOUT=${FM_SEND_INBOX_LIVE_TIMEOUT:-240}
 CHECKED=0
 LAG_CHECKED=0
+CODEX_LAG_CHECKED=0
 FAILED=0
 
 pass() { printf 'ok - %s\n' "$1"; }
@@ -277,7 +278,10 @@ check_harness_doorbell() {  # <name>
     lag_rc=0
     check_lagged_doorbell "$name" "$version" "$win" "$home" "$task" || lag_rc=$?
     case "$lag_rc" in
-      0) LAG_CHECKED=$((LAG_CHECKED + 1)) ;;
+      0)
+        LAG_CHECKED=$((LAG_CHECKED + 1))
+        [ "$name" != codex ] || CODEX_LAG_CHECKED=1
+        ;;
       1) FAILED=1 ;;
     esac
   else
@@ -309,7 +313,7 @@ if [ "$CHECKED" -eq 0 ]; then
 fi
 case " $HARNESSES " in
   *' codex '*)
-    if command -v codex >/dev/null 2>&1 && [ "$LAG_CHECKED" -eq 0 ]; then
+    if command -v codex >/dev/null 2>&1 && [ "$CODEX_LAG_CHECKED" -eq 0 ]; then
       printf 'not ok - the lagged-doorbell re-ring was never exercised against codex, whose paste-burst Enter swallow it exists for\n' >&2
       exit 1
     fi
