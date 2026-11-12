@@ -17,6 +17,10 @@
 # after it is the message, even "--key" or "--help". Text that only begins with
 # dashes, such as "- item", "--- heading", "-1", or "--help me with this", is
 # already ordinary text and needs no "--".
+# The text arrives as arguments, so the calling shell expands it first: in a
+# double-quoted message a backtick span or $(...) runs as a command and is
+# replaced by its output before fm-send sees it. Quote steer text in single
+# quotes, especially when it carries code.
 # Special keys instead of text: fm-send.sh <target> --key Enter
 # Key support is backend-specific: tmux/herdr support Escape, Enter, and C-c;
 # Orca supports Enter and C-c only; T3 Code maps Escape and C-c to a native
