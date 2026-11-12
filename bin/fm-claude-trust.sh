@@ -164,7 +164,10 @@
 # file this uid owns; every unrelated key and project entry is preserved, and
 # both entries land in one atomic replacement. In secondmate-home and lab-home
 # mode: the single projects entry for the registered home path, same store,
-# same atomic replacement. fm-spawn.sh forwards CLAUDE_CONFIG_DIR onto the
+# same atomic replacement. Concurrent registrations against one store are
+# serialized by a lock beside it (see the block above the read-modify-write),
+# so none loses another's entries; a Claude Code session's own writes are only
+# detected, not excluded. fm-spawn.sh forwards CLAUDE_CONFIG_DIR onto the
 # claude launch verbatim rather than resolving it, and the pane starts in the
 # registered directory, so only an absolute value names the same store on both sides; a
 # relative one is refused below rather than guessed at.
@@ -406,9 +409,30 @@ if [ -e "$STORE" ]; then
   [ -w "$STORE" ] || refuse "'$STORE' is not writable"
 fi
 
-# Read-modify-write, then read back and confirm. fm-spawn runs from a live
-# firstmate Claude Code session that writes this same file, so the store can move
-# under us in both directions and each needs its own answer.
+# Concurrent registrations serialize on one lock per resolved store, beside it,
+# so every firstmate home whose spawns share one Claude config directory waits
+# on the same lock. Without it two spawns started together each read the store,
+# both pass the fingerprint check below before either renames, and the second
+# rename silently drops the first one's entries while both report success. The
+# lock is fm-wake-lib.sh's pid-owned lock, so a holder that was killed is
+# reclaimed by the next registration rather than wedging every later spawn, and
+# a live holder that never finishes is waited on for LOCK_WAIT seconds and then
+# refused rather than blocking the spawn forever. STATE points at the store's
+# own directory only so sourcing the library creates nothing; no queue or other
+# state-directory helper is used here.
+LOCK_WAIT=30
+LOCK="$STORE.fm-trust.lock"
+# shellcheck source=bin/fm-wake-lib.sh
+FM_STATE_OVERRIDE=$(dirname "$STORE") . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/fm-wake-lib.sh"
+fm_lock_acquire_wait_max "$LOCK" "$LOCK_WAIT" \
+  || refuse "another registration has held '$LOCK' for over ${LOCK_WAIT}s; if no registration is running, remove that lock"
+trap 'fm_lock_release "$LOCK"' EXIT
+
+# Read-modify-write, then read back and confirm. The lock above orders this
+# against every other registration, but fm-spawn runs from a live firstmate
+# Claude Code session that writes this same file and takes no lock of ours, so
+# the store can still move under us in both directions and each needs its own
+# answer.
 #
 # Losing the VENDOR's write is the serious one: this renames a whole
 # re-serialisation over the file, so anything Claude changed since the read -
@@ -426,8 +450,8 @@ fi
 # the dialog this registration removes, which reaches firstmate as an ordinary
 # stale wake and a relaunch registers again. The readback catches it within these
 # attempts, and it must fail loudly rather than report a trust it did not leave.
-# ponytail: fingerprint-and-refuse, not a lock; flock is absent on macOS and
-# cannot stop a vendor session's own rewrite anyway.
+# Against the vendor this is fingerprint-and-refuse, not a lock: no lock of ours
+# can stop a Claude Code session's own rewrite.
 #
 # In worktree mode every flag lands on both the worktree entry and the project
 # entry in the same read-modify-write attempt, so a single rename either
