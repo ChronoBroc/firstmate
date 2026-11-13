@@ -1227,6 +1227,7 @@ OpenCode needed `FM_SEND_INBOX_LIVE_TIMEOUT=560` because its configured model wa
 Pi 0.87.1 was installed but not verified: its configured model returned an account error (`The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account`) before it read the inbox.
 
 The guard's lagged-delivery phase sends a second steer while the agent under the pane's shell is stopped, and when that leaves the doorbell in the composer it plays one watcher re-ring into the stopped agent and requires an acknowledgement with no further ring; Codex must exercise that phase or the run fails.
+Whether the stop strands the doorbell is timing-dependent (Codex submitted it anyway in two of three runs on 2026-11-12), so when it does not, the phase waits for that steer's acknowledgement, enqueues a third record with no ring, types its doorbell into the proven-empty composer without Enter, and plays the same single re-ring.
 Run on 2026-11-12 on tmux 3.6, macOS arm64, with `FM_SEND_INBOX_LIVE_HARNESSES=codex` added to the command above:
 
 ```text
