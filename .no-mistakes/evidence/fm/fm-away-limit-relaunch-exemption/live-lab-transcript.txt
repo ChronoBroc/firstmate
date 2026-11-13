@@ -1,0 +1,52 @@
+lab=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.kt8Jri socket=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.kt8Jri/tmux/tmux-501/fm-lab
+== real crew-state readings
+w1: state: working · source: pane · harness busy (claude-hook)
+w2: state: working · source: pane · harness busy (claude-hook)
+w3: state: working · source: pane · harness busy (claude-hook)
+w4: state: working · source: pane · harness busy (claude-hook)
+dead: state: unknown · source: none · no current-state source available
+== enter away, cap 4
+  spend cap: 4 actively working workers (a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does)
+  reach: hold-for-return only. No phone channel is configured; anything that needs you waits for your return.
+  your words: (none)
+live-workers=4
+
+### S1: cap full (4 working) -> relaunch of dead worker via fm-control
+rc=75
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.kt8Jri
+deferred: relaunch of dead refused - the away-posture record caps actively working workers at 4 and 4 ordinary worker(s) are actively working in this home (a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does); dead is not one of them, so its replacement would put the home over the cap. dead's record, local copy, and unlanded work are kept as they are for a relaunch once a worker finishes or for the captain's return (spend cap: bin/fm-afk-contract.sh)
+SNAPSHOT UNCHANGED
+live-workers after=4
+
+### S2: cap full -> direct fm-spawn --relaunch of dead worker
+rc=75
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.kt8Jri
+deferred: relaunch of dead refused - the away-posture record caps actively working workers at 4 and 4 ordinary worker(s) are actively working in this home (a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does); dead is not one of them, so its replacement would put the home over the cap. dead's record, local copy, and unlanded work are kept as they are for a relaunch once a worker finishes or for the captain's return (spend cap: bin/fm-afk-contract.sh)
+SNAPSHOT UNCHANGED
+
+### S3: decision CLI: counted worker w1 relaunch at full cap (exempt) vs dead / fresh
+w1 --relaunch rc=0
+deferred: relaunch of dead refused - the away-posture record caps actively working workers at 4 and 4 ordinary worker(s) are actively working in this home (a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does); dead is not one of them, so its replacement would put the home over the cap. dead's record, local copy, and unlanded work are kept as they are for a relaunch once a worker finishes or for the captain's return (spend cap: bin/fm-afk-contract.sh)
+dead --relaunch rc=1
+error: spawn refused - the away-posture record caps actively working workers at 4 and 4 ordinary worker(s) are actively working in this home (a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does); task newtask stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)
+fresh rc=1
+
+### S4: one worker finishes (w4 harness idle + pane shell) -> dead relaunch admitted by decision
+live-workers=3
+dead --relaunch rc=0
+
+### S5: room under cap but another launch holds the task-set lock -> relaunch defers 75
+fm-control rc=75
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.kt8Jri
+deferred: relaunch of dead waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh)
+fm-spawn rc=75
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.kt8Jri
+deferred: relaunch of dead waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh)
+SNAPSHOT UNCHANGED
+
+### S6: no away record (archive) at 4 working -> relaunch cap not applied
+record present: no
+dead --relaunch (no record) rc=0
+
+== teardown
+lab removed: yes

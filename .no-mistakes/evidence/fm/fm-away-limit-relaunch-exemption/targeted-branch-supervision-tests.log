@@ -1,0 +1,2 @@
+ok - the away-posture record relocates the PR merge and a spawn under the spend cap to the branch, never local landing, and only while confirmed, valid, and away
+ok - the away spend cap is rechecked under the task-set lock so concurrent spawns cannot both publish

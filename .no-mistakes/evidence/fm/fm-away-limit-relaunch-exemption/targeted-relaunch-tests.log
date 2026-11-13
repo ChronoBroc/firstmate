@@ -1,0 +1,7 @@
+ok - fm-control relaunch: a dead worker's relaunch at a full away cap defers with exit 75 and touches nothing
+ok - fm-control relaunch: a worker the away cap counts is replaced at a full cap
+ok - fm-control relaunch: a dead worker is relaunched while the away cap has room
+ok - fm-spawn --relaunch: a dead worker's direct relaunch at a full away cap defers with exit 75 and touches nothing
+ok - fm-control relaunch: a dead worker's relaunch defers while another launch holds the away cap's last slot
+ok - fm-spawn --relaunch: a dead worker's direct relaunch defers while another launch holds the away cap's last slot
+ok - away supervision relaunches existing In-flight and queued items under the saturated fresh-spawn spend cap
