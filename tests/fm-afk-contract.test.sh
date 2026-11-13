@@ -746,9 +746,39 @@ test_spend_cap_counts_a_parked_worker_whose_harness_is_busy() {
   ) || exit 1
 }
 
+# A failed endpoint probe is not death: a parked worker, or one whose state
+# reading says its endpoint is gone, stops counting only once the
+# recovery-grade backend classifier confirms the endpoint dead or missing. An
+# orca endpoint whose CLI cannot answer fails the cheap existence probe, but
+# orca has no recovery classifier, so it keeps counting; a closed tmux window
+# is confirmed missing and does not.
+test_spend_cap_counts_a_worker_whose_death_is_unconfirmed() {
+  (
+    local stub count id
+    afk_tmux_fixture spend-death-unconfirmed
+    stub=$(make_reading_stub "$FIXTURE_HOME")
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/fakebin/orca"
+    chmod +x "$TMP/fakebin/orca"
+    fm_write_meta "$ST/orca-parked.meta" "backend=orca" "terminal=term-1" "harness=claude" "kind=ship"
+    printf 'state: parked · source: run-step · awaiting_approval\n' > "$ST/orca-parked.reading"
+    fm_write_meta "$ST/orca-gone.meta" "backend=orca" "terminal=term-2" "harness=claude" "kind=ship"
+    printf 'state: unknown · source: none · backend target gone: term-2\n' > "$ST/orca-gone.reading"
+    worker tmux-parked ship busy
+    worker tmux-gone ship busy
+    tmux -S "$SOCK" kill-window -t crew:fm-tmux-parked || fail "the parked worker's window should close"
+    tmux -S "$SOCK" kill-window -t crew:fm-tmux-gone || fail "the gone worker's window should close"
+    printf 'state: parked · source: run-step · awaiting_approval\n' > "$ST/tmux-parked.reading"
+    printf 'state: unknown · source: none · backend target gone: crew:fm-tmux-gone\n' > "$ST/tmux-gone.reading"
+    count=$(FM_AFK_CONTRACT_CREW_STATE_BIN=$stub contract "$FIXTURE_HOME" live-workers)
+    [ "$count" = 2 ] || fail "live-workers counted $count, not the two orca workers whose death the backend cannot confirm"
+    pass "a worker whose endpoint probe fails counts until the recovery-grade classifier confirms it dead"
+  ) || exit 1
+}
+
 # A reading that never arrives, comes back empty, or is not a recognized state
-# counts as working, so an unreadable fleet can never exceed the cap; a
-# recognized non-working state does not count.
+# counts as working, so an unreadable fleet can never exceed the cap; so does a
+# recognized non-working state whose harness cannot be read, here a tmux
+# endpoint on no running server, which is unreadable rather than proven gone.
 test_spend_cap_counts_an_unreadable_worker_as_working() {
   local home stub out
   home=$(make_home spend-unreadable)
@@ -763,8 +793,8 @@ test_spend_cap_counts_an_unreadable_worker_as_working() {
   fm_write_meta "$home/state/failed.meta" "window=fm-failed" "kind=ship"
   printf 'state: failed · source: run-step · review failed\n' > "$home/state/failed.reading"
   out=$(FM_AFK_CONTRACT_CREW_STATE_BIN=$stub FM_AFK_CONTRACT_CREW_STATE_TIMEOUT=1 contract "$home" live-workers)
-  [ "$out" = 3 ] || fail "an unreadable reading did not count as working: counted $out, not 3"
-  pass "a timed-out, empty, or unrecognized reading counts as working, and parked or failed does not"
+  [ "$out" = 5 ] || fail "an unreadable reading did not count as working: counted $out, not 5"
+  pass "a timed-out, empty, or unrecognized reading counts as working, and so does a parked or failed one whose harness cannot be read"
 }
 
 # Without --spend, entry records the default 4 whatever records stand, since
@@ -795,6 +825,7 @@ test_words_preserve_final_newline_shape
 test_enter_writes_a_v2_record_in_one_step_and_announces_hold_for_return
 test_spend_cap_counts_only_actively_working_workers
 test_spend_cap_counts_a_parked_worker_whose_harness_is_busy
+test_spend_cap_counts_a_worker_whose_death_is_unconfirmed
 test_spend_cap_counts_an_unreadable_worker_as_working
 test_entry_without_spend_records_the_default
 test_retired_two_step_entry_is_refused_by_name

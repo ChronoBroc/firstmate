@@ -133,11 +133,12 @@
 # bin/fm-crew-state.sh reading, bounded by FM_AFK_CONTRACT_CREW_STATE_TIMEOUT
 # seconds (default 20), says it is working, or while its harness is busy
 # whatever its task reads. A worker whose task is parked at a gate, done,
-# blocked, paused, or failed, or whose harness reads exactly idle with no status
-# declaration, does not count once its live busy reading (fm_busy_classify_live
-# in bin/fm-busy-lib.sh, under the same bound) verifiably reads idle or its
-# endpoint gone; a worker whose state reading says its endpoint is gone never
-# counts. So idle and finished records left for cleanup never hold the cap,
+# blocked, paused, or failed, whose state reading says its endpoint is gone, or
+# whose harness reads exactly idle with no status declaration, does not count
+# once its live busy reading (fm_busy_classify_live in bin/fm-busy-lib.sh, under
+# the same bound) verifiably reads idle, or reads its endpoint gone and the
+# recovery-grade fm_backend_agent_state (bin/fm-backend.sh) confirms it dead or
+# missing. So idle and finished records left for cleanup never hold the cap,
 # while a worker busy on a parked gate does. Any other reading on either side -
 # an unreadable, timed-out, unknown, or unrecognized one included - counts, so
 # an unreadable fleet can never exceed the cap. fm_afk_contract_reading_counts
@@ -202,34 +203,45 @@ fm_afk_contract_present() {  # [state-dir]
 }
 
 # What one bin/fm-crew-state.sh reading says about the spend cap (the header's
-# SPEND CAP): 0 when it counts, 1 when its endpoint is gone, and 2 when the
-# task is not working - parked at a gate, done, blocked, paused, or failed, or
-# an exactly idle harness with no status declaration - so the harness's own
-# busy reading decides. Anything else, an unreadable or empty reading included,
+# SPEND CAP): 0 when it counts and 1 when the task is not working - parked at a
+# gate, done, blocked, paused, or failed, its endpoint read gone, or an exactly
+# idle harness with no status declaration - so the harness's own busy reading
+# decides. Anything else, an unreadable or empty reading included,
 # counts, so an unreadable fleet can never exceed the cap.
 fm_afk_contract_reading_counts() {  # <crew-state line>
   local sep=' · '
   case "$1" in
     "state: working${sep}"*) return 0 ;;
-    "state: unknown${sep}source: none${sep}backend target gone"*) return 1 ;;
     "state: parked${sep}"* | "state: done${sep}"* | "state: blocked${sep}"* | \
       "state: paused${sep}"* | "state: failed${sep}"* | \
-      "state: unknown${sep}source: none${sep}no current-state source available") return 2 ;;
+      "state: unknown${sep}source: none${sep}backend target gone"* | \
+      "state: unknown${sep}source: none${sep}no current-state source available") return 1 ;;
   esac
   return 0
 }
 
 # Whether a worker's harness is verifiably not busy right now: its live busy
 # reading (fm_busy_classify_live in bin/fm-busy-lib.sh, the reading
-# bin/fm-crew-state.sh consults), bounded like the state reading, is idle or
-# its endpoint is gone. Busy, unknown, unreadable, and timed out are not quiet.
+# bin/fm-crew-state.sh consults), bounded like the state reading, is idle, or
+# its endpoint reads gone and the recovery-grade fm_backend_agent_state in
+# bin/fm-backend.sh confirms it dead or missing. Busy, unknown, unreadable, an
+# unconfirmed death, and timed out are not quiet.
 fm_afk_contract_harness_quiet() {  # <meta> <id> <state-dir>
   local verdict
   # shellcheck disable=SC2016
   verdict=$(fm_run_timed "$FM_AFK_CONTRACT_CREW_STATE_TIMEOUT" bash -c '
     . "$1/fm-backend.sh" && . "$1/fm-busy-lib.sh" || exit 1
-    fm_busy_classify_live "$(fm_backend_of_meta "$2")" "$(fm_backend_target_of_meta "$2")" \
-      "$(fm_meta_get "$2" harness)" "$3" "$4"' \
+    backend=$(fm_backend_of_meta "$2") target=$(fm_backend_target_of_meta "$2")
+    verdict=$(fm_busy_classify_live "$backend" "$target" "$(fm_meta_get "$2" harness)" "$3" "$4")
+    case "$verdict" in
+      "dead "*)
+        case "$(fm_backend_agent_state "$backend" "$target" "$2")" in
+          dead | missing) ;;
+          *) verdict="unknown death-unconfirmed" ;;
+        esac
+        ;;
+    esac
+    printf "%s" "$verdict"' \
     _ "$FM_AFK_CONTRACT_DIR" "$1" "$2" "$3" 2>/dev/null) || return 1
   case "$verdict" in
     'idle '* | 'dead '*) return 0 ;;
@@ -244,7 +256,7 @@ fm_afk_contract_harness_quiet() {  # <meta> <id> <state-dir>
 # harness is not verifiably quiet. This is the one implementation of that
 # count, read by bin/fm-spawn.sh's refusal.
 fm_afk_contract_working_ordinary_workers() {  # [state-dir]
-  local state=${1:-$FM_AFK_CONTRACT_STATE} meta id reading rc working=0
+  local state=${1:-$FM_AFK_CONTRACT_STATE} meta id reading working=0
   local bin=${FM_AFK_CONTRACT_CREW_STATE_BIN:-$FM_AFK_CONTRACT_DIR/fm-crew-state.sh}
   for meta in "$state"/*.meta; do
     [ -f "$meta" ] || continue
@@ -253,10 +265,7 @@ fm_afk_contract_working_ordinary_workers() {  # [state-dir]
     id=${id%.meta}
     reading=$(fm_run_timed "$FM_AFK_CONTRACT_CREW_STATE_TIMEOUT" \
       env FM_STATE_OVERRIDE="$state" FM_CREW_STATE_NO_FORGE=1 "$bin" "$id" 2>/dev/null | head -1) || true
-    rc=0
-    fm_afk_contract_reading_counts "$reading" || rc=$?
-    [ "$rc" -ne 1 ] || continue
-    [ "$rc" -ne 2 ] || ! fm_afk_contract_harness_quiet "$meta" "$id" "$state" || continue
+    fm_afk_contract_reading_counts "$reading" || ! fm_afk_contract_harness_quiet "$meta" "$id" "$state" || continue
     working=$((working + 1))
   done
   printf '%s\n' "$working"

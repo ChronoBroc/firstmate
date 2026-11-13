@@ -1458,9 +1458,14 @@ test_away_record_relocates_main_owned_actions_to_the_branch() {
   status=$?
   [ "$status" -eq 1 ] || fail "main spawn past the cap exited $status, not 1: $out"
   assert_contains "$out" "caps actively working workers" "main was not held to the spend cap"
-  # A worker that is not actively working leaves room under the cap.
+  # A worker that is not actively working, here one whose tmux server is
+  # positively gone, leaves room under the cap.
+  fm_write_meta "$home/state/task-b.meta" "window=crew:fm-task-b" "kind=ship"
   printf 'state: blocked · source: status-log · PR ready\n' > "$home/state/task-b.reading"
-  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" "$ROOT/bin/fm-spawn.sh" task-new --mode no-mistakes --yolo off 2>&1)
+  mkdir -p "$TMP_ROOT/away-fakebin"
+  printf '#!/usr/bin/env bash\necho "no server running on /tmp/fm-away-none" >&2\nexit 1\n' > "$TMP_ROOT/away-fakebin/tmux"
+  chmod +x "$TMP_ROOT/away-fakebin/tmux"
+  out=$(PATH="$TMP_ROOT/away-fakebin:$PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$root" "$ROOT/bin/fm-spawn.sh" task-new --mode no-mistakes --yolo off 2>&1)
   assert_not_contains "$out" "caps actively working workers" "an idle worker held the spend cap"
   rm -f "$home/state/task-b.reading"
 
