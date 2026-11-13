@@ -39,6 +39,13 @@ A managed policy can override the requested disablement, so a worker can still e
 A crewmate loses nothing: its turn-end signal is the `-c notify=` program on the same launch, and the Firstmate hooks in a project's `.codex/hooks.json` are primary-session infrastructure that stands down in a child worktree.
 A secondmate is a primary in its own home and keeps its hooks, so an unanswerable modal there is still possible and is the operator's own hook review to settle.
 
+## Doorbell delivery
+
+Codex's paste-burst heuristic turns an Enter that reaches it in the same read as fast-typed text into a newline, so when its event loop lags (a loaded host, a busy render) a steering doorbell can sit unsubmitted above an empty cursor row, mid-turn under a "tab to queue message" footer or idle.
+Verified on 2026-11-12 with codex-cli 0.167.0, which otherwise accepts Enter mid-turn as an in-turn steer.
+The doorbell ring in `../../../bin/fm-task-inbox-lib.sh` owns the recovery: it submits a composer holding only doorbell copies with a lone Enter instead of typing another copy, confirms its own doorbell left the composer, and reports one that did not, so the re-ring ladder retries and then escalates it.
+A composer holding the worker's own draft is never submitted.
+
 ## Skill popup
 
 A `$<skill>` invocation opens a `$` autocomplete popup.

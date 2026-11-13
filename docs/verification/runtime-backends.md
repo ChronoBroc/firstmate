@@ -1226,6 +1226,18 @@ ok - opencode (1.18.33): the doorbell reached a real worker, which acted and ack
 OpenCode needed `FM_SEND_INBOX_LIVE_TIMEOUT=560` because its configured model was still mid-turn at the default 240 seconds.
 Pi 0.87.1 was installed but not verified: its configured model returned an account error (`The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account`) before it read the inbox.
 
+The guard's lagged-delivery phase sends a second steer while the agent under the pane's shell is stopped, and when that leaves the doorbell in the composer it plays one watcher re-ring into the stopped agent and requires an acknowledgement with no further ring; Codex must exercise that phase or the run fails, unless the phase reports it not exercised with a reason: the composer never read empty before the lagged steer (a rate-limit or other modal), or the lag left text other than whole doorbell copies, such as a truncated doorbell, whose handling `tests/fm-task-inbox.test.sh` proves deterministically (the ring reports it undelivered and never types over it).
+Whether the stop strands the doorbell is timing-dependent (Codex submitted it anyway in two of three runs on 2026-11-12), so when it does not, the phase waits for that steer's acknowledgement, enqueues a third record with no ring, types its doorbell into the proven-empty composer without Enter, and plays the same single re-ring.
+Run on 2026-11-12 on tmux 3.6, macOS arm64, with `FM_SEND_INBOX_LIVE_HARNESSES=codex` added to the command above:
+
+```text
+ok - codex (codex-cli 0.167.0): the doorbell reached a real worker, which acted and acked with the mv
+ok - codex (codex-cli 0.167.0): a doorbell a lagging worker left in its composer was submitted by one re-ring, acted on and acked
+ok - live steering-inbox doorbell guard: 1 harness(es) honored the doorbell contract, 1 proved the lagged re-ring
+```
+
+Against the earlier ring, which typed a fresh doorbell over one Codex had left in its composer, the same phase failed with two stacked doorbells never submitted (`a doorbell left in a lagging composer was not honored after one re-ring within 90s (acted=no acked=no)`).
+
 ## Waiting-worker command ceilings
 
 The `# Waiting` section of the ship and scout briefs (`bin/fm-brief.sh`) has a worker hold every external wait inside one blocking shell command, bounded by what its harness lets one command run.

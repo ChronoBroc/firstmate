@@ -14,10 +14,15 @@
 # INSTALLED verified harness: each is launched idle in an isolated tmux server,
 # steered through the REAL fm-send (durable record + doorbell), and must both
 # ACT on the instruction (create a named file) and ACKNOWLEDGE it (the mv into
-# handled/), failing loudly with the harness name and version.
+# handled/), failing loudly with the harness name and version. A second,
+# lagged steer then reaches the worker while its foreground process group is
+# frozen, and so does one watcher-role re-ring: the worker must still act and
+# acknowledge with no further ring, which proves a re-ring submits a doorbell
+# a lagging agent left in its composer rather than stacking another copy
+# (stranded deterministically when the freeze alone does not leave it there).
 #
 # Run explicitly with FM_SEND_INBOX_LIVE_E2E=1. This test spends a small
-# number of real model tokens per installed harness (one short turn each) -
+# number of real model tokens per installed harness (two short turns each) -
 # authorized by the harness-dependent-checks rule. An absent harness is
 # reported explicitly and skipped; a run that verified nothing fails rather
 # than passing vacuously. Restrict with
@@ -46,6 +51,10 @@ LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-inbox-live.XXXXXX")
 LAB=$(cd "$LAB" && pwd)
 TIMEOUT=${FM_SEND_INBOX_LIVE_TIMEOUT:-240}
 CHECKED=0
+LAG_CHECKED=0
+CODEX_LAG_CHECKED=0
+CODEX_LAG_SKIP=
+LAG_SKIP_REASON=
 FAILED=0
 
 pass() { printf 'ok - %s\n' "$1"; }
@@ -136,8 +145,138 @@ wait_ready() {  # <window>
   return 2
 }
 
+# Freeze the agent under the pane's shell around one call, so the agent reads
+# the call's typed text and its Enter in one batch when it resumes, as a
+# lagging event loop does on a loaded host. Codex's paste-burst heuristic then
+# turns that Enter into a newline and leaves the doorbell unsubmitted. Only
+# the shell's descendants are stopped: stopping the shell as well left the
+# agent running (observed on macOS), as the kernel continues an orphaned
+# process group whose members are all stopped.
+lagged() {  # <window> <command...>
+  local win=$1 pids frontier next p rc=0
+  shift
+  frontier=$(tmux -L "$SOCKET" display-message -p -t "$SESSION:$win" '#{pane_pid}')
+  pids=
+  while [ -n "$frontier" ]; do
+    next=
+    for p in $frontier; do
+      next="$next $(pgrep -P "$p" 2>/dev/null | tr '\n' ' ')"
+    done
+    pids="$pids $next"
+    frontier=$(printf '%s' "$next" | tr -s ' ')
+    [ -n "${frontier// /}" ] || frontier=
+  done
+  # shellcheck disable=SC2086
+  [ -z "${pids// /}" ] || kill -STOP $pids 2>/dev/null || true
+  "$@" || rc=$?
+  sleep 0.5
+  # shellcheck disable=SC2086
+  [ -z "${pids// /}" ] || kill -CONT $pids 2>/dev/null || true
+  return "$rc"
+}
+
+ring_as() {  # <harness> <ring args...>
+  FM_COMPOSER_HARNESS=$1 fm_task_inbox_ring "${@:2}"
+}
+
+# The lagged-delivery phase: one steer sent to a frozen worker. When the
+# freeze leaves its doorbell unsubmitted in the composer (the divergence this
+# phase exists for, asserted rather than assumed), a single watcher-role
+# re-ring, also into a frozen worker, must submit that doorbell instead of
+# stacking another copy on it, and the worker must then act and acknowledge
+# with no further ring. Whether the freeze strands the doorbell is timing
+# luck (a fast enough event loop submits it anyway), so when it does not, the
+# phase waits for that steer's acknowledgement and then strands the next
+# doorbell deterministically: it enqueues a record with no ring and types its
+# doorbell into a composer proven empty, without Enter - the state the
+# 2026-10-30 incident left - before the same single lagged re-ring.
+# Returns 0 proven, 1 failed, 2 not exercised.
+check_lagged_doorbell() {  # <name> <version> <window> <home> <task>
+  local name=$1 version=$2 win=$3 home=$4 task=$5 acted="$LAB/acted-lag-$1" rec handled doorbell i how=lagged
+  local text="Firstmate live check: run exactly this shell command now: touch $acted - then follow the mv instruction you were given for this message. Reply with one short line."
+  # Start from an idle composer, so the lag rather than a reply still being
+  # rendered decides what the worker reads. A composer that never reads empty
+  # (a rate-limit or other modal, leftover text) is not the state under test,
+  # and typing the steer into it could accept a modal choice.
+  if ! wait_ready "$win"; then
+    LAG_SKIP_REASON="composer never read empty before the lagged steer (a modal or leftover text)"
+    note "$name ($version): $LAG_SKIP_REASON; the lag phase is not exercised on this run"
+    tmux -L "$SOCKET" capture-pane -p -t "$SESSION:$win" 2>/dev/null | grep '[^[:space:]]' | tail -6 | sed 's/^/#   /'
+    return 2
+  fi
+  lagged "$win" env FM_HOME="$home" FM_ROOT_OVERRIDE="$home" FM_SEND_SETTLE=0 "$ROOT/bin/fm-send.sh" "$task" "$text" \
+    >/dev/null 2>&1
+  rec="$home/state/$task.inbox/002.msg"
+  handled="$home/state/$task.inbox/handled/002.msg"
+  [ -f "$rec" ] || [ -f "$handled" ] || {
+    printf 'not ok - %s (%s): the lagged steer left no durable inbox record\n' "$name" "$version" >&2
+    return 1
+  }
+  sleep 3
+  doorbell=$(fm_task_inbox_doorbell_line "$rec")
+  if ! FM_COMPOSER_HARNESS=$name fm_task_inbox_composer_holds tmux "$SESSION:$win" "$doorbell"; then
+    # Text other than whole doorbell copies (a truncated doorbell, a modal)
+    # will not be acked by waiting; the ring's handling of a truncated
+    # doorbell is proven deterministically in tests/fm-task-inbox.test.sh.
+    if [ ! -f "$handled" ] && [ "$(fm_tmux_composer_state "$SESSION:$win")" != empty ]; then
+      LAG_SKIP_REASON="the lag left text other than whole doorbell copies in the composer"
+      note "$name ($version): $LAG_SKIP_REASON; the lag phase is not exercised on this run"
+      tmux -L "$SOCKET" capture-pane -p -t "$SESSION:$win" 2>/dev/null | grep '[^[:space:]]' | tail -6 | sed 's/^/#   /'
+      return 2
+    fi
+    note "$name ($version): the lag did not strand its doorbell in the composer; stranding the next one deterministically"
+    i=0
+    while [ "$i" -lt "$TIMEOUT" ] && ! { [ -f "$handled" ] && [ -e "$acted" ]; }; do
+      sleep 1
+      i=$((i + 1))
+    done
+    if ! { [ -f "$handled" ] && [ -e "$acted" ]; }; then
+      printf 'not ok - %s (%s): a lagged doorbell neither held in the composer nor honored within %ss\n' "$name" "$version" "$TIMEOUT" >&2
+      tmux -L "$SOCKET" capture-pane -p -t "$SESSION:$win" 2>/dev/null | grep '[^[:space:]]' | tail -10 | sed 's/^/#   /' >&2
+      return 1
+    fi
+    rm -f "$acted"
+    # Never type into a composer not proven empty: an Enter-free doorbell
+    # over a modal or a draft would not be the state under test.
+    if ! wait_ready "$win"; then
+      LAG_SKIP_REASON="composer never read empty, so the stranded doorbell was not typed"
+      note "$name ($version): $LAG_SKIP_REASON; the re-ring half is not exercised here"
+      return 2
+    fi
+    rec=$(fm_task_inbox_write "$home/state" "$task" "$text") || {
+      printf 'not ok - %s (%s): could not enqueue the stranded-doorbell record\n' "$name" "$version" >&2
+      return 1
+    }
+    handled="$home/state/$task.inbox/handled/${rec##*/}"
+    doorbell=$(fm_task_inbox_doorbell_line "$rec")
+    tmux -L "$SOCKET" send-keys -t "$SESSION:$win" -l "$doorbell"
+    sleep 1
+    if ! FM_COMPOSER_HARNESS=$name fm_task_inbox_composer_holds tmux "$SESSION:$win" "$doorbell"; then
+      printf 'not ok - %s (%s): a doorbell typed without Enter did not read as held in the composer\n' "$name" "$version" >&2
+      return 1
+    fi
+    how=stranded
+  fi
+  lagged "$win" ring_as "$name" tmux "$SESSION:$win" "$rec" || true
+  i=0
+  while [ "$i" -lt "$TIMEOUT" ]; do
+    [ -f "$handled" ] && [ -e "$acted" ] && break
+    sleep 1
+    i=$((i + 1))
+  done
+  if [ -f "$handled" ] && [ -e "$acted" ]; then
+    pass "$name ($version): a doorbell left in its composer ($how) was submitted by one re-ring, acted on and acked"
+    return 0
+  fi
+  printf 'not ok - %s (%s): a doorbell left in a lagging composer was not honored after one re-ring within %ss (acted=%s acked=%s)\n' \
+    "$name" "$version" "$TIMEOUT" "$([ -e "$acted" ] && echo yes || echo no)" \
+    "$([ -f "$handled" ] && echo yes || echo no)" >&2
+  tmux -L "$SOCKET" capture-pane -p -t "$SESSION:$win" 2>/dev/null | grep '[^[:space:]]' | tail -10 | sed 's/^/#   /' >&2
+  return 1
+}
+
 check_harness_doorbell() {  # <name>
-  local name=$1 version cmd win="hx-$1" home task acted rec handled i ready_rc
+  local name=$1 version cmd win="hx-$1" home task acted rec handled i ready_rc lag_rc
   version=$(harness_version "$name")
   cmd=$(launch_cmd "$name") || { note "no launch recipe for $name"; return 0; }
   home="$LAB/$name-home"
@@ -187,8 +326,18 @@ check_harness_doorbell() {  # <name>
     i=$((i + 1))
   done
   if [ -f "$handled" ] && [ -e "$acted" ]; then
-    CHECKED=$((CHECKED + 1))
     pass "$name ($version): the doorbell reached a real worker, which acted and acked with the mv"
+    CHECKED=$((CHECKED + 1))
+    lag_rc=0
+    check_lagged_doorbell "$name" "$version" "$win" "$home" "$task" || lag_rc=$?
+    case "$lag_rc" in
+      0)
+        LAG_CHECKED=$((LAG_CHECKED + 1))
+        [ "$name" != codex ] || CODEX_LAG_CHECKED=1
+        ;;
+      1) FAILED=1 ;;
+      *) [ "$name" != codex ] || CODEX_LAG_SKIP=$LAG_SKIP_REASON ;;
+    esac
   else
     FAILED=1
     printf 'not ok - %s (%s): doorbell not honored within %ss (acted=%s acked=%s)\n' \
@@ -216,4 +365,14 @@ if [ "$CHECKED" -eq 0 ]; then
   printf 'not ok - live steering-inbox doorbell guard verified nothing (no harness installed?)\n' >&2
   exit 1
 fi
-pass "live steering-inbox doorbell guard: $CHECKED harness(es) honored the doorbell contract"
+case " $HARNESSES " in
+  *' codex '*)
+    if command -v codex >/dev/null 2>&1 && [ "$CODEX_LAG_CHECKED" -eq 0 ] && [ -n "$CODEX_LAG_SKIP" ]; then
+      note "codex lagged-doorbell re-ring not exercised on this run: $CODEX_LAG_SKIP"
+    elif command -v codex >/dev/null 2>&1 && [ "$CODEX_LAG_CHECKED" -eq 0 ]; then
+      printf 'not ok - the lagged-doorbell re-ring was never exercised against codex, whose paste-burst Enter swallow it exists for\n' >&2
+      exit 1
+    fi
+    ;;
+esac
+pass "live steering-inbox doorbell guard: $CHECKED harness(es) honored the doorbell contract, $LAG_CHECKED proved the lagged re-ring"
