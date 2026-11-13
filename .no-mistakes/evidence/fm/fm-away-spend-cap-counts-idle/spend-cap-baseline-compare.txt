@@ -1,0 +1,161 @@
+##### BASE 04fb5957
+=== S1: incident reproduction - 5 idle builders + 1 board-hosting idle scout, then /afk with no --spend ===
+crew-state readings:
+  board-scout  kind=scout      state: working · source: status-log · hosting the board
+  builder-1    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/1 ready
+  builder-2    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/2 ready
+  builder-3    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/3 ready
+  builder-4    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/4 ready
+  builder-5    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/5 ready
+$ fm-afk-contract.sh enter --words 'review the open PRs' --spend 4
+  Away posture recorded at 2026-11-13T00:10:58Z: hold-for-return only. No phone channel is configured; anything that needs you waits for your return. Your away instructions are recorded verbatim; the away session will carry them out where it can, and anything it is unsure of, or that needs you, waits for your return. Destructive, irreversible, and security-sensitive actions are never pre-authorizable, whatever the words say. Expected return: not given. Spend cap: 4 concurrent workers.
+  Away posture (recorded):
+    entered: 2026-11-13T00:10:58Z
+    expected return: not given
+    spend cap: 4 concurrent workers
+    reach: hold-for-return only. No phone channel is configured; anything that needs you waits for your return.
+    your words (verbatim):
+      review the open PRs
+$ fm-afk-contract.sh field spend_max_concurrent_workers -> 4
+$ fm-afk-contract.sh readback (spend line):
+    spend cap: 4 concurrent workers
+$ fm-afk-contract.sh live-workers -> 6
+$ fm-spawn.sh reviewer-1 --mode no-mistakes --yolo off
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  6 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: spawn refused - the away-posture record caps concurrent workers at 4 and 6 ordinary task(s) are live in this home; task reviewer-1 stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)
+  [fm-spawn exit=1]
+
+=== S2: cap still binds - 4 workers turn busy (harness busy) ===
+crew-state readings:
+  board-scout  kind=scout      state: working · source: pane · harness busy (claude-hook)
+  builder-1    kind=ship       state: working · source: pane · harness busy (claude-hook)
+  builder-2    kind=ship       state: working · source: pane · harness busy (claude-hook)
+  builder-3    kind=ship       state: working · source: pane · harness busy (claude-hook)
+  builder-4    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/4 ready
+  builder-5    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/5 ready
+$ fm-afk-contract.sh live-workers -> 6
+$ fm-spawn.sh reviewer-2 --mode no-mistakes --yolo off
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: spawn refused - the away-posture record caps concurrent workers at 4 and 6 ordinary task(s) are live in this home; task reviewer-2 stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)
+  [fm-spawn exit=1]
+
+=== S3: adversarial - one busy worker idles -> slot frees; unreadable busy record re-fills it ===
+$ (builder-3 harness idles) live-workers -> 6
+$ fm-spawn.sh reviewer-3
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: spawn refused - the away-posture record caps concurrent workers at 4 and 6 ordinary task(s) are live in this home; task reviewer-3 stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)
+  [fm-spawn exit=1]
+$ (builder-4 busy record corrupted -> unreadable) live-workers -> 6
+$ fm-spawn.sh reviewer-4
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: spawn refused - the away-posture record caps concurrent workers at 4 and 6 ordinary task(s) are live in this home; task reviewer-4 stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)
+  [fm-spawn exit=1]
+
+=== S4: adversarial - blocked-status worker with busy harness counts; secondmate never; killed endpoint frees slot ===
+crew-state readings:
+  board-scout  kind=scout      state: working · source: pane · harness busy (claude-hook)
+  builder-1    kind=ship       state: working · source: pane · harness busy (claude-hook)
+  builder-2    kind=ship       state: working · source: pane · harness busy (claude-hook)
+  builder-3    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/3 ready
+  builder-4    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/4 ready
+  builder-5    kind=ship       state: working · source: pane · harness busy (claude-hook)
+  mate         kind=secondmate state: unknown · source: none · no current-state source available
+$ live-workers -> 6   (expect 4: builder-1,2,5 + board-scout; secondmate excluded)
+$ (builder-5 window killed, confirmed missing) live-workers -> 6   (expect 3)
+
+=== S5: quiet-mode record never caps ===
+$ live-workers -> 6
+$ mode -> quiet
+$ fm-spawn.sh reviewer-5
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/tmp.LkLEvC7eFq/bin/fm-spawn.sh: line 2725: POS[1]: unbound variable
+  [fm-spawn exit=1]
+##### TARGET 6b551568
+=== S1: incident reproduction - 5 idle builders + 1 board-hosting idle scout, then /afk with no --spend ===
+crew-state readings:
+  board-scout  kind=scout      state: working · source: status-log · hosting the board
+  builder-1    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/1 ready
+  builder-2    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/2 ready
+  builder-3    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/3 ready
+  builder-4    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/4 ready
+  builder-5    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/5 ready
+$ fm-afk-contract.sh enter --words 'review the open PRs' --spend 4
+  Away posture recorded at 2026-11-13T00:11:16Z: hold-for-return only. No phone channel is configured; anything that needs you waits for your return. Your away instructions are recorded verbatim; the away session will carry them out where it can, and anything it is unsure of, or that needs you, waits for your return. Destructive, irreversible, and security-sensitive actions are never pre-authorizable, whatever the words say. Expected return: not given. Spend cap: 4 actively working workers (a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does).
+  Away posture (recorded):
+    entered: 2026-11-13T00:11:16Z
+    expected return: not given
+    spend cap: 4 actively working workers (a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does)
+    reach: hold-for-return only. No phone channel is configured; anything that needs you waits for your return.
+    your words (verbatim):
+      review the open PRs
+$ fm-afk-contract.sh field spend_max_concurrent_workers -> 4
+$ fm-afk-contract.sh readback (spend line):
+    spend cap: 4 actively working workers (a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does)
+$ fm-afk-contract.sh live-workers -> 1
+$ fm-spawn.sh reviewer-1 --mode no-mistakes --yolo off
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.eLhdkZ
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  6 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{run-worktree}/bin/fm-spawn.sh: line 2725: POS[1]: unbound variable
+  [fm-spawn exit=1]
+
+=== S2: cap still binds - 4 workers turn busy (harness busy) ===
+crew-state readings:
+  board-scout  kind=scout      state: working · source: pane · harness busy (claude-hook)
+  builder-1    kind=ship       state: working · source: pane · harness busy (claude-hook)
+  builder-2    kind=ship       state: working · source: pane · harness busy (claude-hook)
+  builder-3    kind=ship       state: working · source: pane · harness busy (claude-hook)
+  builder-4    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/4 ready
+  builder-5    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/5 ready
+$ fm-afk-contract.sh live-workers -> 4
+$ fm-spawn.sh reviewer-2 --mode no-mistakes --yolo off
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.eLhdkZ
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: spawn refused - the away-posture record caps actively working workers at 4 and 4 ordinary worker(s) are actively working in this home (a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does); task reviewer-2 stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)
+  [fm-spawn exit=1]
+
+=== S3: adversarial - one busy worker idles -> slot frees; unreadable busy record re-fills it ===
+$ (builder-3 harness idles) live-workers -> 3
+$ fm-spawn.sh reviewer-3
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.eLhdkZ
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+{run-worktree}/bin/fm-spawn.sh: line 2725: POS[1]: unbound variable
+  [fm-spawn exit=1]
+$ (builder-4 busy record corrupted -> unreadable) live-workers -> 4
+$ fm-spawn.sh reviewer-4
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.eLhdkZ
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: spawn refused - the away-posture record caps actively working workers at 4 and 4 ordinary worker(s) are actively working in this home (a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does); task reviewer-4 stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)
+  [fm-spawn exit=1]
+
+=== S4: adversarial - blocked-status worker with busy harness counts; secondmate never; killed endpoint frees slot ===
+crew-state readings:
+  board-scout  kind=scout      state: working · source: pane · harness busy (claude-hook)
+  builder-1    kind=ship       state: working · source: pane · harness busy (claude-hook)
+  builder-2    kind=ship       state: working · source: pane · harness busy (claude-hook)
+  builder-3    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/3 ready
+  builder-4    kind=ship       state: blocked · source: status-log · PR https://github.com/o/r/pull/4 ready
+  builder-5    kind=ship       state: working · source: pane · harness busy (claude-hook)
+  mate         kind=secondmate state: unknown · source: none · no current-state source available
+$ live-workers -> 4   (expect 4: builder-1,2,5 + board-scout; secondmate excluded)
+$ (builder-5 window killed, confirmed missing) live-workers -> 3   (expect 3)
+
+=== S5: quiet-mode record never caps ===
+$ live-workers -> 5
+$ mode -> quiet
+$ fm-spawn.sh reviewer-5
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.eLhdkZ
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+{run-worktree}/bin/fm-spawn.sh: line 2725: POS[1]: unbound variable
+  [fm-spawn exit=1]
