@@ -218,7 +218,9 @@
 #   per-home task-set lock and refuses rather than waits when another operation
 #   owns it. The refusal names another spawn or forced teardown when the recorded
 #   holder role is known, otherwise another operation. --relaunch is exempt
-#   because the existing task's control lock covers it.
+#   because the existing task's control lock covers it, except while an away
+#   record stands, when it takes the task-set lock first so its spend-cap
+#   decision serializes with other launches, deferring with exit 75 when held.
 #   A fresh Treehouse-backed spawn also takes the project-identity lock in the local
 #   root Firstmate home's state directory before slot allocation and holds it through
 #   task metadata publication. Teardown holds that same lock while proving and
@@ -2308,11 +2310,12 @@ spawn_refuse_if_away_spend_cap() {
 # and exit 75, after adopting the task's kind and endpoint but before anything
 # is launched or rewritten, so the record, local copy, and unlanded work stay as
 # they were. A relaunch through bin/fm-control.sh was already decided there,
-# before the old agent stopped. A secondmate is a persistent home rather than
+# before the old agent stopped, under the task-set lock it holds through this
+# publication. A secondmate is a persistent home rather than
 # spend, so it is exempt. A fresh spawn is checked before any endpoint,
 # worktree, or record exists, so a refusal costs nothing to unwind, and
-# rechecked after the task-set lock so two fresh spawns cannot both publish
-# from a stale count.
+# rechecked after the task-set lock so no two launches can both publish from a
+# stale count; a relaunch decides under that same lock.
 [ "$RELAUNCH" -eq 1 ] || spawn_refuse_if_away_spend_cap
 spawn_require_relocated_queued_work() {
   local actor
@@ -2328,6 +2331,22 @@ spawn_require_relocated_queued_work() {
     exit 1
   fi
 }
+# A direct relaunch while an away record stands takes the task-set lock before
+# the task's control lock, the order bin/fm-teardown.sh documents, and holds it
+# through publication, so its spend-cap decision and every other launch's
+# serialize (the spend-cap comment above owns why).
+spawn_hold_task_set_for_relaunch() {
+  [ -f "$STATE/.afk-contract" ] || return 0
+  SPAWN_TASK_SET_LOCK=$(fm_task_set_lock_path "$STATE") || {
+    echo "error: could not resolve the task-set lock for $STATE" >&2
+    exit 1
+  }
+  if ! fm_lock_try_acquire "$SPAWN_TASK_SET_LOCK"; then
+    echo "deferred: relaunch of $ID waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh)" >&2
+    return 1
+  fi
+  SPAWN_TASK_SET_LOCK_HELD=1
+}
 if [ "$RELAUNCH" -eq 1 ]; then
   SPAWN_CONTROL_LOCK="$STATE/.control-$ID.lock"
   control_owner=$(cat "$SPAWN_CONTROL_LOCK/pid" 2>/dev/null || true)
@@ -2339,6 +2358,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # this entrypoint directly (contract: bin/fm-lease-lib.sh).
     echo "error: relaunch (fm-spawn) refused - the supervision branch must relaunch through fm-control" >&2
     exit "$FM_LEASE_REFUSE_EXIT"
+  elif ! spawn_hold_task_set_for_relaunch; then
+    exit 75
   elif fm_lock_try_acquire "$SPAWN_CONTROL_LOCK"; then
     SPAWN_CONTROL_LOCK_HELD=1
   else

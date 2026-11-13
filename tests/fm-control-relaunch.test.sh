@@ -3615,6 +3615,8 @@ test_away_relaunch_of_a_dead_worker_below_the_cap_proceeds() {
 
   expect_code 0 "$rc" "a dead worker's relaunch below the away cap should proceed"$'\n'"$out"
   assert_contains "$out" "relaunched rl-cap-room harness=claude" "the dead worker should have been relaunched"
+  [ ! -e "$dir/home/state/.task-set.lock" ] \
+    || fail "a relaunch must release the home's task-set lock once its replacement is published"
   pass "fm-control relaunch: a dead worker is relaunched while the away cap has room"
 }
 
@@ -3633,6 +3635,69 @@ test_away_direct_spawn_relaunch_of_a_dead_worker_at_a_full_cap_defers() {
     || fail "a deferred direct relaunch must leave the record, instructions, local copy, and state directory exactly as they were"
   assert_no_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "a deferred direct relaunch must launch nothing"
   pass "fm-spawn --relaunch: a dead worker's direct relaunch at a full away cap defers with exit 75 and touches nothing"
+}
+
+# Another launch in flight holds this home's task-set lock through its record's
+# publication (bin/fm-spawn.sh). The holder must stay alive, because
+# fm_lock_try_acquire reclaims a lock whose owning pid is gone.
+hold_home_task_set_lock() {  # <case-dir> -> echoes the holder pid
+  local lock="$1/home/state/.task-set.lock" i=0 holder
+  (
+    # shellcheck source=/dev/null
+    . "$ROOT/bin/fm-wake-lib.sh"
+    fm_lock_try_acquire "$lock" || exit 1
+    sleep 30
+  ) >/dev/null 2>&1 &
+  holder=$!
+  while [ ! -s "$lock/pid" ] && [ "$i" -lt 100 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ -s "$lock/pid" ] || fail "the stand-in launch could not take the task-set lock"
+  printf '%s\n' "$holder"
+}
+
+test_away_relaunch_defers_while_another_launch_takes_the_last_slot() {
+  local dir out rc before holder
+  local -x FM_AFK_CONTRACT_CREW_STATE_BIN
+  dir=$(away_cap_case away-race-control rl-cap-race 2 1 dead)
+  FM_AFK_CONTRACT_CREW_STATE_BIN=$(away_crew_state_stub "$dir")
+  before=$(away_cap_snapshot "$dir" rl-cap-race)
+  holder=$(hold_home_task_set_lock "$dir")
+
+  out=$(run_control "$dir" rl-cap-race relaunch --note "continue after the crash"); rc=$?
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+
+  expect_code 75 "$rc" "a dead worker's relaunch must not take the last slot while another launch is publishing"$'\n'"$out"
+  assert_contains "$out" "deferred: relaunch of rl-cap-race waits" "the relaunch should defer rather than fail"
+  [ "$before" = "$(away_cap_snapshot "$dir" rl-cap-race)" ] \
+    || fail "a relaunch deferred by a concurrent launch must leave the record, instructions, local copy, and state directory exactly as they were"
+  [ "$(cat "$dir/fake/command")" = zsh ] || fail "a relaunch deferred by a concurrent launch must start no agent"
+
+  out=$(run_control "$dir" rl-cap-race relaunch --note "continue after the crash"); rc=$?
+  expect_code 0 "$rc" "once the other launch is done the relaunch should proceed"$'\n'"$out"
+  pass "fm-control relaunch: a dead worker's relaunch defers while another launch holds the away cap's last slot"
+}
+
+test_away_direct_spawn_relaunch_defers_while_another_launch_takes_the_last_slot() {
+  local dir out rc before holder
+  local -x FM_AFK_CONTRACT_CREW_STATE_BIN
+  dir=$(away_cap_case away-race-spawn rl-cap-race-spawn 2 1 dead)
+  FM_AFK_CONTRACT_CREW_STATE_BIN=$(away_crew_state_stub "$dir")
+  before=$(away_cap_snapshot "$dir" rl-cap-race-spawn)
+  holder=$(hold_home_task_set_lock "$dir")
+
+  out=$(run_spawn "$dir" rl-cap-race-spawn --relaunch); rc=$?
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+
+  expect_code 75 "$rc" "a direct relaunch must not take the last slot while another launch is publishing"$'\n'"$out"
+  assert_contains "$out" "deferred: relaunch of rl-cap-race-spawn waits" "the direct relaunch should defer rather than fail"
+  [ "$before" = "$(away_cap_snapshot "$dir" rl-cap-race-spawn)" ] \
+    || fail "a direct relaunch deferred by a concurrent launch must leave the record, instructions, local copy, and state directory exactly as they were"
+  assert_no_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "a deferred direct relaunch must launch nothing"
+  pass "fm-spawn --relaunch: a dead worker's direct relaunch defers while another launch holds the away cap's last slot"
 }
 
 test_exit_and_relaunch_remove_the_dialog_file() {
@@ -3794,3 +3859,5 @@ test_away_relaunch_of_a_dead_worker_at_a_full_cap_defers_and_touches_nothing
 test_away_relaunch_of_a_counted_worker_at_a_full_cap_proceeds
 test_away_relaunch_of_a_dead_worker_below_the_cap_proceeds
 test_away_direct_spawn_relaunch_of_a_dead_worker_at_a_full_cap_defers
+test_away_relaunch_defers_while_another_launch_takes_the_last_slot
+test_away_direct_spawn_relaunch_defers_while_another_launch_takes_the_last_slot
