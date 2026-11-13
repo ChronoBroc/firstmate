@@ -1565,6 +1565,8 @@ if ! pane_readable "$BACKEND_TARGET"; then
   # contract. Backends with no classifier (orca, zellij, cmux, and paseo all
   # report unverified, and tern's classifier is not promoted to recovery grade)
   # keep their historical capture-failure-means-gone reading.
+  # The "backend target gone" detail prefix is read as a dead worker by the away
+  # spend cap (fm_afk_contract_reading_counts in bin/fm-afk-contract.sh).
   case "$TASK_BACKEND" in
     tmux|herdr|rex|t3code) AGENT_STATE=$(fm_backend_agent_state "$TASK_BACKEND" "$BACKEND_TARGET" "$META") ;;
     *) AGENT_STATE=none ;;
@@ -1621,4 +1623,6 @@ if [ -n "$LOG_VERB" ]; then
   fi
 fi
 
+# The away spend cap reads this exact line as an idle worker
+# (fm_afk_contract_reading_counts in bin/fm-afk-contract.sh).
 emit unknown none "no current-state source available"
