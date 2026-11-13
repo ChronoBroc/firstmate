@@ -15,7 +15,8 @@
 # tasks, which already run at T3's full-access mode, refuse.
 # The existing task lease guard protects configuration publication. Release its
 # command lock before invoking child lifecycle commands, which guard themselves.
-# A lifecycle failure leaves the setting saved and reports incomplete recovery.
+# A lifecycle failure leaves the setting saved and reports incomplete recovery;
+# a relaunch the away spend cap defers exits 75 as a wait, with the work kept.
 set -eu
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 case "${1:-}" in
@@ -87,9 +88,23 @@ printf 'saved config/%s=%s; approvals use a model reviewer\n' "$SETTING" "$FALLB
 fm_lease_guard_release
 # Cancel the pending approval/refused turn so guarded relaunch can exit the
 # composer without accepting the blocked command or typing into its dialog.
-if ! "$SCRIPT_DIR/fm-control.sh" "$ID" interrupt \
-  || ! "$SCRIPT_DIR/fm-control.sh" "$ID" relaunch --note "Managed bypass failed; config/$SETTING now selects $FALLBACK. Preserve all work and continue the assigned task."; then
+if ! "$SCRIPT_DIR/fm-control.sh" "$ID" interrupt; then
   echo 'error: fallback saved, but worker recovery failed; preserve work and reconcile through fm-control' >&2
   exit 1
 fi
+relaunch_rc=0
+"$SCRIPT_DIR/fm-control.sh" "$ID" relaunch --note "Managed bypass failed; config/$SETTING now selects $FALLBACK. Preserve all work and continue the assigned task." || relaunch_rc=$?
+case "$relaunch_rc" in
+  0) ;;
+  75)
+    # The away spend cap deferred the replacement (bin/fm-control.sh relaunch):
+    # nothing was stopped or discarded, so this is a wait, not a failure.
+    echo "deferred: fallback saved; the relaunch of $ID waits under the away spend cap with its work kept - relaunch it through fm-control once a worker finishes or at the captain's return" >&2
+    exit 75
+    ;;
+  *)
+    echo 'error: fallback saved, but worker recovery failed; preserve work and reconcile through fm-control' >&2
+    exit 1
+    ;;
+esac
 printf 'managed approval failover: %s relaunched with config/%s=%s\n' "$ID" "$SETTING" "$FALLBACK"

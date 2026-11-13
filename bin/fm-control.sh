@@ -88,6 +88,16 @@
 #              Claude ship or scout keeps the account its record names, and
 #              only an explicit --account <entry> moves it to another
 #              declared one, checked here the same way.
+#              While an away record stands, an ordinary task's relaunch is
+#              exempt from the spend cap only when its worker is actively
+#              working at that moment, since the replacement then takes a
+#              counted place; otherwise it meets the cap like a fresh spawn
+#              and, when the cap is full, prints `deferred:` and exits 75
+#              before anything is touched, so the agent, record, local copy,
+#              and unlanded work stay as they were (bin/fm-afk-contract.sh
+#              SPEND CAP owns the rule). Treat that exit as a wait for a worker
+#              to finish or the captain's return, never as a failed relaunch
+#              to retry. A secondmate is exempt.
 #              A replacement omp secondmate likewise passes its per-secondmate
 #              omp profile pin (bin/fm-omp-profile-lib.sh) before the old agent
 #              stops.
@@ -1226,6 +1236,15 @@ do_relaunch() {
   fm_control_backend_relaunch_supported "$BACKEND" \
     || die "task $ID runs on the $BACKEND backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch"
   resolve_relaunch_profile
+
+  # The away spend cap is decided here, while the old agent still runs: once it
+  # is stopped every replaced worker reads as dead, so fm-spawn trusts this
+  # answer for a relaunch it launches on this transaction's behalf.
+  case "$KIND" in
+    ship|scout)
+      FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || exit 75
+      ;;
+  esac
 
   case "$KIND" in
     ship|scout)

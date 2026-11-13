@@ -84,6 +84,8 @@ A relaunch does take one session reference when the endpoint's own runtime recor
    Under a declared [Claude account list](configuration.md#several-claude-accounts-configclaude-accounts), a Claude ship or scout keeps its recorded account, and `--account <entry>` moves it to another declared one after the same check.
    An omp secondmate replacement likewise passes its [per-secondmate omp profile](configuration.md#per-secondmate-omp-profile) file check before the old agent stops.
    Ship and scout replacements also pass the [worker tool exclusion checks](configuration.md#worker-tool-exclusions-configcrew-exclude-tools) at this step.
+   While an away record stands, a ship or scout relaunch also meets the away spend cap here, while the old agent still runs: it is exempt only when that worker is actively working, and otherwise, with the cap full, it prints `deferred:` and exits 75 before anything is touched ([`bin/fm-afk-contract.sh`](../bin/fm-afk-contract.sh) SPEND CAP owns the rule).
+   That exit is a wait for a worker to finish or for the captain's return, not a failed relaunch.
 2. **Safe checkpoint.**
    The recorded worktree must exist and be a worktree root; its head and dirty state are recorded.
    For a `kind=secondmate` task, the home's identity marker must match and its child records must be readable, so a relaunch can never strand child work behind an unreadable home.
