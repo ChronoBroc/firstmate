@@ -392,7 +392,9 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 # empty cursor row the classifier reads as `unknown`. Typing over it stacked
 # one more copy per ring, and a stack never matched a single doorbell once it
 # read `pending`, so every later ring skipped it until a human pressed Enter.
-# A lone Enter cannot join a paste burst. On both paths a doorbell still in
+# A lone Enter cannot join a paste burst. Our doorbell held behind other text
+# (a truncated earlier copy) is never typed over or submitted and returns 2.
+# On both paths a doorbell still in
 # the composer after three spaced lone Enters returns 2, so the caller reports
 # it undelivered and the re-ring ladder retries and escalates it, unless
 # fm_composer_queued_enter_verdict reads it as accepted and queued by a busy
@@ -413,6 +415,14 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
     return
   fi
   [ "$cstate" != pending ] || return 1
+  # Our doorbell still in the composer behind other text (a truncated earlier
+  # copy, say) is an earlier ring that never submitted. That text is not ours
+  # to submit and typing over it only stacks another copy, so report the
+  # doorbell undelivered and let the re-ring ladder escalate it.
+  if [ "$cstate" != empty ] \
+    && fm_task_inbox_composer_has_doorbell "$backend" "$target" "$line" "$label"; then
+    return 2
+  fi
   # Accepted residual race: terminal input and Enter are separate delivery
   # steps, so an agent exiting after the liveness check could leave a bare
   # shell only a suffix; the `: ` prefix protects complete lines only. Do not
@@ -425,7 +435,8 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
   # composer itself says whether the Enter was swallowed.
   [ "$verdict" != send-failed ] || return 2
   if [ "$verdict" != empty ] \
-    && fm_task_inbox_composer_holds "$backend" "$target" "$line" "$label"; then
+    && fm_task_inbox_composer_has_doorbell "$backend" "$target" "$line" "$label"; then
+    fm_task_inbox_composer_holds "$backend" "$target" "$line" "$label" || return 2
     fm_task_inbox_submit_held "$backend" "$target" "$line" "$label"
     return
   fi
@@ -467,6 +478,22 @@ fm_task_inbox_composer_holds() {  # <backend> <target> <line> [expected-label]
       *) return 1 ;;
     esac
   done
+}
+
+# Whether the composer's content, ignoring whitespace and line wrapping,
+# contains <line> anywhere.
+fm_task_inbox_composer_has_doorbell() {  # <backend> <target> <line> [expected-label]
+  local cap held want
+  fm_backend_source "$1" || return 1
+  cap=$(fm_backend_capture "$1" "$2" "$FM_COMPOSER_CAPTURE_LINES" "${4:-}" 2>/dev/null) || return 1
+  held=$(fm_composer_extract_selected_content styled=0 "$cap") || return 1
+  held=$(printf '%s' "$held" | tr -d '[:space:]')
+  want=$(printf '%s' "$3" | tr -d '[:space:]')
+  [ -n "$want" ] || return 1
+  case "$held" in
+    *"$want"*) return 0 ;;
+  esac
+  return 1
 }
 
 fm_task_inbox_is_fire_and_forget() {  # <record-path>

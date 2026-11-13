@@ -482,6 +482,20 @@ test_ring_never_stacks_unsubmitted_doorbells() {
   [ ! -s "$log" ] || fail "nothing should have been submitted:"$'\n'"$(cat "$log")"
   [ "$(tr -d '[:space:]' < "$composer")" = "$(printf '%s' "$doorbell" | tr -d '[:space:]')" ] \
     || fail "re-rings stacked doorbell copies in the composer:"$'\n'"$(cat "$composer")"
+
+  # A truncated doorbell left above the cursor row (seen live on Codex) is
+  # not a whole copy of ours, so it is never submitted on its own. A ring
+  # whose own doorbell then also fails to leave the composer must report it
+  # undelivered, never rung, and a re-ring must not stack another copy.
+  : > "$log"; printf '%s\n' "${doorbell:0:120}" > "$composer"; echo 99 > "$newlines"
+  rc=0; ring || rc=$?
+  [ "$rc" = 2 ] || fail "a doorbell stuck behind a truncated copy must be reported as not delivered, got rc $rc"
+  held=$(tr -d '[:space:]' < "$composer")
+  rc=0; ring || rc=$?
+  [ "$rc" = 2 ] || fail "a re-ring over a doorbell stuck behind a truncated copy must report not delivered, got rc $rc"
+  [ "$(tr -d '[:space:]' < "$composer")" = "$held" ] \
+    || fail "a re-ring typed over a doorbell stuck behind a truncated copy:"$'\n'"$(cat "$composer")"
+  [ ! -s "$log" ] || fail "a truncated doorbell must never be submitted:"$'\n'"$(cat "$log")"
   pass "inbox: the ring submits stacked or newline-swallowed doorbells with a lone Enter, never types over them, and reports one it cannot submit"
 }
 
