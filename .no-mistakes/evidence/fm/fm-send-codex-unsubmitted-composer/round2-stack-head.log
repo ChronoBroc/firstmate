@@ -1,0 +1,31 @@
+# root={run-worktree} mode=stack codex-cli 0.167.2 ready=empty
+## composer BEFORE ring (state=pending)
+#     permissions: YOLO mode
+#   ⚠ Heads up, you have less than 10% of your weekly limit left. Run /status for a breakdown.
+#                                                                                                                                                              ⚠ weekly limit: 9% left · resets at 11:30 AM on 17 Nov · /status
+#   › : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.: Firstmate instruction waiting: list
+#     "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.: Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering
+#     inbox, read and act on each in numeric order, then mv each into its handled/.: Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then
+#     mv each into its handled/.
+#     GPT-6-Astra medium · ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#                                                                                                                                                                                                     ⚠ 5 warnings · f2 to view
+## ring rc=0
+#   › : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.: Firstmate instruction waiting: list
+#     "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.: Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering
+#     inbox, read and act on each in numeric order, then mv each into its handled/.: Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then
+#     mv each into its handled/.
+#   • Working (0s • esc to interrupt)
+#                                                                                                                                                              ⚠ weekly limit: 9% left · resets at 11:30 AM on 17 Nov · /status
+#   › Ask Codex to do anything
+#     GPT-6-Astra medium · ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#     ← for agents · ? for shortcuts                                                                                                                                                                  ⚠ 5 warnings · f2 to view
+## after 20s: acted=yes acked=yes
+#       + 2 lines (⌃t to expand)
+#   • Ran touch /private/tmp/fm-stack.1Vki9L/acted …
+#     └ (no output)
+#       + Show details
+#   • Working (20s • esc to interrupt)
+#                                                                                                                                                              ⚠ weekly limit: 9% left · resets at 11:30 AM on 17 Nov · /status
+#   › Ask Codex to do anything
+#     GPT-6-Astra medium · ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ · Process steering inbox
+#     ← for agents · ? for shortcuts                                                                                                                                                                  ⚠ 5 warnings · f2 to view

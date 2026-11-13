@@ -1,0 +1,4 @@
+ok - codex (codex-cli 0.167.0): the doorbell reached a real worker, which acted and acked with the mv
+ok - codex (codex-cli 0.167.0): a doorbell a lagging worker left in its composer was submitted by one re-ring, acted on and acked
+ok - live steering-inbox doorbell guard: 1 harness(es) honored the doorbell contract, 1 proved the lagged re-ring
+exit=0

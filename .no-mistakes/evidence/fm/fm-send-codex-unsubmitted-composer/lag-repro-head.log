@@ -1,0 +1,29 @@
+## ready verdict=empty after 2s
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fm-lagrepro.GZUMl9/home
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the requested message WILL still be sent.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## attempt 1 record=/private/tmp/fm-lagrepro.GZUMl9/home/state/t1.inbox/001.msg composer=unknown
+## holds-exact-doorbell=yes
+## extracted composer content: [: Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.]
+## expected doorbell:          [: Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.]
+#   ⚠ Heads up, you have less than 10% of your weekly limit left. Run /status for a breakdown.
+#     >_ OpenAI Codex (v0.167.2)
+#        ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#     permissions: YOLO mode
+#                                                                                                                                                              ⚠ weekly limit: 9% left · resets at 11:30 AM on 17 Nov · /status
+#   › : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.
+#     GPT-6-Astra medium · ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#                                                                                                                                                                                                     ⚠ 5 warnings · f2 to view
+## re-ring rc=0
+## after 13s handled=yes
+#       + Show details
+#   • Working (13s • esc to interrupt)
+#                                                                                                                                                              ⚠ weekly limit: 9% left · resets at 11:30 AM on 17 Nov · /status
+#   › Ask Codex to do anything
+#     GPT-6-Astra medium · ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ · Process inbox tasks
+#     ← for agents · ? for shortcuts                                                                                                                                                                  ⚠ 5 warnings · f2 to view

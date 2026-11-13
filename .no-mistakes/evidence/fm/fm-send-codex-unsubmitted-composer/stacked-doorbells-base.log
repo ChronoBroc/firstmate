@@ -1,0 +1,31 @@
+# root=/tmp/fmbase scenario=stack codex=codex-cli 0.167.2
+## composer BEFORE ring (state=pending)
+#     permissions: YOLO mode
+#                                                                                                                                                              ⚠ weekly limit: 9% left · resets at 11:30 AM on 17 Nov · /status
+#   › : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'drv.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/. : Firstmate instruction waiting: list
+#     "$FM_TASK_INBOX"/*.msg in your 'drv.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/. : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'drv.inbox'
+#     steering inbox, read and act on each in numeric order, then mv each into its handled/. : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'drv.inbox' steering inbox, read and act on each in numeric
+#     order, then mv each into its handled/.
+#     GPT-6-Astra medium · ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#                                                                                                                                                                                                     ⚠ 5 warnings · f2 to view
+## ring rc=1
+## composer right AFTER ring
+#     permissions: YOLO mode
+#                                                                                                                                                              ⚠ weekly limit: 9% left · resets at 11:30 AM on 17 Nov · /status
+#   › : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'drv.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/. : Firstmate instruction waiting: list
+#     "$FM_TASK_INBOX"/*.msg in your 'drv.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/. : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'drv.inbox'
+#     steering inbox, read and act on each in numeric order, then mv each into its handled/. : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'drv.inbox' steering inbox, read and act on each in numeric
+#     order, then mv each into its handled/.
+#     GPT-6-Astra medium · ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#                                                                                                                                                                                                     ⚠ 5 warnings · f2 to view
+## after 45s: acted=no acked=no
+#     >_ OpenAI Codex (v0.167.2)
+#        ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#     permissions: YOLO mode
+#                                                                                                                                                              ⚠ weekly limit: 9% left · resets at 11:30 AM on 17 Nov · /status
+#   › : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'drv.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/. : Firstmate instruction waiting: list
+#     "$FM_TASK_INBOX"/*.msg in your 'drv.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/. : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'drv.inbox'
+#     steering inbox, read and act on each in numeric order, then mv each into its handled/. : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'drv.inbox' steering inbox, read and act on each in numeric
+#     order, then mv each into its handled/.
+#     GPT-6-Astra medium · ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#                                                                                                                                                                                                     ⚠ 5 warnings · f2 to view

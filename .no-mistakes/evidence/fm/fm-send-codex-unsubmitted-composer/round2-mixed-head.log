@@ -1,0 +1,28 @@
+# root={run-worktree} mode=mixed codex-cli 0.167.2 ready=empty
+## composer BEFORE ring (state=pending)
+#     >_ OpenAI Codex (v0.167.2)
+#        ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#     permissions: YOLO mode
+#   ⚠ Heads up, you have less than 10% of your weekly limit left. Run /status for a breakdown.
+#                                                                                                                                                              ⚠ weekly limit: 9% left · resets at 11:30 AM on 17 Nov · /status
+#   › : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/. my own draft words
+#     GPT-6-Astra medium · ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#                                                                                                                                                                                                     ⚠ 5 warnings · f2 to view
+## ring rc=1
+#     >_ OpenAI Codex (v0.167.2)
+#        ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#     permissions: YOLO mode
+#   ⚠ Heads up, you have less than 10% of your weekly limit left. Run /status for a breakdown.
+#                                                                                                                                                              ⚠ weekly limit: 9% left · resets at 11:30 AM on 17 Nov · /status
+#   › : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/. my own draft words
+#     GPT-6-Astra medium · ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#                                                                                                                                                                                                     ⚠ 5 warnings · f2 to view
+## after 15s: acted=no acked=no
+#     >_ OpenAI Codex (v0.167.2)
+#        ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#     permissions: YOLO mode
+#   ⚠ Heads up, you have less than 10% of your weekly limit left. Run /status for a breakdown.
+#                                                                                                                                                              ⚠ weekly limit: 9% left · resets at 11:30 AM on 17 Nov · /status
+#   › : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/. my own draft words
+#     GPT-6-Astra medium · ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ
+#                                                                                                                                                                                                     ⚠ 5 warnings · f2 to view

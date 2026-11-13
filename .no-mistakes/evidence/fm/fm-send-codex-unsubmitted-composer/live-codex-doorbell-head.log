@@ -1,0 +1,4 @@
+ok - codex (codex-cli 0.167.0): the doorbell reached a real worker, which acted and acked with the mv
+# codex (codex-cli 0.167.0): the lagged doorbell did not stay in the composer, so the re-ring half is not exercised here
+not ok - the lagged-doorbell re-ring was never exercised against codex, whose paste-burst Enter swallow it exists for
+exit=1

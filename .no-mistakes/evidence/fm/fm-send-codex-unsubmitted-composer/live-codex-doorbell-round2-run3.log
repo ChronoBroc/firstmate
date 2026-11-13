@@ -1,0 +1,15 @@
+ok - codex (codex-cli 0.167.2): the doorbell reached a real worker, which acted and acked with the mv
+# codex (codex-cli 0.167.2): the lag did not strand its doorbell in the composer; stranding the next one deterministically
+not ok - codex (codex-cli 0.167.2): a lagged doorbell neither held in the composer nor honored within 150s
+#   • Ran mkdir -p "$FM_TASK_INBOX/handled" && mv "$FM_TASK_INBOX/001.msg" "$FM_TASK_INBOX/handled/"
+#     └ (no output)
+#   • Captain, executed the instruction and moved 001.msg into handled/.
+#     Worked for 28s • 6:51 PM
+#     Approaching rate limits
+#     Switch to gpt-6-luna for lower credit usage?
+#   › 1. Switch to gpt-6-luna                   Fast and affordable model for easier tasks.
+#     2. Keep current model
+#     3. Keep current model (never show again)  Hide future rate limit reminders about switching models
+#     enter select · esc back
+not ok - live steering-inbox doorbell guard found failures above
+exit=1

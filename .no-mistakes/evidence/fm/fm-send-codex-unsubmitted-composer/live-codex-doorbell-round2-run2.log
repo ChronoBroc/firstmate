@@ -1,0 +1,15 @@
+ok - codex (codex-cli 0.167.2): the doorbell reached a real worker, which acted and acked with the mv
+# codex (codex-cli 0.167.2): the lag did not strand its doorbell in the composer; stranding the next one deterministically
+not ok - codex (codex-cli 0.167.2): a lagged doorbell neither held in the composer nor honored within 240s
+#   • Ran touch /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-inbox-live.fWcYcM/acted-codex
+#     └ (no output)
+#   • Ran mkdir -p "$FM_TASK_INBOX/handled" && mv "$FM_TASK_INBOX/001.msg" "$FM_TASK_INBOX/handled/"
+#     └ (no output)
+#   • Captain, executed the live check and moved 001.msg into handled/.
+#     Worked for 12s • 6:37 PM
+#                                                                                                                                                              ⚠ weekly limit: 9% left · resets at 11:30 AM on 17 Nov · /status
+#   › : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 'live-codex.inbox' steering inbox, read and act on ea
+#     GPT-6-Luna medium · ~/.no-mistakes/worktrees/af987dfc3730/01M792B19RSX9XH0F21Z701JRZ · Process steering inbox
+#                                                                                                                                                                                                     ⚠ 5 warnings · f2 to view
+not ok - live steering-inbox doorbell guard found failures above
+exit=1
