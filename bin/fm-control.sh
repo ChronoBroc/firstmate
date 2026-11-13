@@ -88,6 +88,21 @@
 #              Claude ship or scout keeps the account its record names, and
 #              only an explicit --account <entry> moves it to another
 #              declared one, checked here the same way.
+#              While an away record stands, an ordinary task's relaunch is
+#              exempt from the spend cap only when its worker is actively
+#              working at that moment, since the replacement then takes a
+#              counted place; otherwise it meets the cap like a fresh spawn
+#              and, when the cap is full, prints `deferred:` and exits 75
+#              before anything is touched, so the agent, record, local copy,
+#              and unlanded work stay as they were (bin/fm-afk-contract.sh
+#              SPEND CAP owns the rule). Treat that exit as a wait for a worker
+#              to finish or the captain's return, never as a failed relaunch
+#              to retry. A secondmate is exempt. While a record stands, the
+#              relaunch takes this home's task-set lock before the task's
+#              control lock and holds it until the replacement's record is
+#              published, so no other launch decides against the same count;
+#              when another launch or teardown holds it, the relaunch prints
+#              `deferred:` and exits 75 the same way.
 #              A replacement omp secondmate likewise passes its per-secondmate
 #              omp profile pin (bin/fm-omp-profile-lib.sh) before the old agent
 #              stops.
@@ -223,8 +238,16 @@ die() {  # <message>
 
 CONTROL_LOCK=
 CONTROL_LOCK_HELD=0
+TASK_SET_LOCK=
+TASK_SET_LOCK_HELD=0
 RELAUNCH_ACTIVE=0
 RELAUNCH_PHASE=start
+
+release_task_set_lock() {
+  [ "$TASK_SET_LOCK_HELD" = 1 ] || return 0
+  TASK_SET_LOCK_HELD=0
+  fm_lock_release "$TASK_SET_LOCK" || true
+}
 
 control_cleanup() {
   local status=$?
@@ -241,6 +264,7 @@ control_cleanup() {
     CONTROL_LOCK_HELD=0
     fm_lock_release "$CONTROL_LOCK" || true
   fi
+  release_task_set_lock
   if declare -F fm_lease_guard_release >/dev/null 2>&1; then
     fm_lease_guard_release || true
   fi
@@ -353,6 +377,14 @@ ID=$RAW_ID
 fm_lease_guard "$ID" "lifecycle control (fm-control)"
 CONTROL_LOCK="$STATE/.control-$ID.lock"
 trap control_cleanup EXIT
+if [ "$VERB" = relaunch ] && [ -f "$STATE/.afk-contract" ]; then
+  TASK_SET_LOCK=$(fm_task_set_lock_path "$STATE") || die "could not resolve the task-set lock for $STATE"
+  if ! fm_lock_try_acquire "$TASK_SET_LOCK"; then
+    echo "deferred: relaunch of $ID waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh)" >&2
+    exit 75
+  fi
+  TASK_SET_LOCK_HELD=1
+fi
 fm_lock_try_acquire "$CONTROL_LOCK" \
   || die "another lifecycle action is already running for task $ID"
 CONTROL_LOCK_HELD=1
@@ -1227,6 +1259,17 @@ do_relaunch() {
     || die "task $ID runs on the $BACKEND backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch"
   resolve_relaunch_profile
 
+  # The away spend cap is decided here, while the old agent still runs: once it
+  # is stopped every replaced worker reads as dead, so fm-spawn trusts this
+  # answer for a relaunch it launches on this transaction's behalf. The
+  # task-set lock taken before the control lock keeps every other launch out
+  # from this decision through the replacement's publication.
+  case "$KIND" in
+    ship|scout)
+      FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || exit 75
+      ;;
+  esac
+
   case "$KIND" in
     ship|scout)
       RELAUNCH_BRIEF="$DATA/$ID/brief.md"
@@ -1274,6 +1317,7 @@ do_relaunch() {
   [ -z "$TARGET_ACCOUNT" ] || spawn_args+=(--account "$TARGET_ACCOUNT")
   if FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
       "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" >/dev/null; then
+    release_task_set_lock
     RELAUNCH_META_PUBLISHED=1
     # $T was resolved from the record before the launch. When the recorded
     # endpoint was gone, the launch owner created a fresh one and republished

@@ -83,6 +83,7 @@ Escalate in order:
 3. If the crewmate is confused or looping, interrupt with `FM_HOME=<this-firstmate-home> bin/fm-control.sh <task-id> interrupt`, then redirect with one corrective line through `fm-send`.
 4. If the crewmate is genuinely wedged after redirection and its backend supports a replacement, relaunch it with `FM_HOME=<this-firstmate-home> bin/fm-control.sh <task-id> relaunch --note '<progress so far>'`, which stops the agent, carries the brief plus that note into a replacement in the same local copy, and restores the prior record if the replacement cannot start.
    On T3 Code, do not relaunch; preserve the task and report the stuck thread with its current server status for operator action.
+   A relaunch that prints `deferred:` and exits 75 was held by the away spend cap with nothing stopped or discarded; it is a wait for a worker to finish or for the captain's return, so do not retry it in a loop or count it toward step 5.
    Pass `--harness`, `--model`, or `--effort` on that same command when the worker should come back on a different runtime.
    Genuine wedging means looping, unresponsive, repeating the same obstacle, or truly dead.
    A low context reading is not wedging; modern harnesses auto-compact and keep going.

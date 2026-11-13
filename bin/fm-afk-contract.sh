@@ -104,6 +104,10 @@
 #     Print how many of this home's ordinary workers are actively working right
 #     now (SPEND CAP below). Reads no record, so it answers before an entry as
 #     well as during one.
+#   fm-afk-contract.sh spend-cap-admits <task-id> [--relaunch]
+#     Exit 0 when the spend cap (SPEND CAP below) admits one ordinary launch for
+#     <task-id> - a fresh spawn, or with --relaunch a replacement agent for that
+#     existing task - and 1 with the refusal on stderr when it does not.
 #   fm-afk-contract.sh archive              move the record aside; print its path
 #   fm-afk-contract.sh archived <entered_epoch>   print that archived record's path
 #
@@ -127,8 +131,9 @@
 # SPEND CAP (spend_max_concurrent_workers; this script is its one owner, for
 # both the number written at entry and the counting rule behind it).
 # The cap bounds how many ordinary workers this home has actively working at
-# once while an away record stands; bin/fm-spawn.sh enforces it by refusing a
-# fresh ordinary spawn once that many are working. An ordinary worker is every
+# once while an away record stands; bin/fm-spawn.sh and bin/fm-control.sh
+# enforce it by refusing an ordinary launch that would add a working worker
+# once that many are working. An ordinary worker is every
 # state/*.meta whose kind is not secondmate. It counts only while its
 # bin/fm-crew-state.sh reading, bounded by FM_AFK_CONTRACT_CREW_STATE_TIMEOUT
 # seconds (default 20), says it is working, or while its harness is busy
@@ -142,20 +147,31 @@
 # while a worker busy on a parked gate does. Any other reading on either side -
 # an unreadable, timed-out, unknown, or unrecognized one included - counts, so
 # an unreadable fleet can never exceed the cap. fm_afk_contract_reading_counts
-# and fm_afk_contract_harness_quiet are that mapping, and
-# fm_afk_contract_working_ordinary_workers, exposed as
-# `live-workers`, is the one count bin/fm-spawn.sh's refusal reads.
+# and fm_afk_contract_harness_quiet are that mapping,
+# fm_afk_contract_worker_counts applies it to one worker, and
+# fm_afk_contract_working_ordinary_workers, exposed as `live-workers`, is the
+# one count. fm_afk_contract_spend_cap_admits, exposed as `spend-cap-admits`, is
+# the one admission decision: a fresh ordinary launch is refused once the count
+# reaches the cap. A relaunch is exempt only when the worker it replaces counts
+# at that moment, because the replacement then takes a place already counted.
+# A relaunch of a worker that does not count - dead, idle, parked, or finished -
+# would add one, so it is admitted like a fresh launch and refused with a
+# `deferred:` line that keeps the task's record, local copy, and unlanded work
+# as they are. bin/fm-spawn.sh asks it for a fresh spawn and a direct
+# --relaunch; bin/fm-control.sh asks it before its relaunch stops the old agent,
+# since afterwards every replaced worker reads as dead. Secondmates are exempt
+# at both callers.
 # FM_AFK_CONTRACT_CREW_STATE_BIN replaces the reader for tests only.
 # Without --spend, entry records FM_AFK_CONTRACT_SPEND_DEFAULT (4), whatever
 # records stand, because idle records no longer need room under the cap. An
 # explicit --spend is the captain's number and is recorded unchanged. The
-# read-back, the entry announcement, and the refusal say what is counted.
+# read-back, the entry announcement, and the refusals say what is counted.
 #
 # Sourceable: with the BASH_SOURCE guard, other scripts get the path, presence,
 # posture, spend-cap, and lock helpers (fm_afk_contract_path,
 # fm_afk_contract_present, fm_afk_contract_mode, fm_afk_contract_away_present,
 # fm_afk_contract_archive_dir, fm_afk_contract_working_ordinary_workers,
-# fm_afk_contract_lock_hold, fm_afk_contract_lock_release) without running main.
+# fm_afk_contract_spend_cap_admits, fm_afk_contract_lock_hold, fm_afk_contract_lock_release) without running main.
 set -u
 
 FM_AFK_CONTRACT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -174,7 +190,7 @@ FM_AFK_CONTRACT_READABLE_VERSIONS="1 2"
 FM_AFK_CONTRACT_REACH_ANNOUNCED='No phone channel is configured; anything that needs you waits for your return.'
 FM_AFK_CONTRACT_SPEND_DEFAULT=4
 # What the spend cap counts, in the words the read-back and the entry
-# announcement print; bin/fm-spawn.sh's refusal repeats them.
+# announcement print; the spend-cap refusals repeat them.
 FM_AFK_CONTRACT_SPEND_COUNTS='a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does'
 # The bound on one worker's current-state reading; a read that hits it counts.
 FM_AFK_CONTRACT_CREW_STATE_TIMEOUT=${FM_AFK_CONTRACT_CREW_STATE_TIMEOUT:-20}
@@ -249,26 +265,79 @@ fm_afk_contract_harness_quiet() {  # <meta> <id> <state-dir>
   return 1
 }
 
-# The ordinary workers this home holds that are actively working right now
-# (the header's SPEND CAP): each state/*.meta whose kind is not secondmate,
-# because a secondmate is a persistent home rather than spend, that its
-# bounded current-state reading counts, or whose task is not working while its
-# harness is not verifiably quiet. This is the one implementation of that
-# count, read by bin/fm-spawn.sh's refusal.
-fm_afk_contract_working_ordinary_workers() {  # [state-dir]
-  local state=${1:-$FM_AFK_CONTRACT_STATE} meta id reading working=0
+# Whether the ordinary worker recorded at <state>/<id>.meta counts toward the
+# cap right now (the header's SPEND CAP): 0 when it counts, 1 when it does not.
+# A secondmate never counts, because it is a persistent home rather than spend;
+# any other record counts when its bounded current-state reading counts, or
+# when its task is not working while its harness is not verifiably quiet.
+fm_afk_contract_worker_counts() {  # <state-dir> <id>
+  local state=$1 id=$2 meta reading
   local bin=${FM_AFK_CONTRACT_CREW_STATE_BIN:-$FM_AFK_CONTRACT_DIR/fm-crew-state.sh}
+  meta="$state/$id.meta"
+  [ -f "$meta" ] || return 1
+  [ "$(grep '^kind=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2-)" != secondmate ] || return 1
+  reading=$(fm_run_timed "$FM_AFK_CONTRACT_CREW_STATE_TIMEOUT" \
+    env FM_STATE_OVERRIDE="$state" FM_CREW_STATE_NO_FORGE=1 "$bin" "$id" 2>/dev/null | head -1) || true
+  fm_afk_contract_reading_counts "$reading" && return 0
+  fm_afk_contract_harness_quiet "$meta" "$id" "$state" && return 1
+  return 0
+}
+
+# The ordinary workers this home holds that are actively working right now:
+# every state/*.meta that fm_afk_contract_worker_counts counts. This is the one
+# implementation of that count, read by fm_afk_contract_spend_cap_admits.
+fm_afk_contract_working_ordinary_workers() {  # [state-dir]
+  local state=${1:-$FM_AFK_CONTRACT_STATE} meta id working=0
   for meta in "$state"/*.meta; do
     [ -f "$meta" ] || continue
-    [ "$(grep '^kind=' "$meta" 2>/dev/null | tail -1 | cut -d= -f2-)" != secondmate ] || continue
     id=${meta##*/}
     id=${id%.meta}
-    reading=$(fm_run_timed "$FM_AFK_CONTRACT_CREW_STATE_TIMEOUT" \
-      env FM_STATE_OVERRIDE="$state" FM_CREW_STATE_NO_FORGE=1 "$bin" "$id" 2>/dev/null | head -1) || true
-    fm_afk_contract_reading_counts "$reading" || ! fm_afk_contract_harness_quiet "$meta" "$id" "$state" || continue
+    fm_afk_contract_worker_counts "$state" "$id" || continue
     working=$((working + 1))
   done
   printf '%s\n' "$working"
+}
+
+# The spend-cap admission decision (the header's SPEND CAP) for one ordinary
+# launch of task <id>: a fresh spawn, or with --relaunch a replacement agent
+# for that existing task. Returns 0 to admit and 1 to refuse, printing the
+# refusal on stderr; the caller chooses the exit code and keeps the secondmate
+# exemption, since a secondmate is never ordinary spend.
+fm_afk_contract_spend_cap_admits() {  # <id> [--relaunch]
+  local id=$1 relaunch=${2-} state=$FM_AFK_CONTRACT_STATE path cap live
+  path=$(fm_afk_contract_path "$state")
+  [ -f "$path" ] || return 0
+  fm_afk_contract_validate "$path" >/dev/null 2>&1 || return 0
+  [ "$(fm_afk_contract_record_mode "$path" 2>/dev/null)" = away ] || return 0
+  cap=$(fm_afk_contract_read_field "$path" spend_max_concurrent_workers 2>/dev/null || true)
+  case "$cap" in
+  '' | *[!0-9]* | 0) return 0 ;;
+  esac
+  if [ "$relaunch" = --relaunch ] && fm_afk_contract_worker_counts "$state" "$id"; then
+    # The replacement takes the place of a worker already counted.
+    return 0
+  fi
+  live=$(fm_afk_contract_working_ordinary_workers "$state" 2>/dev/null || true)
+  if [ "$relaunch" = --relaunch ]; then
+    case "$live" in
+    '' | *[!0-9]*)
+      echo "deferred: relaunch of $id refused - the away-posture record caps actively working workers at $cap, $id is not actively working so its replacement would add one, and this home's working worker count could not be read; $id's record, local copy, and unlanded work are kept as they are for a relaunch once the count reads under the cap or for the captain's return (spend cap: bin/fm-afk-contract.sh)" >&2
+      return 1
+      ;;
+    esac
+    [ "$live" -ge "$cap" ] || return 0
+    echo "deferred: relaunch of $id refused - the away-posture record caps actively working workers at $cap and $live ordinary worker(s) are actively working in this home ($FM_AFK_CONTRACT_SPEND_COUNTS); $id is not one of them, so its replacement would put the home over the cap. $id's record, local copy, and unlanded work are kept as they are for a relaunch once a worker finishes or for the captain's return (spend cap: bin/fm-afk-contract.sh)" >&2
+    return 1
+  fi
+  case "$live" in
+  '' | *[!0-9]*)
+    echo "error: spawn refused - the away-posture record caps actively working workers at $cap and this home's working worker count could not be read; task $id stays queued (spend cap: bin/fm-afk-contract.sh)" >&2
+    return 1
+    ;;
+  esac
+  [ "$live" -ge "$cap" ] || return 0
+  echo "error: spawn refused - the away-posture record caps actively working workers at $cap and $live ordinary worker(s) are actively working in this home ($FM_AFK_CONTRACT_SPEND_COUNTS); task $id stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)" >&2
+  return 1
 }
 
 # The posture a record at <path> is (the header's AWAY OR QUIET): quiet only
@@ -750,6 +819,15 @@ fm_afk_contract_main() {
     live-workers)
       [ "$#" -eq 0 ] || { fm_afk_contract_usage >&2; return 2; }
       fm_afk_contract_working_ordinary_workers ;;
+    spend-cap-admits)
+      case "$#:${2-}" in
+        1: | 2:--relaunch) ;;
+        *) fm_afk_contract_usage >&2; return 2 ;;
+      esac
+      case "$1" in
+        '' | */* | .*) fm_afk_contract_usage >&2; return 2 ;;
+      esac
+      fm_afk_contract_spend_cap_admits "$@" ;;
     clauses|flags|refused|grants)
       fm_afk_contract_log "'$cmd' was retired with the clause and merge-grant apparatus: the record is the captain's words (read them with 'words' or 'readback')"
       return 2 ;;

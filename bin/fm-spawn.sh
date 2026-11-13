@@ -94,6 +94,10 @@
 #   gone once that session's server is running again, and TMUX judges it
 #   against the server identity the record carries (tmux_socket, tmux_server),
 #   so a tmux record written before identities were recorded still refuses.
+#   While an away record stands, a direct --relaunch of an ordinary task meets
+#   the spend cap like a fresh spawn, because its stopped worker no longer
+#   counts: it prints `deferred:` and exits 75 with the record, worktree, and
+#   unlanded work untouched (the spend-cap comment below owns the rule).
 #   An endpoint that turns out to have survived refuses too. The worktree is
 #   reused untouched either way; a rebind is a recovery, never a teardown.
 #   Only a crewmate or scout rebinds: a secondmate whose endpoint is gone is
@@ -214,7 +218,9 @@
 #   per-home task-set lock and refuses rather than waits when another operation
 #   owns it. The refusal names another spawn or forced teardown when the recorded
 #   holder role is known, otherwise another operation. --relaunch is exempt
-#   because the existing task's control lock covers it.
+#   because the existing task's control lock covers it, except while an away
+#   record stands, when it takes the task-set lock first so its spend-cap
+#   decision serializes with other launches, deferring with exit 75 when held.
 #   A fresh Treehouse-backed spawn also takes the project-identity lock in the local
 #   root Firstmate home's state directory before slot allocation and holds it through
 #   task metadata publication. Teardown holds that same lock while proving and
@@ -2283,39 +2289,34 @@ if [ "$RELAUNCH" -ne 1 ]; then
   fm_lease_forbid_branch "new-task spawn (fm-spawn)" --away-relocated
 fi
 spawn_refuse_if_away_spend_cap() {
-  local cap live
-  [ "$RELAUNCH" -ne 1 ] || return 0
   [ "$KIND" != secondmate ] || return 0
-  [ -f "$STATE/.afk-contract" ] || return 0
-  FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" validate >/dev/null 2>&1 || return 0
-  [ "$(FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" mode 2>/dev/null)" = away ] || return 0
-  cap=$(FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" field spend_max_concurrent_workers 2>/dev/null || true)
-  case "$cap" in
-  '' | *[!0-9]* | 0) return 0 ;;
-  esac
-  live=$(FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" live-workers 2>/dev/null || true)
-  case "$live" in
-  '' | *[!0-9]*)
-    echo "error: spawn refused - the away-posture record caps actively working workers at $cap and this home's working worker count could not be read; task $ID stays queued (spend cap: bin/fm-afk-contract.sh)" >&2
-    exit 1
-    ;;
-  esac
-  if [ "$live" -ge "$cap" ]; then
-    echo "error: spawn refused - the away-posture record caps actively working workers at $cap and $live ordinary worker(s) are actively working in this home (a worker whose harness is busy counts whatever its task reads; idle, parked, finished, and dead workers whose harness is not busy do not; one whose state cannot be read does); task $ID stays queued for the captain's return or for a worker to finish (spend cap: bin/fm-afk-contract.sh)" >&2
-    exit 1
+  if [ "$RELAUNCH" -eq 1 ]; then
+    # fm-control asked before it stopped the old agent, the only moment the
+    # replaced worker's own count can still be read.
+    [ "$SPAWN_CONTROL_PARENT" -ne 1 ] || return 0
+    FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || exit 75
+    return 0
   fi
+  FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" || exit 1
 }
 # Spend cap (bin/fm-afk-contract.sh's spend_max_concurrent_workers): while an
 # away record exists (never a quiet-mode one, whose captain is present and
-# spends as attended: bin/fm-afk-contract.sh mode), a fresh ordinary spawn
-# refuses for BOTH actors once that many of this home's ordinary workers are
-# actively working, counted by that script's own `live-workers` (its SPEND CAP
-# owns what counts). A relaunch replaces a worker that already
-# counts, and a secondmate is a persistent home rather than spend, so both are
-# exempt. Checked before any endpoint, worktree, or record
-# exists, so a refusal costs nothing to unwind; rechecked after the task-set
-# lock so two fresh spawns cannot both publish from a stale count.
-spawn_refuse_if_away_spend_cap
+# spends as attended: bin/fm-afk-contract.sh mode), an ordinary launch that
+# would add an actively working worker refuses for BOTH actors once that many
+# of this home's ordinary workers are actively working; that script's
+# `spend-cap-admits` (its SPEND CAP) owns what counts and the decision. A fresh
+# spawn refuses with exit 1 and stays queued. A relaunch is exempt only when the
+# worker it replaces still counts; otherwise it refuses with a `deferred:` line
+# and exit 75, after adopting the task's kind and endpoint but before anything
+# is launched or rewritten, so the record, local copy, and unlanded work stay as
+# they were. A relaunch through bin/fm-control.sh was already decided there,
+# before the old agent stopped, under the task-set lock it holds through this
+# publication. A secondmate is a persistent home rather than
+# spend, so it is exempt. A fresh spawn is checked before any endpoint,
+# worktree, or record exists, so a refusal costs nothing to unwind, and
+# rechecked after the task-set lock so no two launches can both publish from a
+# stale count; a relaunch decides under that same lock.
+[ "$RELAUNCH" -eq 1 ] || spawn_refuse_if_away_spend_cap
 spawn_require_relocated_queued_work() {
   local actor
   [ "$RELAUNCH" -ne 1 ] || return 0
@@ -2330,6 +2331,22 @@ spawn_require_relocated_queued_work() {
     exit 1
   fi
 }
+# A direct relaunch while an away record stands takes the task-set lock before
+# the task's control lock, the order bin/fm-teardown.sh documents, and holds it
+# through publication, so its spend-cap decision and every other launch's
+# serialize (the spend-cap comment above owns why).
+spawn_hold_task_set_for_relaunch() {
+  [ -f "$STATE/.afk-contract" ] || return 0
+  SPAWN_TASK_SET_LOCK=$(fm_task_set_lock_path "$STATE") || {
+    echo "error: could not resolve the task-set lock for $STATE" >&2
+    exit 1
+  }
+  if ! fm_lock_try_acquire "$SPAWN_TASK_SET_LOCK"; then
+    echo "deferred: relaunch of $ID waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh)" >&2
+    return 1
+  fi
+  SPAWN_TASK_SET_LOCK_HELD=1
+}
 if [ "$RELAUNCH" -eq 1 ]; then
   SPAWN_CONTROL_LOCK="$STATE/.control-$ID.lock"
   control_owner=$(cat "$SPAWN_CONTROL_LOCK/pid" 2>/dev/null || true)
@@ -2341,6 +2358,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # this entrypoint directly (contract: bin/fm-lease-lib.sh).
     echo "error: relaunch (fm-spawn) refused - the supervision branch must relaunch through fm-control" >&2
     exit "$FM_LEASE_REFUSE_EXIT"
+  elif ! spawn_hold_task_set_for_relaunch; then
+    exit 75
   elif fm_lock_try_acquire "$SPAWN_CONTROL_LOCK"; then
     SPAWN_CONTROL_LOCK_HELD=1
   else
@@ -2606,6 +2625,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: secondmate $ID's recorded endpoint is gone; its recovery is owned by the secondmate respawn path, not by relaunch (run bin/fm-spawn.sh $ID --secondmate, or let the session-start liveness sweep do it)" >&2
     exit 1
   fi
+  spawn_refuse_if_away_spend_cap
   MODE=$(fm_meta_get "$RELAUNCH_META" mode)
   YOLO=$(fm_meta_get "$RELAUNCH_META" yolo)
   UPSTREAM_CONSENT=$(fm_meta_get "$RELAUNCH_META" upstream_consent)
