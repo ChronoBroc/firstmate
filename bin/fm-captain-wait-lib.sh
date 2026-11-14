@@ -20,9 +20,10 @@
 #       wait=<the declared wait line, or needs-decision [key=<key>]: <note>>
 #       summary=<the row's summary, capped>
 #   - Settled: the bytes the status log gained after <endpoint>, under the same
-#     identity, hold the line that ends <wait> (status_wait_ending_line): for
-#     a needs-decision wait, only a resolved or captain-held line closing its
-#     own key. A record whose status log is gone or was replaced is stale: it
+#     identity, hold the line that ends <wait> (status_wait_ending_line): a
+#     resolved line for the wait's own phase key, whatever the wait's verb (a
+#     keyless wait: a keyless resolved line). A resolved line for another key,
+#     routine progress, and every other event leave the record open. A record whose status log is gone or was replaced is stale: it
 #     can never settle, and the drain removes it.
 #   - Every write, and every compare-and-delete the drain performs, runs under
 #     $STATE/.branch-outcomes.lock, so a drain never removes a record a newer

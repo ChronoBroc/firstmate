@@ -157,6 +157,68 @@ test_unrelated_resolve_leaves_a_recorded_decision_open() {
   pass "only a close of the decision's own key settles a recorded needs-decision"
 }
 
+# Append <line> while the worker is busy; the watcher must absorb it as routine
+# and main's drain must present nothing settled.
+assert_absorbed_and_unsettled() {  # <dir> <line> <what>
+  local dir=$1 line=$2 what=$3 state pid verdict
+  state="$dir/state"
+  printf '%s\n' "$line" >> "$state/designer.status"
+  export FM_FAKE_CREW_STATE='state: working · source: pane · busy'
+  watch_bg "$state" "$dir/fakebin" "$dir/watch.out"
+  pid=$!
+  verdict=$(watch_verdict "$state" "$pid")
+  [ "$verdict" = exit ] || reap "$pid"
+  unset FM_FAKE_CREW_STATE
+  [ "$verdict" = absorbed ] || fail "$what was $verdict instead of absorbed as routine progress"
+  drain_and_ack "$state" "$dir/drain.out" || fail "main's drain failed"
+  ! grep -F 'SETTLED WAITS' "$dir/drain.out" >/dev/null \
+    || fail "$what was presented as settling the recorded wait: $(cat "$dir/drain.out")"
+}
+
+assert_settles_on_answer() {  # <dir> <seq>
+  local dir=$1 seq=$2 state
+  state="$dir/state"
+  printf '%s\n' "$ANSWER_LINE" >> "$state/designer.status"
+  drain_and_ack "$state" "$dir/drain.answer.out" || fail "main's drain after the answer failed"
+  grep -F "designer outcome $seq" "$dir/drain.answer.out" | grep -F "$ANSWER_LINE" >/dev/null \
+    || fail "the same-key answer did not settle the recorded wait: $(cat "$dir/drain.answer.out")"
+}
+
+test_captain_held_wait_ignores_another_key_and_settles_on_its_own() {
+  local dir seq
+  dir=$(make_case held-other-key)
+  seq=$(setup_recorded_wait "$dir" 'captain-held [key=board-review] [at=1794686615]: round 7 is held for the owner') \
+    || fail "setup of the recorded hold failed"
+  assert_absorbed_and_unsettled "$dir" 'resolved [key=other] [at=1794687000]: my background render finished' \
+    "a resolve of another key after a recorded hold"
+  assert_settles_on_answer "$dir" "$seq"
+  pass "a recorded captain-held wait settles only on a resolve of its own key"
+}
+
+test_paused_wait_ignores_routine_progress_and_settles_on_its_own_key() {
+  local dir seq
+  dir=$(make_case paused-progress)
+  seq=$(setup_recorded_wait "$dir") || fail "setup of the recorded wait failed"
+  assert_absorbed_and_unsettled "$dir" 'working [at=1794687000]: sketching round 8 while the board waits' \
+    "routine progress after a recorded pause"
+  assert_settles_on_answer "$dir" "$seq"
+  pass "a recorded pause settles only on a resolve of its own key, never on routine progress"
+}
+
+test_settled_entry_keeps_its_settling_line_under_a_long_summary() {
+  local dir state drain_out seq summary
+  dir=$(make_case long-summary); state="$dir/state"; drain_out="$dir/drain.out"
+  setup_recorded_wait "$dir" >/dev/null || fail "setup of the recorded wait failed"
+  summary=$(printf 'Round 7 board question detail. %.0s' $(seq 1 20))
+  seq=$(FM_STATE_OVERRIDE="$state" "$OUTCOME" append --task designer --verdict captain \
+    --summary "$summary" --wake "signal: $state/designer.status") || fail "the long captain outcome was not stored"
+  printf '%s\n' "$ANSWER_LINE" >> "$state/designer.status"
+  drain_and_ack "$state" "$drain_out" || fail "main's drain failed"
+  grep -F "designer outcome $seq" "$drain_out" | grep -F "settled by: $ANSWER_LINE" >/dev/null \
+    || fail "a long summary cut the settling line out of the entry: $(cat "$drain_out")"
+  pass "a settled entry keeps its outcome seq and settling line however long its summary"
+}
+
 test_unrelated_resolve_neither_settles_nor_surfaces() {
   local dir state fakebin out drain_out pid verdict
   dir=$(make_case unrelated-resolve); state="$dir/state"; fakebin="$dir/fakebin"
@@ -233,6 +295,9 @@ fm_test_run \
   test_answer_to_a_recorded_wait_reaches_main_while_the_worker_is_busy \
   test_answer_to_a_recorded_board_decision_reaches_main_while_the_worker_is_busy \
   test_unrelated_resolve_leaves_a_recorded_decision_open \
+  test_captain_held_wait_ignores_another_key_and_settles_on_its_own \
+  test_paused_wait_ignores_routine_progress_and_settles_on_its_own_key \
+  test_settled_entry_keeps_its_settling_line_under_a_long_summary \
   test_unrelated_resolve_neither_settles_nor_surfaces \
   test_resolve_without_a_recorded_wait_stays_routine \
   test_drain_presents_settlement_without_the_wake_and_waits_out_away \

@@ -594,12 +594,23 @@ EOF
 # it. Main only, never while an away record exists (the return drain presents
 # it instead), on every harness. Each entry is presented once and its record is
 # removed only after the section reached stdout; a stale record is removed
-# silently. Removal compares and deletes under $STATE/.branch-outcomes.lock and
+# silently. An entry always carries its outcome seq and its settling line; the
+# summary is shortened first, then the wait text, to fit. Removal compares and deletes under $STATE/.branch-outcomes.lock and
 # skips to the next drain while that lock stays busy. Bounded, and silent when
 # nothing settled.
+# Set FM_LINE_CAP_LINE to <text> cut to at most <max> characters, or to nothing
+# when <max> leaves no room for the truncation marker.
+settled_wait_fit() {  # <text> <max>
+  if [ "${#1}" -gt "$2" ] && [ "$2" -lt "${#FM_LINE_CAP_SUFFIX}" ]; then
+    FM_LINE_CAP_LINE=
+    return 0
+  fi
+  fm_cap_line_var "$1" "$2"
+}
+
 print_settled_waits_section() {
   local task rc line output='' cleared='' stale='' used=0 shown=0 omitted=0 bytes
-  local item_bytes=600 global_bytes=4000 seq lock="$STATE/.branch-outcomes.lock"
+  local item_bytes=600 global_bytes=4000 seq lock="$STATE/.branch-outcomes.lock" ending summary room
   [ "$ACTOR" = main ] || return 0
   ! fm_afk_contract_away_present "$STATE" || return 0
   while IFS= read -r task; do
@@ -612,7 +623,14 @@ print_settled_waits_section() {
       continue
     fi
     [ "$rc" -eq 0 ] || continue
-    line="$task outcome $FM_CAPTAIN_WAIT_SEQ (\"$FM_CAPTAIN_WAIT_SUMMARY\") waited on: $FM_CAPTAIN_WAIT_WAIT -> settled by: $FM_CAPTAIN_WAIT_ENDING"
+    fm_cap_line_var "$FM_CAPTAIN_WAIT_ENDING" $((item_bytes / 2))
+    ending=$FM_LINE_CAP_LINE
+    line="$task outcome $FM_CAPTAIN_WAIT_SEQ (\"\") waited on:  -> settled by: $ending"
+    room=$((item_bytes - 1 - ${#line}))
+    settled_wait_fit "$FM_CAPTAIN_WAIT_SUMMARY" $((room - ${#FM_CAPTAIN_WAIT_WAIT}))
+    summary=$FM_LINE_CAP_LINE
+    settled_wait_fit "$FM_CAPTAIN_WAIT_WAIT" $((room - ${#summary}))
+    line="$task outcome $FM_CAPTAIN_WAIT_SEQ (\"$summary\") waited on: $FM_LINE_CAP_LINE -> settled by: $ending"
     fm_cap_line_var "$line" $((item_bytes - 1))
     line=$FM_LINE_CAP_LINE
     bytes=$(( ${#line} + 1 ))
