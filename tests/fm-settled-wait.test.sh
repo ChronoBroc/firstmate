@@ -69,7 +69,8 @@ setup_recorded_wait() {  # <dir> [<wait-line>]
     --wake "signal: $state/designer.status") || fail "setup: the captain outcome was not stored"
   # Main presented the outcome, relayed it to the captain, and acknowledged it.
   FM_STATE_OVERRIDE="$state" "$OUTCOME" mark-read --through "$seq" >/dev/null \
-    && FM_STATE_OVERRIDE="$state" "$OUTCOME" mark-processed --through "$seq" >/dev/null \
+    || fail "setup: the captain outcome could not be marked relayed"
+  FM_STATE_OVERRIDE="$state" "$OUTCOME" mark-processed --through "$seq" >/dev/null \
     || fail "setup: the captain outcome could not be marked relayed"
   printf '%s' "$seq"
 }
