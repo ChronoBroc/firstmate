@@ -27,10 +27,11 @@
 #                          signal death is no answer and stops nothing. With
 #                          no memory_check line, paused and parked workers are
 #                          never stopped.
-# With the file absent every key takes its default, so a done worker's idle
-# session is stopped by default and nothing else is. The file must be a
-# regular file owned by this user and writable by nobody else, or it is read as
-# `off` (it chooses a command the watcher's sweep runs).
+# The file is the opt-in: with it absent nothing is ever stopped. With it
+# present, even empty, every key takes its default, so a done worker's idle
+# session is stopped and nothing else is until a memory_check line is added.
+# The file must be a regular file owned by this user and writable by nobody
+# else, or it is read as `off` (it chooses a command the watcher's sweep runs).
 #
 # Record: state/<id>.session-stopped, written only by bin/fm-idle-stop.sh after
 # `fm-control.sh <id> exit` reported `stopped`:
@@ -128,7 +129,10 @@ fm_idle_stop_config_load() {  # <config-dir>
   FM_IDLE_STOP_IDLE_AFTER=$FM_IDLE_STOP_IDLE_AFTER_DEFAULT
   FM_IDLE_STOP_MEMORY_CHECK=
   FM_IDLE_STOP_CONFIG_ERROR=
-  [ -e "$f" ] || [ -L "$f" ] || return 0
+  if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+    FM_IDLE_STOP_ENABLED=0
+    return 0
+  fi
   if ! fm_idle_stop_config_trusted "$f"; then
     FM_IDLE_STOP_ENABLED=0
     FM_IDLE_STOP_CONFIG_ERROR="$f is not a regular file owned by this user and writable only by it; idle-session stop is off until it is"

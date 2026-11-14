@@ -211,20 +211,24 @@ test_done_worker_is_stopped_and_window_kept() {
   pass "sweep: a done worker's idle session exits through fm-control, its window, record and worktree stay, and current state names the stop"
 }
 
-test_done_after_and_done_off() {
+test_opt_in_done_after_and_done_off() {
   local dir out
   dir=$(new_case done-after)
   add_task "$dir" t1 scout "done [at=$(date +%s)]: report written"
   start_tree "$dir" idle
+  assert_equals "skip idle-session stop is off" "$(check "$dir" t1)" "a home without the config file never stops anything"
+  sweep "$dir" >/dev/null
+  [ ! -s "$dir/fake/literal" ] || fail "a home that never opted in had a worker stopped: $(cat "$dir/fake/literal")"
+  config "$dir" '# opted in with every default'
   out=$(check "$dir" t1)
-  case "$out" in "skip idle "*) ;; *) fail "a just-finished worker should wait done_after, got: $out" ;; esac
+  case "$out" in "skip idle "*"of 120s") ;; *) fail "a just-finished worker should wait the default done_after, got: $out" ;; esac
   config "$dir" 'done=off' 'done_after=0'
   out=$(check "$dir" t1)
   assert_equals "skip done stopping is off" "$out" "done=off keeps done workers up"
   config "$dir" 'off' 'done_after=0'
   sweep "$dir" >/dev/null
   [ ! -s "$dir/fake/literal" ] || fail "the off switch must stop nothing, typed: $(cat "$dir/fake/literal")"
-  pass "sweep: done_after delays a fresh done, and done=off and off keep sessions up"
+  pass "sweep: nothing stops without the config file, done_after delays a fresh done, and done=off and off keep sessions up"
 }
 
 # --- 2. never a worker that is not idle ----------------------------------------
@@ -436,7 +440,7 @@ test_exit_only_if_idle_refuses_busy() {
 }
 
 test_done_worker_is_stopped_and_window_kept
-test_done_after_and_done_off
+test_opt_in_done_after_and_done_off
 test_running_command_busy_and_unread_steer_stay_up
 test_paused_needs_short_memory
 test_parked_and_secondmate

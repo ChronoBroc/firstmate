@@ -795,8 +795,9 @@ The flag is a home-local preference and is not inherited by secondmate homes.
 
 ## Idle session stop (config/idle-session-stop)
 
-An idle harness session holds about as much memory as a working one, so the watcher stops the session of a worker that no longer needs one and brings it back when something does.
-A done ship or scout worker's session is stopped once it has been idle for `done_after` seconds, which is on by default.
+An idle harness session holds about as much memory as a working one, so a home that opts in has the watcher stop the session of a worker that no longer needs one and bring it back when something does.
+The optional local, gitignored `config/idle-session-stop` file is the opt-in: with it absent nothing is ever stopped, and the watcher does nothing extra.
+With it present, even empty, a done ship or scout worker's session is stopped once it has been idle for `done_after` seconds.
 A paused or parked worker's session is stopped only after `idle_after` seconds idle and only while the configured `memory_check` command reports host memory short; with no `memory_check` line this never happens.
 The stop uses the control plane's own `bin/fm-control.sh <id> exit`, so the window, the worktree, the branch, and every unlanded change stay exactly where they were, and teardown and landing treat a stopped worker as any other.
 
@@ -810,7 +811,7 @@ A steer sent with `bin/fm-send.sh` relaunches the worker through `bin/fm-control
 A refused relaunch, such as the away spend cap's deferral or an account refusal, wakes firstmate once with the refusal as a wait, keeps the steer in the inbox, and is retried silently after `FM_IDLE_STOP_REVIVE_RETRY_SECS`.
 A typed harness command such as `/compact` to a stopped worker is refused, because its pane holds a bare shell.
 
-The file is optional, local, and gitignored, and must be a regular file owned by this user and writable by nobody else, or the feature reads as off.
+The file must be a regular file owned by this user and writable by nobody else, or the feature reads as off.
 Blank lines and `#` comments are skipped:
 
 ```text
@@ -823,7 +824,7 @@ off                     # the off switch: stop nothing
 
 `memory_check` takes an absolute command path and optional arguments, runs directly with no shell, and is bounded by `FM_IDLE_STOP_MEMORY_TIMEOUT`; a timeout, a missing command, an exit of 126 or above, or a signal death is no answer and stops nothing.
 A malformed value keeps its default, so a typo never widens what is stopped.
-With the file absent, done workers are stopped and nothing else is.
+An empty file stops done workers and nothing else.
 Turning the feature off stops nothing new, while a session it already stopped still comes back on demand.
 The file is home-local and not inherited by secondmate homes.
 `bin/fm-idle-stop.sh check <id>` prints the verdict a sweep would reach for one task, and `state/.idle-stop.log` records each stop and each "not now".

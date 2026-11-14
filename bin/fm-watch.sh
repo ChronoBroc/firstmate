@@ -3663,6 +3663,10 @@ idle_stop_tick() {
     wait "$IDLE_STOP_PID" 2>/dev/null || true
     IDLE_STOP_PID=
   fi
+  # A home that never opted in, and holds no stop record, does nothing more.
+  if [ ! -e "$(fm_idle_stop_config_path "$CONFIG")" ] && ! compgen -G "$STATE/*.session-stopped" >/dev/null; then
+    return 0
+  fi
   [ "$(age_of "$STATE/.last-idle-stop")" -ge "$IDLE_STOP_INTERVAL" ] || return 0
   touch "$STATE/.last-idle-stop"
   FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG \

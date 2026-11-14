@@ -17,7 +17,8 @@
 #
 #   sweep   One deterministic pass over this home's ship and scout tasks, run
 #           detached by the watcher on a cadence (bin/fm-watch.sh
-#           idle_stop_tick); it spends no model turns and wakes nobody. A task
+#           idle_stop_tick) in a home that created config/idle-session-stop;
+#           it spends no model turns and wakes nobody. A task
 #           is stopped only when every condition below holds, read fresh:
 #             - an ordinary local ship or scout on tmux (the backend whose
 #               process tree proves the agent holds no running command), not a
@@ -143,6 +144,10 @@ verdict() {  # <id>
   local status_file="$STATE/$1.status" open now idle after reason
   VERDICT_STATE=
   VERDICT_STATUS=
+  if [ "$FM_IDLE_STOP_ENABLED" != 1 ]; then
+    printf 'skip idle-session stop is off%s' "${FM_IDLE_STOP_CONFIG_ERROR:+ ($FM_IDLE_STOP_CONFIG_ERROR)}"
+    return 0
+  fi
   [ -f "$meta" ] || { printf 'skip no task record'; return 0; }
   kind=$(fm_meta_get "$meta" kind); [ -n "$kind" ] || kind=ship
   case "$kind" in
