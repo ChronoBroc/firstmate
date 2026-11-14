@@ -594,10 +594,12 @@ EOF
 # it. Main only, never while an away record exists (the return drain presents
 # it instead), on every harness. Each entry is presented once and its record is
 # removed only after the section reached stdout; a stale record is removed
-# silently. Bounded, and silent when nothing settled.
+# silently. Removal compares and deletes under $STATE/.branch-outcomes.lock and
+# skips to the next drain while that lock stays busy. Bounded, and silent when
+# nothing settled.
 print_settled_waits_section() {
-  local task rc line output='' cleared='' used=0 shown=0 omitted=0 bytes
-  local item_bytes=600 global_bytes=4000 path seq
+  local task rc line output='' cleared='' stale='' used=0 shown=0 omitted=0 bytes
+  local item_bytes=600 global_bytes=4000 seq lock="$STATE/.branch-outcomes.lock"
   [ "$ACTOR" = main ] || return 0
   ! fm_afk_contract_away_present "$STATE" || return 0
   while IFS= read -r task; do
@@ -605,7 +607,8 @@ print_settled_waits_section() {
     fm_captain_wait_settled "$STATE" "$task"
     rc=$?
     if [ "$rc" -eq 3 ]; then
-      path=$(fm_captain_wait_path "$STATE" "$task") && rm -f -- "$path"
+      stale="$stale$task $FM_CAPTAIN_WAIT_SEQ
+"
       continue
     fi
     [ "$rc" -eq 0 ] || continue
@@ -626,18 +629,22 @@ print_settled_waits_section() {
   done <<EOF
 $(fm_captain_wait_tasks "$STATE")
 EOF
-  [ "$shown" -gt 0 ] || [ "$omitted" -gt 0 ] || return 0
-  printf 'SETTLED WAITS (a captain outcome recorded while its task declared the wait shown, and the line that has since ended that wait - the task no longer waits on it, so never report it as still waiting; tell the captain only what is new to them):\n' || return 1
-  printf '%s' "$output" || return 1
-  if [ "$omitted" -gt 0 ]; then
-    printf 'SETTLED WAITS: %d more held back (byte cap); they follow on the next drain\n' "$omitted" || return 1
+  if [ "$shown" -gt 0 ] || [ "$omitted" -gt 0 ]; then
+    printf 'SETTLED WAITS (a captain outcome recorded while its task declared the wait shown, and the line that has since ended that wait - the task no longer waits on it, so never report it as still waiting; tell the captain only what is new to them):\n' || return 1
+    printf '%s' "$output" || return 1
+    if [ "$omitted" -gt 0 ]; then
+      printf 'SETTLED WAITS: %d more held back (byte cap); they follow on the next drain\n' "$omitted" || return 1
+    fi
   fi
+  [ -n "$cleared$stale" ] || return 0
+  fm_lock_acquire_wait_bounded "$lock" "$PRESENTATION_LOCK_TIMEOUT" || return 0
   while read -r task seq; do
     [ -n "$task" ] || continue
     fm_captain_wait_clear "$STATE" "$task" "$seq" || true
   done <<EOF
-$cleared
+$cleared$stale
 EOF
+  fm_lock_release "$lock"
 }
 
 # Print BRANCH OUTCOMES: what the supervision host's session recorded since

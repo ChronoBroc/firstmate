@@ -7,20 +7,26 @@
 #     bin/fm-branch-outcome.sh append for every captain-verdict row. When the
 #     task's status log, at the row's captured status provenance
 #     (statusEndpoint and statusIdent), holds a declared wait
-#     (status_declared_wait_line, bin/fm-classify-lib.sh), the record names
-#     that row and that wait; otherwise the row removes any record, because the
+#     (status_declared_wait_line, bin/fm-classify-lib.sh) or, failing that, an
+#     open keyed needs-decision (status_open_decisions; keyless and "default"
+#     decisions excluded, the newest opened wins), the record names that row
+#     and that wait; otherwise the row removes any record, because the
 #     newer captain outcome supersedes what main was last told. Routine rows
 #     never touch it. Format, one key=value line each, values on one line:
 #       v=fm-captain-wait-v1
 #       seq=<outcome seq>
 #       endpoint=<status log size at that row>
 #       ident=<status log identity at that row>
-#       wait=<the declared wait line>
+#       wait=<the declared wait line, or needs-decision [key=<key>]: <note>>
 #       summary=<the row's summary, capped>
 #   - Settled: the bytes the status log gained after <endpoint>, under the same
-#     identity, hold the line that ends <wait> (status_wait_ending_line). A
-#     record whose status log is gone or was replaced is stale: it can never
-#     settle, and the drain removes it.
+#     identity, hold the line that ends <wait> (status_wait_ending_line): for
+#     a needs-decision wait, only a resolved or captain-held line closing its
+#     own key. A record whose status log is gone or was replaced is stale: it
+#     can never settle, and the drain removes it.
+#   - Every write, and every compare-and-delete the drain performs, runs under
+#     $STATE/.branch-outcomes.lock, so a drain never removes a record a newer
+#     captain outcome wrote meanwhile.
 #   - Consumers: bin/fm-watch.sh treats a signaled status log whose task has a
 #     settled record as actionable and decision-owned, so the signal is never
 #     absorbed as routine progress and an attended supervision session cannot
@@ -58,6 +64,18 @@ _fm_captain_wait_one_line() {  # <text>
   printf '%s' "${text:0:$FM_CAPTAIN_WAIT_TEXT_MAX}"
 }
 
+# The newest open keyed needs-decision in <status-file>, as a decision line.
+_fm_captain_wait_open_decision() {  # <status-file> <kind>
+  local key verb note found=''
+  while IFS=$'\t' read -r key verb note; do
+    [ "$verb" = needs-decision ] && [ -n "$key" ] && [ "$key" != default ] || continue
+    found="needs-decision [key=$key]: $note"
+  done <<EOF
+$(status_open_decisions "$1" "$2")
+EOF
+  [ -z "$found" ] || printf '%s\n' "$found"
+}
+
 # Record or remove <task>'s wait for captain outcome <seq>, per the contract.
 # Returns 1 only when a record could not be written or removed.
 fm_captain_wait_note() {  # <state> <task> <seq> <endpoint> <ident> <summary>
@@ -70,6 +88,7 @@ fm_captain_wait_note() {  # <state> <task> <seq> <endpoint> <ident> <summary>
     prefix=$(mktemp "$state/.captain-wait-prefix.XXXXXX") || return 1
     if _fm_status_read_span "$f" 0 "$endpoint" > "$prefix" 2>/dev/null; then
       wait=$(status_declared_wait_line "$prefix")
+      [ -n "$wait" ] || wait=$(_fm_captain_wait_open_decision "$prefix" "$(_fm_status_kind "$f")")
     fi
     rm -f -- "$prefix"
   fi
@@ -99,8 +118,8 @@ fm_captain_wait_settled() {  # <state> <task>
   [ -e "$path" ] || [ -L "$path" ] || return 1
   [ -f "$path" ] && [ ! -L "$path" ] || return 3
   data=$(LC_ALL=C command cat "$path" 2>/dev/null) || return 3
-  [ "$(printf '%s\n' "$data" | sed -n 's/^v=//p')" = "$FM_CAPTAIN_WAIT_VERSION" ] || return 3
   FM_CAPTAIN_WAIT_SEQ=$(printf '%s\n' "$data" | sed -n 's/^seq=//p')
+  [ "$(printf '%s\n' "$data" | sed -n 's/^v=//p')" = "$FM_CAPTAIN_WAIT_VERSION" ] || return 3
   endpoint=$(printf '%s\n' "$data" | sed -n 's/^endpoint=//p')
   ident=$(printf '%s\n' "$data" | sed -n 's/^ident=//p')
   FM_CAPTAIN_WAIT_WAIT=$(printf '%s\n' "$data" | sed -n 's/^wait=//p')
@@ -117,12 +136,13 @@ fm_captain_wait_settled() {  # <state> <task>
   return 0
 }
 
-# Remove <task>'s record only while it still names outcome <seq>, so a newer
-# captain outcome recorded meanwhile keeps its own record.
+# Remove <task>'s record only while it still names outcome <seq> (as
+# FM_CAPTAIN_WAIT_SEQ read it), so a newer captain outcome recorded meanwhile
+# keeps its own record. The caller holds $STATE/.branch-outcomes.lock.
 fm_captain_wait_clear() {  # <state> <task> <seq>
   local path
   path=$(fm_captain_wait_path "$1" "$2") || return 1
-  [ -f "$path" ] || return 0
+  [ -e "$path" ] || [ -L "$path" ] || return 0
   [ "$(sed -n 's/^seq=//p' "$path" 2>/dev/null)" = "$3" ] || return 0
   rm -f -- "$path"
 }

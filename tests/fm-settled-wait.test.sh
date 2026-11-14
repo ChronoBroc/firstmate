@@ -25,6 +25,7 @@ TMP_ROOT=$(fm_test_tmproot fm-settled-wait-tests)
 OUTCOME="$ROOT/bin/fm-branch-outcome.sh"
 PAUSE_LINE='paused [key=board-review] [at=1794686615]: round 7 waits for the owner on the Lavish board - until 2026-11-21T20:00Z'
 ANSWER_LINE='resolved [key=board-review] [at=1794687324]: round 7 answered, all four as recommended; drawing round 8'
+DECISION_LINE='needs-decision [key=board-review] [at=1794686615]: round 7 waits for the owner'
 
 # Wait up to 10s for the watcher to either exit (it surfaced a wake) or record
 # an absorbed signal. Prints exit or absorbed.
@@ -48,20 +49,20 @@ watch_verdict() {  # <state> <pid>
 
 # A designer task whose keyed wait was surfaced, recorded as a captain outcome,
 # relayed, and acknowledged by main. Prints the outcome's seq.
-setup_recorded_wait() {  # <dir>
-  local dir=$1 state fakebin out pid seq
+setup_recorded_wait() {  # <dir> [<wait-line>]
+  local dir=$1 wait_line=${2:-$PAUSE_LINE} state fakebin out pid seq
   state="$dir/state"; fakebin="$dir/fakebin"; out="$dir/first.out"
   printf 'window=test:fm-designer\nkind=scout\nharness=claude\n' > "$state/designer.meta"
   printf 'working [at=1794686610]: round 7 is on the board\n' > "$state/designer.status"
   printf '%s' "$(seen_sig "$state/designer.status")" > "$state/.seen-designer_status"
-  printf '%s\n' "$PAUSE_LINE" >> "$state/designer.status"
+  printf '%s\n' "$wait_line" >> "$state/designer.status"
   # The worker ended its turn to wait, so it is not provably working and the
   # watcher surfaces the pause, as it did for the reported round.
   export FM_FAKE_CREW_STATE='state: idle · source: pane · waiting at its prompt'
   watch_bg "$state" "$fakebin" "$out"
   pid=$!
   [ "$(watch_verdict "$state" "$pid")" = exit ] \
-    || { reap "$pid"; fail "setup: the keyed pause did not surface"; }
+    || { reap "$pid"; fail "setup: the keyed wait did not surface"; }
   ack_stopped_cycle "$state" >/dev/null 2>&1 || fail "setup: could not acknowledge the pause wake"
   seq=$(FM_STATE_OVERRIDE="$state" "$OUTCOME" append --task designer --verdict captain \
     --summary "Round 7 is on the Lavish board with four questions. Waiting for the captain's answers." \
@@ -118,6 +119,42 @@ test_answer_to_a_recorded_wait_reaches_main_while_the_worker_is_busy() {
     || fail "a settled wait was presented again after main saw it"
   unset FM_FAKE_CREW_STATE
   pass "an answer settling a recorded captain wait reaches main as settled even while the worker is busy"
+}
+
+test_answer_to_a_recorded_board_decision_reaches_main_while_the_worker_is_busy() {
+  local dir state fakebin out drain_out seq pid verdict
+  dir=$(make_case decision-busy); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; drain_out="$dir/drain.out"
+  seq=$(setup_recorded_wait "$dir" "$DECISION_LINE") || fail "setup of the recorded decision failed"
+  printf '%s\n' "$ANSWER_LINE" >> "$state/designer.status"
+  export FM_FAKE_CREW_STATE='state: working · source: pane · busy drawing round 8'
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  verdict=$(watch_verdict "$state" "$pid")
+  [ "$verdict" = exit ] || reap "$pid"
+  [ "$verdict" = exit ] \
+    || fail "the answer closing recorded decision outcome $seq was $verdict by the watcher instead of reaching a session"
+  grep -F "$(printf '\tneeds-decision: ')" "$state/.wake-queue" | grep -F designer.status >/dev/null \
+    || fail "the answer's queued row is not main-owned: $(cat "$state/.wake-queue")"
+  drain_and_ack "$state" "$drain_out" || fail "main's drain failed"
+  grep -F 'SETTLED WAITS' "$drain_out" >/dev/null \
+    || fail "main's drain did not present the recorded decision as settled: $(cat "$drain_out")"
+  grep -F "designer outcome $seq" "$drain_out" | grep -F "$ANSWER_LINE" >/dev/null \
+    || fail "the settled entry is not tied to outcome $seq and the answer: $(cat "$drain_out")"
+  unset FM_FAKE_CREW_STATE
+  pass "an answer closing a recorded keyed needs-decision reaches main as settled even while the worker is busy"
+}
+
+test_unrelated_resolve_leaves_a_recorded_decision_open() {
+  local dir state drain_out
+  dir=$(make_case decision-unrelated); state="$dir/state"; drain_out="$dir/drain.out"
+  setup_recorded_wait "$dir" "$DECISION_LINE" >/dev/null || fail "setup of the recorded decision failed"
+  printf 'resolved [key=render-job] [at=1794687000]: my background render finished\n' >> "$state/designer.status"
+  printf 'working [at=1794687010]: tidying the round 7 notes\n' >> "$state/designer.status"
+  drain_and_ack "$state" "$drain_out" || fail "main's drain failed"
+  ! grep -F 'SETTLED WAITS' "$drain_out" >/dev/null \
+    || fail "events that do not close the board decision were presented as settling it: $(cat "$drain_out")"
+  pass "only a close of the decision's own key settles a recorded needs-decision"
 }
 
 test_unrelated_resolve_neither_settles_nor_surfaces() {
@@ -194,6 +231,8 @@ test_newer_captain_outcome_without_a_wait_supersedes_an_open_one() {
 
 fm_test_run \
   test_answer_to_a_recorded_wait_reaches_main_while_the_worker_is_busy \
+  test_answer_to_a_recorded_board_decision_reaches_main_while_the_worker_is_busy \
+  test_unrelated_resolve_leaves_a_recorded_decision_open \
   test_unrelated_resolve_neither_settles_nor_surfaces \
   test_resolve_without_a_recorded_wait_stays_routine \
   test_drain_presents_settlement_without_the_wake_and_waits_out_away \
