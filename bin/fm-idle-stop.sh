@@ -29,8 +29,7 @@
 #               drive call - is busy and stays up;
 #             - no shell is running below the agent process, so a worker whose
 #               turn ended over a background job stays up too;
-#             - its steering inbox holds no unacknowledged steer, and no other
-#               lifecycle action holds its control lock;
+#             - its steering inbox holds no unacknowledged steer;
 #             - its current state (bin/fm-crew-state.sh) is `done`, and done
 #               stopping is on, and it has been idle for done_after; or it is
 #               `paused` or `parked`, it has been idle for idle_after, and the
@@ -39,7 +38,8 @@
 #               open decision is what parks it, and its answer arrives as a
 #               steer, which relaunches it.
 #           Then it runs `fm-control.sh <id> exit --only-if-idle`. Every refusal
-#           that exit makes - a busy agent, pending composer text, a blocking
+#           that exit makes - a busy agent, another lifecycle action holding
+#           the task's control lock, pending composer text, a blocking
 #           dialog, a state it cannot prove - is "not now": logged, retried on a
 #           later sweep, never forced. Only an exit that reports `stopped`
 #           writes the record. A steer that landed while the exit ran is
@@ -135,50 +135,51 @@ crew_state() {  # <id>
     "$SCRIPT_DIR/fm-crew-state.sh" "$1" 2>/dev/null
 }
 
-# verdict <id>: prints `eligible <reason>` or `skip <why>`; sets VERDICT_STATE
-# and VERDICT_STATUS for the record.
+# verdict <id>: sets VERDICT to `eligible <reason>` or `skip <why>`, and
+# VERDICT_STATE and VERDICT_STATUS for the record.
+VERDICT=
 VERDICT_STATE=
 VERDICT_STATUS=
 verdict() {  # <id>
   local id=$1 meta="$STATE/$1.meta" kind backend target agent busy running reading word
   local status_file="$STATE/$1.status" open now idle after reason
+  VERDICT=
   VERDICT_STATE=
   VERDICT_STATUS=
   if [ "$FM_IDLE_STOP_ENABLED" != 1 ]; then
-    printf 'skip idle-session stop is off%s' "${FM_IDLE_STOP_CONFIG_ERROR:+ ($FM_IDLE_STOP_CONFIG_ERROR)}"
+    printf -v VERDICT 'skip idle-session stop is off%s' "${FM_IDLE_STOP_CONFIG_ERROR:+ ($FM_IDLE_STOP_CONFIG_ERROR)}"
     return 0
   fi
-  [ -f "$meta" ] || { printf 'skip no task record'; return 0; }
+  [ -f "$meta" ] || { printf -v VERDICT 'skip no task record'; return 0; }
   kind=$(fm_meta_get "$meta" kind); [ -n "$kind" ] || kind=ship
   case "$kind" in
     ship|scout) ;;
-    *) printf 'skip a %s is never stopped' "$kind"; return 0 ;;
+    *) printf -v VERDICT 'skip a %s is never stopped' "$kind"; return 0 ;;
   esac
-  [ -z "$(fm_meta_get "$meta" remote_host)" ] || { printf 'skip remote task'; return 0; }
-  ! fm_pr_adopted_record "$meta" || { printf 'skip adopted pull request, no worker'; return 0; }
+  [ -z "$(fm_meta_get "$meta" remote_host)" ] || { printf -v VERDICT 'skip remote task'; return 0; }
+  ! fm_pr_adopted_record "$meta" || { printf -v VERDICT 'skip adopted pull request, no worker'; return 0; }
   backend=$(fm_backend_of_meta "$meta")
   target=$(fm_backend_target_of_meta "$meta")
-  [ -n "$target" ] || { printf 'skip no recorded endpoint'; return 0; }
-  [ "$backend" = tmux ] || { printf 'skip the %s backend has no process proof that the agent holds no running command' "$backend"; return 0; }
+  [ -n "$target" ] || { printf -v VERDICT 'skip no recorded endpoint'; return 0; }
+  [ "$backend" = tmux ] || { printf -v VERDICT 'skip the %s backend has no process proof that the agent holds no running command' "$backend"; return 0; }
   if fm_idle_stop_record_valid "$STATE" "$id" "$meta"; then
-    printf 'skip already stopped'
+    printf -v VERDICT 'skip already stopped'
     return 0
   fi
   agent=${FM_IDLE_STOP_RECORD_AGENT_STATE:-$(fm_backend_agent_state "$backend" "$target" "$meta" 2>/dev/null || true)}
-  [ "$agent" = alive ] || { printf 'skip agent is %s' "${agent:-unreadable}"; return 0; }
-  [ ! -d "$STATE/.control-$id.lock" ] || { printf 'skip another lifecycle action holds the task'; return 0; }
+  [ "$agent" = alive ] || { printf -v VERDICT 'skip agent is %s' "${agent:-unreadable}"; return 0; }
   busy=$(fm_busy_classify_meta "$meta" "$id" "$STATE")
   case "$busy" in
     idle\ *) ;;
-    *) printf 'skip harness is not proven idle (%s)' "$busy"; return 0 ;;
+    *) printf -v VERDICT 'skip harness is not proven idle (%s)' "$busy"; return 0 ;;
   esac
-  ! fm_idle_stop_unhandled_steer "$STATE" "$id" || { printf 'skip an unread steer waits in its inbox'; return 0; }
+  ! fm_idle_stop_unhandled_steer "$STATE" "$id" || { printf -v VERDICT 'skip an unread steer waits in its inbox'; return 0; }
   running=0
   fm_idle_stop_running_command "$target" >/dev/null || running=$?
   case "$running" in
-    0) printf 'skip agent holds a running command (%s)' "$(fm_idle_stop_running_command "$target")"; return 0 ;;
+    0) printf -v VERDICT 'skip agent holds a running command (%s)' "$(fm_idle_stop_running_command "$target")"; return 0 ;;
     1) ;;
-    *) printf 'skip no process proof that the agent holds no running command'; return 0 ;;
+    *) printf -v VERDICT 'skip no process proof that the agent holds no running command'; return 0 ;;
   esac
   reading=$(crew_state "$id")
   word=${reading#state: }
@@ -190,34 +191,34 @@ verdict() {  # <id>
   idle=$((now - $(fm_idle_stop_last_activity "$STATE" "$id")))
   case "$word" in
     done)
-      [ "$FM_IDLE_STOP_DONE" = 1 ] || { printf 'skip done stopping is off'; return 0; }
-      [ -z "$open" ] || { printf 'skip an open decision stands'; return 0; }
+      [ "$FM_IDLE_STOP_DONE" = 1 ] || { printf -v VERDICT 'skip done stopping is off'; return 0; }
+      [ -z "$open" ] || { printf -v VERDICT 'skip an open decision stands'; return 0; }
       after=$FM_IDLE_STOP_DONE_AFTER
       reason='done'
       ;;
     paused|parked)
       if [ "$word" = paused ] && [ -n "$open" ]; then
-        printf 'skip an open decision stands'
+        printf -v VERDICT 'skip an open decision stands'
         return 0
       fi
       after=$FM_IDLE_STOP_IDLE_AFTER
       reason='idle-memory'
       ;;
     *)
-      printf 'skip current state is %s' "${word:-unreadable}"
+      printf -v VERDICT 'skip current state is %s' "${word:-unreadable}"
       return 0
       ;;
   esac
-  [ "$idle" -ge "$after" ] || { printf 'skip idle %ss of %ss' "$idle" "$after"; return 0; }
+  [ "$idle" -ge "$after" ] || { printf -v VERDICT 'skip idle %ss of %ss' "$idle" "$after"; return 0; }
   if [ "$reason" = idle-memory ]; then
-    [ -n "$FM_IDLE_STOP_MEMORY_CHECK" ] || { printf 'skip no memory_check configured'; return 0; }
+    [ -n "$FM_IDLE_STOP_MEMORY_CHECK" ] || { printf -v VERDICT 'skip no memory_check configured'; return 0; }
     case "$(memory_verdict)" in
       short) ;;
-      fine) printf 'skip host memory is fine'; return 0 ;;
-      *) printf 'skip memory check: %s' "$(memory_verdict)"; return 0 ;;
+      fine) printf -v VERDICT 'skip host memory is fine'; return 0 ;;
+      *) printf -v VERDICT 'skip memory check: %s' "$(memory_verdict)"; return 0 ;;
     esac
   fi
-  printf 'eligible %s' "$reason"
+  printf -v VERDICT 'eligible %s' "$reason"
 }
 
 # revive_detached <id>: start a revive without waiting for it.
@@ -228,7 +229,8 @@ revive_detached() {  # <id>
 
 stop_one() {  # <id>
   local id=$1 meta="$STATE/$1.meta" v out rc=0 reason target
-  v=$(verdict "$id")
+  verdict "$id"
+  v=$VERDICT
   case "$v" in
     eligible\ *) reason=${v#eligible } ;;
     *) return 0 ;;
@@ -262,8 +264,7 @@ reconcile_one() {  # <id>
   rec=$(fm_idle_stop_record_path "$STATE" "$id")
   [ -f "$rec" ] || return 1
   if fm_idle_stop_record_valid "$STATE" "$id" "$meta"; then
-    if fm_idle_stop_unhandled_steer "$STATE" "$id" && ! fm_idle_stop_notice_holds "$STATE" "$id" \
-      && [ ! -d "$STATE/.idle-revive-$id.lock" ]; then
+    if fm_idle_stop_unhandled_steer "$STATE" "$id" && ! fm_idle_stop_notice_holds "$STATE" "$id"; then
       revive_detached "$id"
     fi
     return 0
@@ -353,7 +354,8 @@ case "$VERB" in
   check)
     [ -n "${1:-}" ] || { usage >&2; exit 2; }
     fm_task_id_creation_valid "$1" || { echo "error: '$1' is not a valid task id" >&2; exit 2; }
-    printf '%s\n' "$(verdict "$1")"
+    verdict "$1"
+    printf '%s\n' "$VERDICT"
     ;;
   revive)
     [ -n "${1:-}" ] || { usage >&2; exit 2; }

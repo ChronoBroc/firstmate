@@ -1295,10 +1295,8 @@ else
     # recorded as a wait the watcher reports, with the steer kept here.
     if [ "$ring_rc" = 3 ] && fm_idle_stop_record_valid "$STATE" "$INBOX_TASK_ID" "$TARGET_META"; then
       ring_rc=4
-      if [ ! -d "$STATE/.idle-revive-$INBOX_TASK_ID.lock" ]; then
-        FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE \
-          nohup "$SCRIPT_DIR/fm-idle-stop.sh" revive "$INBOX_TASK_ID" </dev/null >/dev/null 2>&1 &
-      fi
+      FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE \
+        nohup "$SCRIPT_DIR/fm-idle-stop.sh" revive "$INBOX_TASK_ID" </dev/null >/dev/null 2>&1 &
     fi
     case "$ring_rc" in
     1) echo "fm-send: doorbell skipped (composer visibly holds pending text); the steer is durably recorded at $INBOX_RECORD and $ring_retry" >&2 ;;

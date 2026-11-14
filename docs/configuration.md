@@ -815,12 +815,19 @@ The file must be a regular file owned by this user and writable by nobody else, 
 Blank lines and `#` comments are skipped:
 
 ```text
-done=on                 # stop a done worker's idle session (default on)
-done_after=120          # seconds a done worker must be idle first (default 120)
-idle_after=1800         # seconds a paused or parked worker must be idle first (default 1800)
-memory_check=/usr/local/bin/host-memory-ok --quiet   # exit 0 = memory fine, any other exit = short
-off                     # the off switch: stop nothing
+# stop a done worker's idle session (default on)
+done=on
+# seconds a done worker must be idle first (default 120)
+done_after=120
+# seconds a paused or parked worker must be idle first (default 1800)
+idle_after=1800
+# exit 0 = memory fine, any other exit = short
+memory_check=/usr/local/bin/host-memory-ok --quiet
+# the off switch: stop nothing
+off
 ```
+
+Comments go on their own lines; text after a value is read as part of it.
 
 `memory_check` takes an absolute command path and optional arguments, runs directly with no shell, and is bounded by `FM_IDLE_STOP_MEMORY_TIMEOUT`; a timeout, a missing command, an exit of 126 or above, or a signal death is no answer and stops nothing.
 A malformed value keeps its default, so a typo never widens what is stopped.

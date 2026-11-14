@@ -179,6 +179,7 @@ wait_until() {  # <seconds> <description> <command...>
 
 status_has() { grep -q "$2" "$STATE/$1.status" 2>/dev/null; }
 busy_is() { grep -q "state=$2 " "$STATE/$1.busy-state" 2>/dev/null; }
+handled_any() { [ -n "$(ls "$STATE/$1.inbox/handled/" 2>/dev/null)" ]; }
 # shellcheck disable=SC2016  # Expanded by the child bash.
 agent_state() { fm bash -c '. "$1/bin/fm-backend.sh"; m="$2/$3.meta"; fm_backend_agent_state tmux "$(fm_backend_target_of_meta "$m")" "$m"' _ "$ROOT" "$STATE" "$1"; }
 agent_is() { [ "$(agent_state "$1")" = "$2" ]; }
@@ -262,7 +263,7 @@ out=$(fm "$ROOT/bin/fm-send.sh" w-done 'Please add one more section to the repor
 case "$out" in *"stopped while idle"*) ;; *) die_with "fm-send did not say the worker is coming back: $out" ;; esac
 wait_until 120 "the relaunched worker to read its steer" test -s "$STATE/w-done.inbox.read"
 grep -q 'one more section' "$STATE/w-done.inbox.read" || die_with "the relaunched worker read something else"
-wait_until 30 "the steer's acknowledgement" test -n "$(ls "$STATE/w-done.inbox/handled/" 2>/dev/null)"
+wait_until 30 "the steer's acknowledgement" handled_any w-done
 if [ -e "$STATE/w-done.session-stopped" ] || ! agent_is w-done alive; then
   die_with "the relaunched worker is not running, or still has its stop record"
 fi

@@ -818,7 +818,7 @@ do_exit() {
         ;;
     esac
   fi
-  case "$(busy_verdict)" in
+  [ "$ONLY_IF_IDLE" = 1 ] || case "$(busy_verdict)" in
     busy*)
       cancel=$(deliver_interrupt) || return $?
       state=$(agent_state)

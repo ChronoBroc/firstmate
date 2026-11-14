@@ -3681,10 +3681,9 @@ idle_stop_session_stopped() {  # <task>
   fm_idle_stop_record_valid "$STATE" "$1" "$STATE/$1.meta"
 }
 
-# Start one relaunch on demand for <task>, unless one is already running or a
-# refused one is still waiting out its retry interval.
+# Start a relaunch on demand for <task>, unless a refused one is still waiting
+# out its retry interval; a relaunch already running holds its own lock.
 idle_stop_revive_detached() {  # <task>
-  [ ! -d "$STATE/.idle-revive-$1.lock" ] || return 0
   ! fm_idle_stop_notice_holds "$STATE" "$1" || return 0
   triage_log "idle-stop: relaunching $1 for its waiting steer"
   FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG \
