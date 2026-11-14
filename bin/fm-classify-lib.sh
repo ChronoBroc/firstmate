@@ -417,6 +417,40 @@ _fm_status_declared_wait_scan() {  # <resolve-verb> <legacy-captain-re>
   return 1
 }
 
+# The status line that ended <wait-line>, the declared wait in force when the
+# log was <start-offset> bytes long, read from the bytes appended since; the
+# same rule status_declared_wait_line applies. A captain-held wait ends at any
+# later event; a pause ends at a resolved line for its own phase key or at any
+# other event, while a resolved line for another key leaves it in force.
+# Returns 0 and prints the line when the wait has ended, 1 while it is still in
+# force, and 2 when the log cannot be read.
+status_wait_ending_line() {  # <status-file> <start-offset> <wait-line>
+  local f=$1 start=$2 wait=$3 size chunk resolve legacy_re wait_key line verb key held=0
+  resolve=${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}
+  legacy_re="^[[:space:]]*(${FM_CAPTAIN_RE:-$FM_CLASSIFY_CAPTAIN_RE_DEFAULT})"
+  status_is_captain_held "$wait" && held=1
+  wait_key=$(_fm_decision_key "$wait" "$_FM_CLASSIFY_KEYLESS_PHASE") || wait_key=
+  size=$(_fm_status_file_size "$f") || return 2
+  size=${size//[[:space:]]/}
+  case "$size:$start" in *[!0-9:]*|:*|*:) return 2 ;; esac
+  [ "$start" -lt "$size" ] || return 1
+  chunk=$(_fm_status_read_span "$f" "$start" "$((size - start))") || return 2
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in *[![:space:]]*) ;; *) continue ;; esac
+    _fm_status_line_is_event "$line" "$legacy_re" || continue
+    status_line_verb "$line" verb
+    if [ "$held" -eq 0 ] && [ "$verb" = "$resolve" ]; then
+      key=$(_fm_decision_key "$line" "$_FM_CLASSIFY_KEYLESS_PHASE") || key=
+      [ "$key" = "$wait_key" ] || continue
+    fi
+    printf '%s\n' "$line"
+    return 0
+  done <<EOF
+$chunk
+EOF
+  return 1
+}
+
 # A condition-aware declared wait: a `paused:` line may say WHEN it expects to
 # clear with `until <YYYY-MM-DDTHH:MM[:SS]Z>` anywhere in its text (UTC only, so
 # no local-zone guess is ever recorded). Prints that time as epoch seconds so a

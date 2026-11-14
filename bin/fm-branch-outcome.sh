@@ -69,6 +69,8 @@
 #     it from a bounded window of the store's newest complete rows when it is
 #     absent, so a home whose store predates it gains one at its next session
 #     start without scanning lifetime history.
+#   - Captain wait: a captain row also records or clears the task's
+#     $STATE/.<task>.captain-wait; bin/fm-captain-wait-lib.sh owns that record.
 #   - Every mutation runs under $STATE/.branch-outcomes.lock so the branch
 #     extension and a concurrent session-start replay cannot interleave.
 #   - The store is written BEFORE the outcome is delivered to main
@@ -141,6 +143,8 @@ SCRIPT_DIR="$(d=${BASH_SOURCE[0]%/*}; [ "$d" != "${BASH_SOURCE[0]}" ] || d=.; cd
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-classify-lib.sh
 . "$SCRIPT_DIR/fm-classify-lib.sh"
+# shellcheck source=bin/fm-captain-wait-lib.sh
+. "$SCRIPT_DIR/fm-captain-wait-lib.sh"
 
 STORE="$STATE/branch-outcomes.jsonl"
 CURSOR="$STATE/.branch-outcomes-cursor"
@@ -554,6 +558,13 @@ case "$CMD" in
     if ! publish_outcome_index_ready "$SEQ"; then
       fm_lock_release "$LOCK"
       echo "error: outcome was stored but its bounded task index could not be updated" >&2
+      exit 1
+    fi
+    if [ "$VERDICT" = captain ] && { [ -e "$STATE/$TASK.meta" ] || [ -e "$STATE/$TASK.status" ]; } \
+        && ! fm_captain_wait_note "$STATE" "$TASK" "$SEQ" "$CAPTURED_STATUS_ENDPOINT" \
+          "$CAPTURED_STATUS_IDENT" "$SUMMARY"; then
+      fm_lock_release "$LOCK"
+      echo "error: outcome was stored but the wait it reported could not be recorded" >&2
       exit 1
     fi
     fm_lock_release "$LOCK"

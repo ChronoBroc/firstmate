@@ -229,6 +229,10 @@ Main's reply to the captain covers only the outcomes still open, as if an alread
 Main runs the printed acknowledgement for every presented outcome, settled and handled open ones alike.
 Anything main must act on while attended to move the work forward, such as a local-only branch to land or a pull request to merge, is a captain outcome on the host even when the captain asked not to hear about that work, reported once per unchanged situation (`bin/fm-branch-prompt.sh` "Verdict: routine or captain"), because a routine outcome opens no main turn.
 
+A captain outcome recorded while its task declared a wait, such as a review board waiting on the captain, is tied to that wait, and the line that later ends the wait is never routine progress.
+The watcher surfaces it as a main-owned wake even while the worker is busy, and every main drain outside an away record presents it once in its `SETTLED WAITS` section, beside the outcome it settles, so main never reports a settled wait as still open.
+`bin/fm-captain-wait-lib.sh` owns that record and its settle rule.
+
 One limit: if the captain goes away and returns while an attended engine turn runs, and the host is terminated before that turn's `branch-outcome` wake is delivered, no immediate wake reaches main.
 The captain row is still durable, and the next drain presents it until it is acknowledged.
 

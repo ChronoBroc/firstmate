@@ -13,6 +13,7 @@ Supervision host: on for this home (`config/supervision-host-off` turns it off; 
 {claude,cursor}    `supervision-host: the supervision session could not take this wake ...` means the wake is yours: handle it as above.
 {claude,cursor}    A failing turn may include a `supervision-host:` health note about repeated engine errors: tell the captain when it matters and handle the handed-back wake as usual; during cooldown later attended closes reach you unchanged.
 {claude,cursor}    Routine outcomes never wake you; your next drain lists only visible routine outcomes under `BRANCH OUTCOMES, ROUTINE` for awareness, with nothing to acknowledge. Silent rows do not appear there, but remain available through `bin/fm-branch-outcome.sh list`.
+{claude,cursor}    A `SETTLED WAITS` entry names a captain outcome recorded while its task declared a wait, such as on a review board, and the status line that has since ended that wait: never report that wait as still open, and tell the captain only what is new to them.
 2. Away (an away record exists and no daemon runs): the host hands each wake to a headless away session that runs the supervision branch's contract under the record, and you are parked.
 {claude}    Only a wake the host hands back reaches you, as `Stop hook feedback` carrying the close plus one `supervision-host: <why>` line.
 {cursor,opencode,omp,agy}    Only a wake the host hands back reaches you, as a `watcher` follow-up carrying the close plus one `supervision-host: <why>` line.

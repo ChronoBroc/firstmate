@@ -3,9 +3,10 @@
 # optionally acknowledge handled records,
 # annotate every unread line for validated signal status keys, surface unread
 # informational status lines, latest captain-facing statuses not covered by a
-# newer branch outcome, OPEN DECISIONS, captain-call record divergence, and on
+# newer branch outcome, OPEN DECISIONS, captain-call record divergence, on
 # a supervision-host home the supervision session's new and unprocessed
-# outcomes (BRANCH OUTCOMES), then assert liveness.
+# outcomes (BRANCH OUTCOMES), and captain outcomes whose reported wait has
+# since ended (SETTLED WAITS), then assert liveness.
 #
 # Keep sequence-bound row consumption independent from generation-bound episode
 # retirement; docs/watcher-continuity.md owns the recovery contract.
@@ -33,6 +34,8 @@ SCRIPT_DIR="$(d=${BASH_SOURCE[0]%/*}; [ "$d" != "${BASH_SOURCE[0]}" ] || d=.; cd
 . "$SCRIPT_DIR/fm-supervision-engine-lib.sh"
 # shellcheck source=bin/fm-afk-contract.sh
 . "$SCRIPT_DIR/fm-afk-contract.sh"
+# shellcheck source=bin/fm-captain-wait-lib.sh
+. "$SCRIPT_DIR/fm-captain-wait-lib.sh"
 
 DRAIN_TMP=
 DRAIN_VIEW_TMP=
@@ -583,6 +586,60 @@ EOF
   printf 'RECORD DIVERGENCE: reconcile each one - record the captain'"'"'s own words with bin/fm-captain-hold.sh answer <task> --decision-file <path>, or re-open the status decision when that resolution was not the captain'"'"'s word.\n' || return 1
 }
 
+# Print SETTLED WAITS: each captain outcome recorded while its task declared a
+# wait the task's status log has since ended, tied to that outcome and the
+# line that ended it (bin/fm-captain-wait-lib.sh owns the record and the rule).
+# It derives from durable records alone, so it presents a settlement whether or
+# not any wake carried it and whatever a supervision session reported about
+# it. Main only, never while an away record exists (the return drain presents
+# it instead), on every harness. Each entry is presented once and its record is
+# removed only after the section reached stdout; a stale record is removed
+# silently. Bounded, and silent when nothing settled.
+print_settled_waits_section() {
+  local task rc line output='' cleared='' used=0 shown=0 omitted=0 bytes
+  local item_bytes=600 global_bytes=4000 path seq
+  [ "$ACTOR" = main ] || return 0
+  ! fm_afk_contract_away_present "$STATE" || return 0
+  while IFS= read -r task; do
+    [ -n "$task" ] || continue
+    fm_captain_wait_settled "$STATE" "$task"
+    rc=$?
+    if [ "$rc" -eq 3 ]; then
+      path=$(fm_captain_wait_path "$STATE" "$task") && rm -f -- "$path"
+      continue
+    fi
+    [ "$rc" -eq 0 ] || continue
+    line="$task outcome $FM_CAPTAIN_WAIT_SEQ (\"$FM_CAPTAIN_WAIT_SUMMARY\") waited on: $FM_CAPTAIN_WAIT_WAIT -> settled by: $FM_CAPTAIN_WAIT_ENDING"
+    fm_cap_line_var "$line" $((item_bytes - 1))
+    line=$FM_LINE_CAP_LINE
+    bytes=$(( ${#line} + 1 ))
+    if [ $((used + bytes)) -gt "$global_bytes" ]; then
+      omitted=$((omitted + 1))
+      continue
+    fi
+    output="$output$line
+"
+    cleared="$cleared$task $FM_CAPTAIN_WAIT_SEQ
+"
+    used=$((used + bytes))
+    shown=$((shown + 1))
+  done <<EOF
+$(fm_captain_wait_tasks "$STATE")
+EOF
+  [ "$shown" -gt 0 ] || [ "$omitted" -gt 0 ] || return 0
+  printf 'SETTLED WAITS (a captain outcome recorded while its task declared the wait shown, and the line that has since ended that wait - the task no longer waits on it, so never report it as still waiting; tell the captain only what is new to them):\n' || return 1
+  printf '%s' "$output" || return 1
+  if [ "$omitted" -gt 0 ]; then
+    printf 'SETTLED WAITS: %d more held back (byte cap); they follow on the next drain\n' "$omitted" || return 1
+  fi
+  while read -r task seq; do
+    [ -n "$task" ] || continue
+    fm_captain_wait_clear "$STATE" "$task" "$seq" || true
+  done <<EOF
+$cleared
+EOF
+}
+
 # Print BRANCH OUTCOMES: what the supervision host's session recorded since
 # main last drained (docs/supervision-host.md "Captain outcomes"). Off Pi this
 # presentation is what the Pi branch's transcript entries are. It runs only for
@@ -1011,6 +1068,7 @@ if [ ! -s "$FM_WAKE_QUEUE" ]; then
   DRAIN_LOCK_HELD=false
   (print_status_presentation) || true
   print_branch_outcomes_section || BRANCH_OUTCOMES_RC=1
+  print_settled_waits_section || true
   if [ "$RECOVERY_ACK_REQUIRED" = true ]; then
     printf 'WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation %s\n' "${RECOVERY_MARKER_TOKEN##*:}" >&2
   fi
@@ -1033,6 +1091,7 @@ if [ "$ACTOR" = main ]; then
     DRAIN_LOCK_HELD=false
     (print_status_presentation) || true
     print_branch_outcomes_section || BRANCH_OUTCOMES_RC=1
+    print_settled_waits_section || true
     assert_watcher_liveness
     exit "$BRANCH_OUTCOMES_RC"
   fi
@@ -1096,5 +1155,6 @@ printf 'WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --a
 
 (print_status_presentation "$RAW_ROWS") || true
 print_branch_outcomes_section || BRANCH_OUTCOMES_RC=1
+print_settled_waits_section || true
 assert_watcher_liveness
 exit "$BRANCH_OUTCOMES_RC"
