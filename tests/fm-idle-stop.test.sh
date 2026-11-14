@@ -388,6 +388,33 @@ test_typed_command_to_stopped_worker_refused() {
   pass "fm-send: a typed harness command to a stopped worker is refused, never typed into its shell"
 }
 
+test_typed_command_waits_out_a_lifecycle_action() {
+  local dir out rc=0 holder i=0
+  dir=$(new_case typed-locked)
+  add_task "$dir" t1 scout "done [at=$(date +%s)]: report written"
+  config "$dir" 'done_after=0'
+  start_tree "$dir" idle
+  # shellcheck disable=SC2016  # Expanded by the child bash.
+  run_env "$dir" bash -c '. "$1/bin/fm-wake-lib.sh"; STATE=$2; fm_lock_try_acquire "$2/.control-t1.lock" || exit 1; : > "$2/.held"; /bin/sleep 30' \
+    _ "$ROOT" "$dir/home/state" >/dev/null &
+  holder=$!
+  printf '%s\n' "$holder" >> "$TREE_PIDS"
+  while [ ! -e "$dir/home/state/.held" ] && [ "$i" -lt 100 ]; do /bin/sleep 0.1; i=$((i + 1)); done
+  [ -e "$dir/home/state/.held" ] || fail "setup: the lifecycle lock was not taken"
+  : > "$dir/fake/literal"
+  out=$(run_env "$dir" "$SEND" t1 '/compact') || rc=$?
+  kill_tree "$holder"
+  [ "$rc" -ne 0 ] || fail "a typed command must not be sent while a lifecycle action holds the task: $out"
+  assert_contains "$out" "another lifecycle action is running" "the refusal names why"
+  [ ! -s "$dir/fake/literal" ] || fail "a typed command was sent during a lifecycle action: $(cat "$dir/fake/literal")"
+  rc=0
+  out=$(run_env "$dir" "$SEND" t1 '/compact') || rc=$?
+  assert_contains "$(cat "$dir/fake/literal")" "/compact" "once the action ends the typed command is sent: $out"
+  out=$(run_env "$dir" "$CONTROL" t1 exit --only-if-idle 2>&1) || true
+  assert_contains "$out" "stopped" "the lifecycle lock is released after the typed send"
+  pass "fm-send: in a home that stops idle sessions, a typed harness command never races a lifecycle action"
+}
+
 test_watcher_inbox_relaunches_without_wake() {
   local dir
   dir=$(stopped_case watch-revive)
@@ -486,6 +513,7 @@ test_stale_record_ignored_and_removed
 test_spend_cap_does_not_count_a_stopped_worker
 test_steer_relaunches_a_stopped_worker
 test_typed_command_to_stopped_worker_refused
+test_typed_command_waits_out_a_lifecycle_action
 test_watcher_inbox_relaunches_without_wake
 test_refused_relaunch_is_a_wait_reported_once
 test_stale_path_skips_a_stopped_worker

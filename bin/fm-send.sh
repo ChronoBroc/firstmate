@@ -1079,11 +1079,27 @@ else
   fi
   # A session stopped while idle (bin/fm-idle-stop.sh) has a bare shell where
   # its harness was, so typed parser input would run as a shell command there.
-  if [ "$INBOX_PLANE" = 0 ] && [ -n "$TARGET_SELECTOR" ] && [ -n "$TARGET_META" ] \
-    && fm_idle_stop_record_valid "$STATE" "$(fm_send_id_from_meta "$TARGET_META")" "$TARGET_META"; then
-    fm_send_known_undelivered_cleanup || true
-    echo "error: $TARGET_SELECTOR's session was stopped while idle, so a typed harness command has nothing to reach; send an ordinary steer (it relaunches the worker) or run bin/fm-control.sh $(fm_send_id_from_meta "$TARGET_META") relaunch first" >&2
-    exit 1
+  # In a home that stops idle sessions, typed input holds the task's lifecycle
+  # lock until it exits, so no idle-session exit can run between this check
+  # and the keystrokes.
+  if [ "$INBOX_PLANE" = 0 ] && [ -n "$TARGET_SELECTOR" ] && [ -n "$TARGET_META" ]; then
+    TYPED_TASK_ID=$(fm_send_id_from_meta "$TARGET_META")
+    if [ -n "$TYPED_TASK_ID" ] \
+      && { [ -e "$(fm_idle_stop_config_path "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}")" ] \
+        || [ -e "$(fm_idle_stop_record_path "$STATE" "$TYPED_TASK_ID")" ]; }; then
+      if ! fm_lock_try_acquire "$STATE/.control-$TYPED_TASK_ID.lock"; then
+        fm_send_known_undelivered_cleanup || true
+        echo "error: another lifecycle action is running for task $TYPED_TASK_ID, so a typed harness command was not sent; retry it shortly" >&2
+        exit 1
+      fi
+      TYPED_CONTROL_LOCK="$STATE/.control-$TYPED_TASK_ID.lock"
+      trap 'fm_lease_guard_release; fm_lock_release "$TYPED_CONTROL_LOCK" >/dev/null 2>&1 || true' EXIT
+    fi
+    if fm_idle_stop_record_valid "$STATE" "$TYPED_TASK_ID" "$TARGET_META"; then
+      fm_send_known_undelivered_cleanup || true
+      echo "error: $TARGET_SELECTOR's session was stopped while idle, so a typed harness command has nothing to reach; send an ordinary steer (it relaunches the worker) or run bin/fm-control.sh $TYPED_TASK_ID relaunch first" >&2
+      exit 1
+    fi
   fi
   if [ "$INBOX_PLANE" = 1 ] && [ "$TARGET_BACKEND" = remote ]; then
     # Remote inbox leg: the message becomes a durable record in the remote
