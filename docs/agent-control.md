@@ -59,6 +59,8 @@ For a typed exit, `exit` reads the composer's state before typing the exit comma
 A stopped agent whose pane still shows the dialog text is not refused.
 [`fm_composer_blocking_dialog`](../bin/fm-composer-lib.sh) owns the recognised set, which today is only Claude's background-task exit picker; [its verification record](verification/runtime-backends.md#claude-background-task-exit-picker) lists the dialogs that are not covered.
 T3 Code has no composer and its `/mcp` tools offer no session stop, so `exit` refuses there before sending anything ([`t3code-backend.md`](t3code-backend.md#current-lifecycle-and-safety)).
+`exit --only-if-idle` replaces the interrupt with a refusal: a task that does not read exactly idle gets `deferred:` and exit 75 with nothing sent, which is how the [idle session stop](configuration.md#idle-session-stop-configidle-session-stop) never cancels a turn.
+A session that stop ended is recorded in `state/<id>.session-stopped` ([`bin/fm-idle-stop-lib.sh`](../bin/fm-idle-stop-lib.sh) owns it); a completed `relaunch` removes that record.
 
 **Teardown and discard are not verbs and will not become verbs.**
 `exit` stops an agent and preserves everything else.

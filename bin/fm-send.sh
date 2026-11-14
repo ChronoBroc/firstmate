@@ -69,6 +69,11 @@
 # unsubmitted in the composer is reported as not reaching the target (the
 # ring's contract is owned by bin/fm-task-inbox-lib.sh); no composer verdict is
 # delivery proof on this plane, and a failed ring never fails the send.
+# A worker whose session was stopped while idle (bin/fm-idle-stop-lib.sh owns
+# that record) has no agent to ring: its steer is recorded as usual and the
+# worker is relaunched detached to read it (bin/fm-idle-stop.sh revive), which
+# reports a refused relaunch as a wait with the steer kept; a TYPED-plane send
+# to such a worker is refused, since a bare shell would run the text.
 #
 # TYPED - the LOCAL text submitted directly instead of through the inbox. On a
 # pane backend, a harness-native invocation (a leading "/", or a leading "$" to
@@ -292,6 +297,8 @@ fi
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-task-inbox-lib.sh
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
+# shellcheck source=bin/fm-idle-stop-lib.sh
+. "$SCRIPT_DIR/fm-idle-stop-lib.sh"
 
 FM_GUARD_CONTINUE_LINE='This is a supervision warning only; the requested message WILL still be sent.' "$SCRIPT_DIR/fm-guard.sh" || true
 
@@ -1070,6 +1077,14 @@ else
       esac
     fi
   fi
+  # A session stopped while idle (bin/fm-idle-stop.sh) has a bare shell where
+  # its harness was, so typed parser input would run as a shell command there.
+  if [ "$INBOX_PLANE" = 0 ] && [ -n "$TARGET_SELECTOR" ] && [ -n "$TARGET_META" ] \
+    && fm_idle_stop_record_valid "$STATE" "$(fm_send_id_from_meta "$TARGET_META")" "$TARGET_META"; then
+    fm_send_known_undelivered_cleanup || true
+    echo "error: $TARGET_SELECTOR's session was stopped while idle, so a typed harness command has nothing to reach; send an ordinary steer (it relaunches the worker) or run bin/fm-control.sh $(fm_send_id_from_meta "$TARGET_META") relaunch first" >&2
+    exit 1
+  fi
   if [ "$INBOX_PLANE" = 1 ] && [ "$TARGET_BACKEND" = remote ]; then
     # Remote inbox leg: the message becomes a durable record in the remote
     # home's steering inbox, written idempotently by the host-local leg, then
@@ -1275,10 +1290,21 @@ else
         ;;
       esac
     fi
+    # A worker whose session was stopped while idle comes back for its steer:
+    # the relaunch runs detached (bin/fm-idle-stop.sh revive), and a refusal is
+    # recorded as a wait the watcher reports, with the steer kept here.
+    if [ "$ring_rc" = 3 ] && fm_idle_stop_record_valid "$STATE" "$INBOX_TASK_ID" "$TARGET_META"; then
+      ring_rc=4
+      if [ ! -d "$STATE/.idle-revive-$INBOX_TASK_ID.lock" ]; then
+        FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE \
+          nohup "$SCRIPT_DIR/fm-idle-stop.sh" revive "$INBOX_TASK_ID" </dev/null >/dev/null 2>&1 &
+      fi
+    fi
     case "$ring_rc" in
     1) echo "fm-send: doorbell skipped (composer visibly holds pending text); the steer is durably recorded at $INBOX_RECORD and $ring_retry" >&2 ;;
     2) echo "fm-send: doorbell did not reach $T; the steer is durably recorded at $INBOX_RECORD and $ring_retry" >&2 ;;
     3) echo "fm-send: doorbell not typed because the agent in $T has exited; the steer is durably recorded at $INBOX_RECORD for recovery (stuck-crewmate-recovery), and the watcher will not re-ring a dead pane" >&2 ;;
+    4) echo "fm-send: $INBOX_TASK_ID's session was stopped while idle; it is being relaunched to read the steer durably recorded at $INBOX_RECORD (a refused relaunch is reported as a wait, with the steer kept)" >&2 ;;
     esac
     exit 0
   fi

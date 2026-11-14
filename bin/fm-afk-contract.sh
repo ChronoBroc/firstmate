@@ -220,9 +220,9 @@ fm_afk_contract_present() {  # [state-dir]
 
 # What one bin/fm-crew-state.sh reading says about the spend cap (the header's
 # SPEND CAP): 0 when it counts and 1 when the task is not working - parked at a
-# gate, done, blocked, paused, or failed, its endpoint read gone, or an exactly
-# idle harness with no status declaration - so the harness's own busy reading
-# decides. Anything else, an unreadable or empty reading included,
+# gate, done, blocked, paused, or failed, its endpoint read gone, its session
+# stopped while idle (bin/fm-idle-stop-lib.sh), or an exactly idle harness with
+# no status declaration - so the harness's own busy reading decides. Anything else, an unreadable or empty reading included,
 # counts, so an unreadable fleet can never exceed the cap.
 fm_afk_contract_reading_counts() {  # <crew-state line>
   local sep=' · '
@@ -231,7 +231,8 @@ fm_afk_contract_reading_counts() {  # <crew-state line>
     "state: parked${sep}"* | "state: done${sep}"* | "state: blocked${sep}"* | \
       "state: paused${sep}"* | "state: failed${sep}"* | \
       "state: unknown${sep}source: none${sep}backend target gone"* | \
-      "state: unknown${sep}source: none${sep}no current-state source available") return 1 ;;
+      "state: unknown${sep}source: none${sep}no current-state source available" | \
+      "state: unknown${sep}source: status-log${sep}session stopped ("*) return 1 ;;
   esac
   return 0
 }

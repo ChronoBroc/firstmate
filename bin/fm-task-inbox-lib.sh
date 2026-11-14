@@ -20,7 +20,9 @@
 # absence of the worker's acknowledgement and re-rung on a bounded schedule.
 # A positively dead or missing endpoint bypasses that schedule without being
 # submitted to, and its unhandled record surfaces through the ordinary stale wake
-# into stuck-crewmate-recovery.
+# into stuck-crewmate-recovery - except a session stopped while idle
+# (bin/fm-idle-stop-lib.sh), whose unhandled record relaunches the worker
+# instead (bin/fm-watch.sh inbox_steer_check, bin/fm-idle-stop.sh revive).
 #
 # Layout under <state-dir>:
 #   <task>.inbox/NNN.msg       one durable steer, numeric sequence, atomic rename

@@ -3,7 +3,7 @@
 # lifecycle verbs addressed to an exact task id.
 #
 # Usage: fm-control.sh <task-id> interrupt
-#        fm-control.sh <task-id> exit
+#        fm-control.sh <task-id> exit [--only-if-idle]
 #        fm-control.sh <task-id> relaunch [--harness <name>] [--model <name>]
 #                                         [--effort <level>] [--account <entry>]
 #                                         (--note <text> | --note-file <path>)
@@ -50,7 +50,12 @@
 #              `already-stopped`, because the endpoint this verb normally
 #              preserves did not survive; a pane that turns out to be there and
 #              idle is the ordinary `already-stopped`; one whose agent is back
-#              takes the ordinary interrupt-then-exit path. TMUX proves absence
+#              takes the ordinary interrupt-then-exit path. --only-if-idle
+#              replaces the interrupt with a refusal: when the task does not
+#              read exactly idle (bin/fm-busy-lib.sh), it prints `deferred:`
+#              and exits 75 with nothing sent, so a caller that may stop only
+#              an idle agent (bin/fm-idle-stop.sh) never cancels a turn.
+#              TMUX proves absence
 #              against the server identity the record carries (tmux_socket,
 #              tmux_server); a record without it REFUSES, because this verb
 #              cannot tell a destroyed window from one on a tmux server it
@@ -103,6 +108,8 @@
 #              published, so no other launch decides against the same count;
 #              when another launch or teardown holds it, the relaunch prints
 #              `deferred:` and exits 75 the same way.
+#              A completed relaunch removes the task's stopped-session record
+#              (bin/fm-idle-stop-lib.sh), since its session is running again.
 #              A replacement omp secondmate likewise passes its per-secondmate
 #              omp profile pin (bin/fm-omp-profile-lib.sh) before the old agent
 #              stops.
@@ -223,6 +230,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-exclude-tools-lib.sh"
 # shellcheck source=bin/fm-task-brief-lib.sh
 . "$SCRIPT_DIR/fm-task-brief-lib.sh"
+# shellcheck source=bin/fm-idle-stop-lib.sh
+. "$SCRIPT_DIR/fm-idle-stop-lib.sh"
 
 POLL=${FM_CONTROL_POLL:-0.5}
 SETTLE_WAIT=${FM_CONTROL_SETTLE_WAIT:-5}
@@ -301,6 +310,7 @@ EFFORT_SET=0
 ACCOUNT_SET=0
 NOTE=
 NOTE_SET=0
+ONLY_IF_IDLE=0
 control_want_value=
 for control_arg in "$@"; do
   if [ -n "$control_want_value" ]; then
@@ -334,6 +344,7 @@ for control_arg in "$@"; do
     --note) control_want_value=note ;;
     --note=*) NOTE=${control_arg#--note=}; NOTE_SET=1 ;;
     --note-file) control_want_value=note_file ;;
+    --only-if-idle) ONLY_IF_IDLE=1 ;;
     --note-file=*)
       [ -f "${control_arg#--note-file=}" ] || die "--note-file '${control_arg#--note-file=}' is not a readable file"
       NOTE=$(cat "${control_arg#--note-file=}")
@@ -351,6 +362,7 @@ if [ "$VERB" != relaunch ]; then
   [ "$HARNESS_SET" = 0 ] && [ "$MODEL_SET" = 0 ] && [ "$EFFORT_SET" = 0 ] && [ "$ACCOUNT_SET" = 0 ] && [ "$NOTE_SET" = 0 ] \
     || die "--harness, --model, --effort, --account, and --note apply to 'relaunch' only"
 fi
+[ "$ONLY_IF_IDLE" = 0 ] || [ "$VERB" = exit ] || die "--only-if-idle applies to 'exit' only"
 [ "$ACCOUNT_SET" = 0 ] || [ -n "$NEW_ACCOUNT" ] || die "--account requires a non-empty value"
 [ "$HARNESS_SET" = 0 ] || [ -n "$NEW_HARNESS" ] || die "--harness requires a non-empty value"
 [ "$MODEL_SET" = 0 ] || [ -n "$NEW_MODEL" ] || die "--model requires a non-empty value"
@@ -794,7 +806,18 @@ do_exit() {
       esac
       ;;
   esac
-  # A busy agent is interrupted first before the exit command is submitted.
+  # A busy agent is interrupted first before the exit command is submitted,
+  # unless the caller asked for an idle-only stop, which refuses instead.
+  if [ "$ONLY_IF_IDLE" = 1 ]; then
+    verdict=$(busy_verdict)
+    case "$verdict" in
+      idle\ *) ;;
+      *)
+        echo "deferred: task $ID does not read idle ($verdict); --only-if-idle sent nothing" >&2
+        exit 75
+        ;;
+    esac
+  fi
   case "$(busy_verdict)" in
     busy*)
       cancel=$(deliver_interrupt) || return $?
@@ -1349,6 +1372,7 @@ do_relaunch() {
 
   journal_write complete "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
   RELAUNCH_ACTIVE=0
+  fm_idle_stop_record_clear "$STATE" "$ID"
   echo "relaunched $ID harness=$TARGET_HARNESS from=$PRIOR_RECORDED_HARNESS model=$TARGET_MODEL effort=$TARGET_EFFORT backend=$BACKEND endpoint=$T worktree=$WT"
 }
 

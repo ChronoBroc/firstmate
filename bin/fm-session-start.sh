@@ -365,6 +365,8 @@ PRIMARY_HARNESS=$("$SCRIPT_DIR/fm-harness.sh" 2>/dev/null || printf unknown)
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-idle-stop-lib.sh
+. "$SCRIPT_DIR/fm-idle-stop-lib.sh"
 # shellcheck source=bin/fm-tasks-axi-lib.sh
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
@@ -947,6 +949,14 @@ for meta in "$STATE"/*.meta; do
     # is the probe's own verdict that the endpoint is gone.
     if [ "$endpoint_rc" -eq 0 ]; then
       printf 'endpoint: alive (backend=%s window=%s)\n' "$backend" "$window"
+      # An idle stop is expected and recorded, not a dead worker to recover.
+      # shellcheck disable=SC2016  # Positional parameters expand inside the child bash.
+      if [ -e "$STATE/$id.session-stopped" ] && fm_run_timed "$ENDPOINT_TIMEOUT" bash -c '
+          . "$1/fm-backend.sh" && . "$1/fm-idle-stop-lib.sh" && fm_idle_stop_record_valid "$2" "$3" "$4"
+        ' _ "$SCRIPT_DIR" "$STATE" "$id" "$meta"; then
+        printf 'session: %s (bin/fm-idle-stop.sh; a steer or fm-control.sh %s relaunch brings it back)\n' \
+          "$(fm_idle_stop_record_describe "$STATE" "$id")" "$id"
+      fi
     elif [ "$endpoint_rc" -eq 124 ] || [ "$endpoint_rc" -ge 128 ]; then
       printf 'endpoint: error (backend=%s window=%s - the endpoint read died or hit its %ss bound; the digest continued past it)\n' \
         "$backend" "$window" "$ENDPOINT_TIMEOUT"

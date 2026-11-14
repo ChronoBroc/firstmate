@@ -166,6 +166,17 @@
 #   check: inactive-outcome bounded poll-loop reconciliation found a suspicious
 #                          inactive terminal outcome that still lacks its durable
 #                          upstream receipt
+#   check: idle-stop: <task> relaunch waits: <refusal>
+#                          a steer reached a worker whose session was stopped
+#                          while idle (bin/fm-idle-stop.sh), and relaunching it
+#                          was refused (the away spend cap, an account pin, a
+#                          launch refusal); reported once per refusal reason,
+#                          the steer stays in its inbox, and the relaunch is
+#                          retried silently after its wait. A session stopped
+#                          this way is otherwise an expected state: its window
+#                          skips the pane-staleness, wedge, and dead-endpoint
+#                          paths, and its steering inbox relaunches it instead
+#                          of escalating (idle_stop_tick, inbox_steer_check)
 #   check: secondmate wake-loop stalled: mate=<id> row=<seq> idle=<seconds>s
 #                          an actionable row in an endpoint-recorded local
 #                          secondmate home's durable wake queue did not advance
@@ -300,6 +311,10 @@ WATCH_HOME_EXISTED=0
 # and wake emission (secondmate_liveness_tick below).
 # shellcheck source=/dev/null # Analyzed separately as a canonical lint root.
 . "$SCRIPT_DIR/fm-secondmate-liveness-lib.sh"
+# Idle-session stop: the record, config, and notice contract are
+# bin/fm-idle-stop-lib.sh's; the sweep and relaunch are bin/fm-idle-stop.sh's.
+# shellcheck source=bin/fm-idle-stop-lib.sh
+. "$SCRIPT_DIR/fm-idle-stop-lib.sh"
 
 WATCH_LOCK="$STATE/.watch.lock"
 WATCH_PATH="$SCRIPT_DIR/fm-watch.sh"
@@ -632,6 +647,15 @@ inbox_steer_busy() {  # <window> <backend> <task> <tail40>
 # being healthy, while an unacknowledged instruction can still be a stuck steer.
 inbox_steer_check() {  # <window> <task>
   local w=$1 task=$2 action verb rec count tail40 reason='' ring_rc backend agent_state
+  # A session stopped while idle is relaunched by its steer, at once and
+  # without the re-ring ladder: there is no agent to ring, and no recovery to
+  # escalate (idle_stop_session_stopped owns the read).
+  if idle_stop_session_stopped "$task"; then
+    if fm_idle_stop_unhandled_steer "$STATE" "$task"; then
+      idle_stop_revive_detached "$task"
+    fi
+    return 0
+  fi
   action=$(fm_task_inbox_due_action "$STATE" "$task") || return 0
   verb=${action%% *}
   [ "$verb" != quiet ] || return 0
@@ -3623,6 +3647,63 @@ event_wait_or_sleep() {
   esac
 }
 
+# Idle-session stop (bin/fm-idle-stop.sh). The sweep runs detached on its own
+# cadence for the same beacon-freshness reason as the publishers above: one
+# sweep may take an exit command's full postcondition wait. It wakes nobody;
+# only a refused relaunch on demand reaches firstmate, once per refusal reason,
+# through idle_stop_notice_surface.
+IDLE_STOP_INTERVAL=${FM_IDLE_STOP_INTERVAL:-60}
+case "$IDLE_STOP_INTERVAL" in ''|*[!0-9]*|0) IDLE_STOP_INTERVAL=60 ;; esac
+IDLE_STOP_PID=
+idle_stop_tick() {
+  if [ -n "$IDLE_STOP_PID" ]; then
+    if kill -0 "$IDLE_STOP_PID" 2>/dev/null; then
+      return 0
+    fi
+    wait "$IDLE_STOP_PID" 2>/dev/null || true
+    IDLE_STOP_PID=
+  fi
+  [ "$(age_of "$STATE/.last-idle-stop")" -ge "$IDLE_STOP_INTERVAL" ] || return 0
+  touch "$STATE/.last-idle-stop"
+  FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG \
+    "$SCRIPT_DIR/fm-idle-stop.sh" sweep </dev/null >/dev/null 2>&1 &
+  IDLE_STOP_PID=$!
+}
+
+# 0 when <task>'s session was stopped while idle and its record still holds.
+# The file test runs first, so a task with no record costs one stat.
+idle_stop_session_stopped() {  # <task>
+  [ -n "$1" ] && [ -e "$(fm_idle_stop_record_path "$STATE" "$1")" ] || return 1
+  fm_idle_stop_record_valid "$STATE" "$1" "$STATE/$1.meta"
+}
+
+# Start one relaunch on demand for <task>, unless one is already running or a
+# refused one is still waiting out its retry interval.
+idle_stop_revive_detached() {  # <task>
+  [ ! -d "$STATE/.idle-revive-$1.lock" ] || return 0
+  ! fm_idle_stop_notice_holds "$STATE" "$1" || return 0
+  triage_log "idle-stop: relaunching $1 for its waiting steer"
+  FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG \
+    nohup "$SCRIPT_DIR/fm-idle-stop.sh" revive "$1" </dev/null >/dev/null 2>&1 &
+}
+
+# Report each new relaunch refusal once. The notice stays for the retry
+# cadence; a later identical refusal keeps its surfaced flag.
+idle_stop_notice_surface() {
+  local f id reason
+  for f in "$STATE"/*.session-revive; do
+    [ -f "$f" ] || continue
+    [ "$(fm_idle_stop_field "$f" surfaced 2>/dev/null)" = 0 ] || continue
+    id=${f##*/}
+    id=${id%.session-revive}
+    reason=$(fm_idle_stop_field "$f" reason 2>/dev/null) || reason='relaunch refused'
+    reason="check: idle-stop: $id relaunch waits: $reason (its steer stays in its inbox; the relaunch is retried after its wait)"
+    fm_wake_append check "idle-stop-$id" "$reason" || exit 1
+    fm_idle_stop_notice_mark_surfaced "$STATE" "$id" || true
+    wake "$reason"
+  done
+}
+
 # --- Main entry: the runtime below runs only when this file is executed as a
 # script. When sourced (unit tests loading the functions above), return here
 # before acquiring the singleton lock or entering the blocking loop.
@@ -4058,6 +4139,9 @@ while :; do
     lane_capacity_publish_detached
   fi
 
+  idle_stop_tick
+  idle_stop_notice_surface
+
   # Bearings publishes reconcile asks as local one-shot request files and
   # returns before any mate delivery. Supervision owns their later delivery;
   # a skipped or failed request remains durable for another poll.
@@ -4478,6 +4562,14 @@ EOF
     # exemption below, because a mate's steers land in an inbox too.
     [ -z "$task" ] || inbox_steer_check "$w" "$task"
     key=$(window_key "$w")
+    # A session stopped while idle is a recorded, expected state, not a quiet,
+    # wedged, or dead worker: no stale, wedge, or dead-record path applies to it,
+    # and the per-hash bookkeeping restarts once it runs again.
+    if [ -n "$task" ] && idle_stop_session_stopped "$task"; then
+      clear_pause_tracking "$key"
+      rm -f "$STATE/.hash-$key" "$STATE/.count-$key"
+      continue
+    fi
     last=$(status_declared_wait_line "$STATE/$task.status")
     if ! status_is_paused_or_captain_held "$last" && [ -e "$STATE/.paused-$key" ]; then
       clear_pause_tracking "$key"
