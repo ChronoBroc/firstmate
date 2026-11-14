@@ -276,19 +276,86 @@ test_drain_presents_settlement_without_the_wake_and_waits_out_away() {
   pass "the drain derives the settlement from durable records and holds it while the captain is away"
 }
 
-test_newer_captain_outcome_without_a_wait_supersedes_an_open_one() {
-  local dir state drain_out
-  dir=$(make_case superseded); state="$dir/state"; drain_out="$dir/drain.out"
-  setup_recorded_wait "$dir" >/dev/null || fail "setup of the recorded wait failed"
-  printf 'working [at=1794687100]: the owner asked for a redraw instead\n' >> "$state/designer.status"
-  FM_STATE_OVERRIDE="$state" "$OUTCOME" append --task designer --verdict captain \
-    --summary "The captain asked for a redraw; round 7 is withdrawn." >/dev/null \
+record_captain_outcome() {  # <state> <summary>
+  FM_STATE_OVERRIDE="$1" "$OUTCOME" append --task designer --verdict captain \
+    --summary "$2" --wake "signal: $1/designer.status"
+}
+
+test_outcome_on_another_key_leaves_the_board_wait_to_settle_visibly() {
+  local dir state fakebin out drain_out seq pid verdict
+  dir=$(make_case other-key-outcome); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; drain_out="$dir/drain.out"
+  seq=$(setup_recorded_wait "$dir") || fail "setup of the recorded wait failed"
+  printf 'blocked [key=credential] [at=1794686700]: need the store API credential\n' >> "$state/designer.status"
+  record_captain_outcome "$state" "Blocked on the store API credential." >/dev/null \
+    || fail "the credential captain outcome was not stored"
+  printf 'resolved [key=credential] [at=1794686800]: credential received\n' >> "$state/designer.status"
+  printf '%s' "$(seen_sig "$state/designer.status")" > "$state/.seen-designer_status"
+  printf '%s\n' "$ANSWER_LINE" >> "$state/designer.status"
+  export FM_FAKE_CREW_STATE='state: working · source: pane · busy drawing round 8'
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  verdict=$(watch_verdict "$state" "$pid")
+  [ "$verdict" = exit ] || reap "$pid"
+  unset FM_FAKE_CREW_STATE
+  [ "$verdict" = exit ] \
+    || fail "the board answer after an outcome on another key was $verdict by the watcher instead of reaching a session"
+  grep -F "$(printf '\tneeds-decision: ')" "$state/.wake-queue" | grep -F designer.status >/dev/null \
+    || fail "the board answer's queued row is not main-owned: $(cat "$state/.wake-queue")"
+  drain_and_ack "$state" "$drain_out" || fail "main's drain failed"
+  grep -F "designer outcome $seq (" "$drain_out" | grep -F "$ANSWER_LINE" >/dev/null \
+    || fail "the board wait recorded by outcome $seq was not presented as settled: $(cat "$drain_out")"
+  pass "a captain outcome on another key leaves the board wait to settle visibly"
+}
+
+test_newer_captain_outcome_without_a_wait_leaves_the_open_wait() {
+  local dir state drain_out seq
+  dir=$(make_case no-wait-outcome); state="$dir/state"; drain_out="$dir/drain.out"
+  seq=$(setup_recorded_wait "$dir") || fail "setup of the recorded wait failed"
+  printf 'working [at=1794687100]: sketching round 8 while the board waits\n' >> "$state/designer.status"
+  record_captain_outcome "$state" "Sketching round 8 while the board waits." >/dev/null \
     || fail "the newer captain outcome was not stored"
   printf '%s\n' "$ANSWER_LINE" >> "$state/designer.status"
   drain_and_ack "$state" "$drain_out" || fail "main's drain failed"
-  ! grep -F 'SETTLED WAITS' "$drain_out" >/dev/null \
-    || fail "a wait superseded by a newer captain outcome was presented as settled: $(cat "$drain_out")"
-  pass "a newer captain outcome recorded outside any wait supersedes the open recorded wait"
+  grep -F "designer outcome $seq (" "$drain_out" | grep -F "$ANSWER_LINE" >/dev/null \
+    || fail "a newer outcome with no wait in force cancelled the recorded wait: $(cat "$drain_out")"
+  pass "a newer captain outcome with no wait in force leaves the recorded wait to settle visibly"
+}
+
+test_unpresented_settlement_survives_a_new_same_key_wait() {
+  local dir state drain_out seq next round8
+  dir=$(make_case same-key-settled); state="$dir/state"; drain_out="$dir/drain.out"
+  round8='resolved [key=board-review] [at=1794688000]: round 8 answered'
+  seq=$(setup_recorded_wait "$dir") || fail "setup of the recorded wait failed"
+  printf '%s\n' "$ANSWER_LINE" >> "$state/designer.status"
+  printf 'paused [key=board-review] [at=1794687400]: round 8 waits for the owner\n' >> "$state/designer.status"
+  next=$(record_captain_outcome "$state" "Round 8 is on the board. Waiting for the captain's answers.") \
+    || fail "the round 8 captain outcome was not stored"
+  drain_and_ack "$state" "$drain_out" || fail "main's drain failed"
+  grep -F "designer outcome $seq (" "$drain_out" | grep -F "$ANSWER_LINE" >/dev/null \
+    || fail "the round 7 settlement was lost to the round 8 wait: $(cat "$drain_out")"
+  ! grep -F "designer outcome $next (" "$drain_out" >/dev/null \
+    || fail "the open round 8 wait was presented before its answer: $(cat "$drain_out")"
+  printf '%s\n' "$round8" >> "$state/designer.status"
+  drain_and_ack "$state" "$drain_out.2" || fail "main's second drain failed"
+  grep -F "designer outcome $next (" "$drain_out.2" | grep -F "$round8" >/dev/null \
+    || fail "the round 8 wait did not settle on its own answer: $(cat "$drain_out.2")"
+  pass "an unpresented settlement survives a new same-key wait, which settles on its own answer"
+}
+
+test_wait_whose_status_log_was_replaced_is_presented_once_as_unconfirmable() {
+  local dir state drain_out seq
+  dir=$(make_case replaced-log); state="$dir/state"; drain_out="$dir/drain.out"
+  seq=$(setup_recorded_wait "$dir") || fail "setup of the recorded wait failed"
+  printf 'working [at=1794688000]: a fresh log after a relaunch\n' > "$state/designer.status.new"
+  mv -f "$state/designer.status.new" "$state/designer.status"
+  drain_and_ack "$state" "$drain_out" || fail "main's drain failed"
+  grep -F "designer outcome $seq's wait" "$drain_out" | grep -F 'can no longer be confirmed' >/dev/null \
+    || fail "a wait whose status log was replaced vanished silently: $(cat "$drain_out")"
+  drain_and_ack "$state" "$drain_out.2" || fail "main's second drain failed"
+  ! grep -F 'SETTLED WAITS' "$drain_out.2" >/dev/null \
+    || fail "an unconfirmable wait was presented again after main saw it"
+  pass "a wait whose status log was replaced is presented once as unconfirmable"
 }
 
 fm_test_run \
@@ -301,4 +368,7 @@ fm_test_run \
   test_unrelated_resolve_neither_settles_nor_surfaces \
   test_resolve_without_a_recorded_wait_stays_routine \
   test_drain_presents_settlement_without_the_wake_and_waits_out_away \
-  test_newer_captain_outcome_without_a_wait_supersedes_an_open_one
+  test_outcome_on_another_key_leaves_the_board_wait_to_settle_visibly \
+  test_newer_captain_outcome_without_a_wait_leaves_the_open_wait \
+  test_unpresented_settlement_survives_a_new_same_key_wait \
+  test_wait_whose_status_log_was_replaced_is_presented_once_as_unconfirmable

@@ -69,8 +69,9 @@
 #     it from a bounded window of the store's newest complete rows when it is
 #     absent, so a home whose store predates it gains one at its next session
 #     start without scanning lifetime history.
-#   - Captain wait: a captain row also records or clears the task's
-#     $STATE/.<task>.captain-wait; bin/fm-captain-wait-lib.sh owns that record.
+#   - Captain wait: a captain row also records each wait its task has in force,
+#     one $STATE/.<task>.captain-wait.<seq>.<key> per key, never removing a
+#     record for another key; bin/fm-captain-wait-lib.sh owns those records.
 #   - Every mutation runs under $STATE/.branch-outcomes.lock so the branch
 #     extension and a concurrent session-start replay cannot interleave.
 #   - The store is written BEFORE the outcome is delivered to main

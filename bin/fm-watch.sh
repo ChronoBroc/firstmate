@@ -3492,7 +3492,7 @@ signal_files_actionable() {  # <status-file> ...
     # The line that ends a wait a captain outcome reported is routine progress
     # to the span, but main was told the task waits, so the signal is
     # decision-owned whoever handles it (bin/fm-captain-wait-lib.sh).
-    if fm_captain_wait_settled "$STATE" "$task"; then
+    if fm_captain_wait_any_settled "$STATE" "$task"; then
       needs_decision=1
     fi
     if [ "$needs_decision" -eq 1 ]; then

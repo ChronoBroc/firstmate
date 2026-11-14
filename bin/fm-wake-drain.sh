@@ -586,18 +586,6 @@ EOF
   printf 'RECORD DIVERGENCE: reconcile each one - record the captain'"'"'s own words with bin/fm-captain-hold.sh answer <task> --decision-file <path>, or re-open the status decision when that resolution was not the captain'"'"'s word.\n' || return 1
 }
 
-# Print SETTLED WAITS: each captain outcome recorded while its task declared a
-# wait the task's status log has since ended, tied to that outcome and the
-# line that ended it (bin/fm-captain-wait-lib.sh owns the record and the rule).
-# It derives from durable records alone, so it presents a settlement whether or
-# not any wake carried it and whatever a supervision session reported about
-# it. Main only, never while an away record exists (the return drain presents
-# it instead), on every harness. Each entry is presented once and its record is
-# removed only after the section reached stdout; a stale record is removed
-# silently. An entry always carries its outcome seq and its settling line; the
-# summary is shortened first, then the wait text, to fit. Removal compares and deletes under $STATE/.branch-outcomes.lock and
-# skips to the next drain while that lock stays busy. Bounded, and silent when
-# nothing settled.
 # Set FM_LINE_CAP_LINE to <text> cut to at most <max> characters, or to nothing
 # when <max> leaves no room for the truncation marker.
 settled_wait_fit() {  # <text> <max>
@@ -608,29 +596,48 @@ settled_wait_fit() {  # <text> <max>
   fm_cap_line_var "$1" "$2"
 }
 
+# Print SETTLED WAITS: each recorded captain wait (one record per outcome and
+# key, bin/fm-captain-wait-lib.sh owns the record and the rule) that the task's
+# status log has since ended, tied to its outcome and the line that ended it,
+# and each one that can no longer be confirmed because the status log is gone
+# or was replaced. It derives from durable records alone, so it presents a
+# settlement whether or not any wake carried it and whatever a supervision
+# session reported about it. Main only, never while an away record exists (the
+# return drain presents it instead), on every harness. Each entry is presented
+# once and exactly its record is removed only after the section reached
+# stdout, under $STATE/.branch-outcomes.lock, skipping removal to the next
+# drain while that lock stays busy; an open record is never removed. A settled
+# entry always carries its outcome seq and its settling line; the summary is
+# shortened first, then the wait text, to fit. Bounded, and silent when
+# nothing settled.
 print_settled_waits_section() {
-  local task rc line output='' cleared='' stale='' used=0 shown=0 omitted=0 bytes
-  local item_bytes=600 global_bytes=4000 seq lock="$STATE/.branch-outcomes.lock" ending summary room
+  local path task rc line output='' cleared='' used=0 shown=0 omitted=0 bytes
+  local item_bytes=600 global_bytes=4000 lock="$STATE/.branch-outcomes.lock" ending summary room
   [ "$ACTOR" = main ] || return 0
   ! fm_afk_contract_away_present "$STATE" || return 0
-  while IFS= read -r task; do
-    [ -n "$task" ] || continue
-    fm_captain_wait_settled "$STATE" "$task"
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    task=$(fm_captain_wait_task_of "$path")
+    fm_captain_wait_judge "$STATE" "$path"
     rc=$?
-    if [ "$rc" -eq 3 ]; then
-      stale="$stale$task $FM_CAPTAIN_WAIT_SEQ
-"
-      continue
-    fi
-    [ "$rc" -eq 0 ] || continue
-    fm_cap_line_var "$FM_CAPTAIN_WAIT_ENDING" $((item_bytes / 2))
-    ending=$FM_LINE_CAP_LINE
-    line="$task outcome $FM_CAPTAIN_WAIT_SEQ (\"\") waited on:  -> settled by: $ending"
-    room=$((item_bytes - 1 - ${#line}))
-    settled_wait_fit "$FM_CAPTAIN_WAIT_SUMMARY" $((room - ${#FM_CAPTAIN_WAIT_WAIT}))
-    summary=$FM_LINE_CAP_LINE
-    settled_wait_fit "$FM_CAPTAIN_WAIT_WAIT" $((room - ${#summary}))
-    line="$task outcome $FM_CAPTAIN_WAIT_SEQ (\"$summary\") waited on: $FM_LINE_CAP_LINE -> settled by: $ending"
+    case "$rc" in
+      0)
+        fm_cap_line_var "$FM_CAPTAIN_WAIT_ENDING" $((item_bytes / 2))
+        ending=$FM_LINE_CAP_LINE
+        line="$task outcome $FM_CAPTAIN_WAIT_SEQ (\"\") waited on:  -> settled by: $ending"
+        room=$((item_bytes - 1 - ${#line}))
+        settled_wait_fit "$FM_CAPTAIN_WAIT_SUMMARY" $((room - ${#FM_CAPTAIN_WAIT_WAIT}))
+        summary=$FM_LINE_CAP_LINE
+        settled_wait_fit "$FM_CAPTAIN_WAIT_WAIT" $((room - ${#summary}))
+        line="$task outcome $FM_CAPTAIN_WAIT_SEQ (\"$summary\") waited on: $FM_LINE_CAP_LINE -> settled by: $ending"
+        ;;
+      3)
+        line="$task outcome $FM_CAPTAIN_WAIT_SEQ's wait  can no longer be confirmed from the task's status log, so check the task before reporting it"
+        settled_wait_fit "$FM_CAPTAIN_WAIT_WAIT" $((item_bytes - 1 - ${#line}))
+        line="$task outcome $FM_CAPTAIN_WAIT_SEQ's wait $FM_LINE_CAP_LINE can no longer be confirmed from the task's status log, so check the task before reporting it"
+        ;;
+      *) continue ;;
+    esac
     fm_cap_line_var "$line" $((item_bytes - 1))
     line=$FM_LINE_CAP_LINE
     bytes=$(( ${#line} + 1 ))
@@ -640,27 +647,26 @@ print_settled_waits_section() {
     fi
     output="$output$line
 "
-    cleared="$cleared$task $FM_CAPTAIN_WAIT_SEQ
+    cleared="$cleared$path
 "
     used=$((used + bytes))
     shown=$((shown + 1))
   done <<EOF
-$(fm_captain_wait_tasks "$STATE")
+$(fm_captain_wait_records "$STATE")
 EOF
-  if [ "$shown" -gt 0 ] || [ "$omitted" -gt 0 ]; then
-    printf 'SETTLED WAITS (a captain outcome recorded while its task declared the wait shown, and the line that has since ended that wait - the task no longer waits on it, so never report it as still waiting; tell the captain only what is new to them):\n' || return 1
-    printf '%s' "$output" || return 1
-    if [ "$omitted" -gt 0 ]; then
-      printf 'SETTLED WAITS: %d more held back (byte cap); they follow on the next drain\n' "$omitted" || return 1
-    fi
+  [ "$shown" -gt 0 ] || [ "$omitted" -gt 0 ] || return 0
+  printf 'SETTLED WAITS (a captain outcome recorded while its task declared the wait shown, and the line that has since ended that wait - the task no longer waits on it, so never report it as still waiting; an entry whose wait can no longer be confirmed lost its status log, so check that task before reporting it either way; tell the captain only what is new to them):\n' || return 1
+  printf '%s' "$output" || return 1
+  if [ "$omitted" -gt 0 ]; then
+    printf 'SETTLED WAITS: %d more held back (byte cap); they follow on the next drain\n' "$omitted" || return 1
   fi
-  [ -n "$cleared$stale" ] || return 0
+  [ -n "$cleared" ] || return 0
   fm_lock_acquire_wait_bounded "$lock" "$PRESENTATION_LOCK_TIMEOUT" || return 0
-  while read -r task seq; do
-    [ -n "$task" ] || continue
-    fm_captain_wait_clear "$STATE" "$task" "$seq" || true
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    rm -f -- "$path" || true
   done <<EOF
-$cleared$stale
+$cleared
 EOF
   fm_lock_release "$lock"
 }

@@ -3,16 +3,21 @@
 # the line that later ends that wait reaches main as settled.
 #
 # CONTRACT (this header is the one owner of the record and its settle rule).
-#   - Record: $STATE/.<task>.captain-wait, at most one per task, written by
-#     bin/fm-branch-outcome.sh append for every captain-verdict row. When the
-#     task's status log, at the row's captured status provenance
-#     (statusEndpoint and statusIdent), holds a declared wait
-#     (status_declared_wait_line, bin/fm-classify-lib.sh) or, failing that, an
-#     open keyed needs-decision (status_open_decisions; keyless and "default"
-#     decisions excluded, the newest opened wins), the record names that row
-#     and that wait; otherwise the row removes any record, because the
-#     newer captain outcome supersedes what main was last told. Routine rows
-#     never touch it. Format, one key=value line each, values on one line:
+#   - Record: one file per recorded wait, $STATE/.<task>.captain-wait.<seq>.<key>,
+#     where <seq> is the captain outcome's seq and <key> the wait's phase key
+#     ("default" for the keyless phase). bin/fm-branch-outcome.sh append writes
+#     them for every captain-verdict row: each wait in force in the task's
+#     status log at the row's captured status provenance (statusEndpoint and
+#     statusIdent) - the declared wait (status_declared_wait_line,
+#     bin/fm-classify-lib.sh) and every open keyed needs-decision
+#     (status_open_decisions; keyless and "default" decisions excluded) - gets
+#     its own record. Waits are independent per key: a row never removes,
+#     replaces or touches a record for another key, and records nothing when no
+#     wait is in force. A same-key record still open is replaced by the newer
+#     row's record (the same wait re-reported); a same-key record already
+#     settled or unconfirmable is left for the drain, and the new wait gets its
+#     own record. Routine rows never touch records. Format, one key=value line
+#     each, values on one line:
 #       v=fm-captain-wait-v1
 #       seq=<outcome seq>
 #       endpoint=<status log size at that row>
@@ -23,17 +28,19 @@
 #     identity, hold the line that ends <wait> (status_wait_ending_line): a
 #     resolved line for the wait's own phase key, whatever the wait's verb (a
 #     keyless wait: a keyless resolved line). A resolved line for another key,
-#     routine progress, and every other event leave the record open. A record whose status log is gone or was replaced is stale: it
-#     can never settle, and the drain removes it.
-#   - Every write, and every compare-and-delete the drain performs, runs under
-#     $STATE/.branch-outcomes.lock, so a drain never removes a record a newer
-#     captain outcome wrote meanwhile.
-#   - Consumers: bin/fm-watch.sh treats a signaled status log whose task has a
-#     settled record as actionable and decision-owned, so the signal is never
-#     absorbed as routine progress and an attended supervision session cannot
-#     keep it from main; bin/fm-wake-drain.sh presents every settled record to
-#     main in its SETTLED WAITS section once, outside an away record, then
-#     removes it; bin/fm-teardown.sh removes a retired task's record.
+#     routine progress, and every other event leave the record open.
+#     Unconfirmable: the status log is gone or was replaced, or the record is
+#     malformed, so it can never settle.
+#   - Removal: only main's drain removes a record, and only after presenting
+#     it as settled or unconfirmable; an open record is never removed. Every
+#     write and removal runs under $STATE/.branch-outcomes.lock.
+#     bin/fm-teardown.sh removes a retired task's records with its status log.
+#   - Consumers: bin/fm-watch.sh treats a signaled status log whose task has
+#     any settled record as actionable and decision-owned, so the signal is
+#     never absorbed as routine progress and an attended supervision session
+#     cannot keep it from main; bin/fm-wake-drain.sh presents every settled or
+#     unconfirmable record to main in its SETTLED WAITS section once, outside
+#     an away record, then removes it.
 #   - A record is a cache of facts the append-only outcome store and status log
 #     already hold; losing one loses only this presentation.
 set -u
@@ -41,20 +48,26 @@ set -u
 FM_CAPTAIN_WAIT_VERSION=fm-captain-wait-v1
 FM_CAPTAIN_WAIT_TEXT_MAX=400
 
-fm_captain_wait_path() {  # <state> <task>
-  case "$2" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
-  printf '%s/.%s.captain-wait' "$1" "$2"
+# Print the record paths for <task>, or for every task, one per line.
+fm_captain_wait_records() {  # <state> [<task>]
+  local p
+  if [ "$#" -gt 1 ]; then
+    case "$2" in ''|*[!A-Za-z0-9._-]*) return 0 ;; esac
+    set -- "$1/.$2.captain-wait."*
+  else
+    set -- "$1"/.*.captain-wait.*
+  fi
+  for p in "$@"; do
+    [ -e "$p" ] || [ -L "$p" ] || continue
+    printf '%s\n' "$p"
+  done
 }
 
-# Print every task id that has a record, one per line.
-fm_captain_wait_tasks() {  # <state>
-  local p base
-  for p in "$1"/.*.captain-wait; do
-    [ -f "$p" ] && [ ! -L "$p" ] || continue
-    base=${p##*/}
-    base=${base#.}
-    printf '%s\n' "${base%.captain-wait}"
-  done
+# The task id a record path names.
+fm_captain_wait_task_of() {  # <path>
+  local base=${1##*/}
+  base=${base#.}
+  printf '%s' "${base%%.captain-wait.*}"
 }
 
 _fm_captain_wait_one_line() {  # <text>
@@ -65,68 +78,87 @@ _fm_captain_wait_one_line() {  # <text>
   printf '%s' "${text:0:$FM_CAPTAIN_WAIT_TEXT_MAX}"
 }
 
-# The newest open keyed needs-decision in <status-file>, as a decision line.
-_fm_captain_wait_open_decision() {  # <status-file> <kind>
-  local key verb note found=''
+_fm_captain_wait_key() {  # <wait-line>
+  local key
+  key=$(_fm_decision_key "$1" "$_FM_CLASSIFY_KEYLESS_PHASE") || return 1
+  [ "$key" != "$_FM_CLASSIFY_KEYLESS_PHASE" ] || key=default
+  printf '%s' "$key"
+}
+
+# Every wait in force in <status-file>: the declared wait, then each open keyed
+# needs-decision as a decision line.
+_fm_captain_wait_in_force() {  # <status-file> <kind>
+  local key verb note
+  status_declared_wait_line "$1"
   while IFS=$'\t' read -r key verb note; do
     [ "$verb" = needs-decision ] && [ -n "$key" ] && [ "$key" != default ] || continue
-    found="needs-decision [key=$key]: $note"
+    printf 'needs-decision [key=%s]: %s\n' "$key" "$note"
   done <<EOF
 $(status_open_decisions "$1" "$2")
 EOF
-  [ -z "$found" ] || printf '%s\n' "$found"
 }
 
-# Record or remove <task>'s wait for captain outcome <seq>, per the contract.
-# Returns 1 only when a record could not be written or removed.
+# Record each wait <task> has in force for captain outcome <seq>, per the
+# contract. The caller holds $STATE/.branch-outcomes.lock. Returns 1 only when
+# a record could not be written or replaced.
 fm_captain_wait_note() {  # <state> <task> <seq> <endpoint> <ident> <summary>
-  local state=$1 task=$2 seq=$3 endpoint=$4 ident=$5 summary=$6 path f prefix wait='' tmp
-  path=$(fm_captain_wait_path "$state" "$task") || return 1
+  local state=$1 task=$2 seq=$3 endpoint=$4 ident=$5 summary=$6 f prefix waits='' wait key path old tmp
+  case "$task" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$seq" in ''|*[!0-9]*) return 1 ;; esac
+  case "$endpoint" in ''|0|*[!0-9]*) return 0 ;; esac
+  case "$ident" in ''|-|*$'\t'*|*$'\n'*) return 0 ;; esac
   f="$state/$task.status"
-  case "$endpoint" in ''|0|*[!0-9]*) rm -f -- "$path"; return ;; esac
-  case "$ident" in ''|-|*$'\t'*|*$'\n'*) rm -f -- "$path"; return ;; esac
-  if [ -f "$f" ] && [ ! -L "$f" ] && [ "$(_fm_open_decisions_file_ident "$f" 2>/dev/null)" = "$ident" ]; then
-    prefix=$(mktemp "$state/.captain-wait-prefix.XXXXXX") || return 1
-    if _fm_status_read_span "$f" 0 "$endpoint" > "$prefix" 2>/dev/null; then
-      wait=$(status_declared_wait_line "$prefix")
-      [ -n "$wait" ] || wait=$(_fm_captain_wait_open_decision "$prefix" "$(_fm_status_kind "$f")")
+  [ -f "$f" ] && [ ! -L "$f" ] && [ "$(_fm_open_decisions_file_ident "$f" 2>/dev/null)" = "$ident" ] || return 0
+  prefix=$(mktemp "$state/.captain-wait-prefix.XXXXXX") || return 1
+  if _fm_status_read_span "$f" 0 "$endpoint" > "$prefix" 2>/dev/null; then
+    waits=$(_fm_captain_wait_in_force "$prefix" "$(_fm_status_kind "$f")")
+  fi
+  rm -f -- "$prefix"
+  while IFS= read -r wait; do
+    [ -n "$wait" ] || continue
+    key=$(_fm_captain_wait_key "$wait") || continue
+    while IFS= read -r old; do
+      [ -n "$old" ] || continue
+      if fm_captain_wait_judge "$state" "$old"; then continue; elif [ "$?" -ne 1 ]; then continue; fi
+      [ "$(_fm_captain_wait_key "$FM_CAPTAIN_WAIT_WAIT")" = "$key" ] || continue
+      rm -f -- "$old" || return 1
+    done <<EOF
+$(fm_captain_wait_records "$state" "$task")
+EOF
+    path="$state/.$task.captain-wait.$seq.$key"
+    tmp=$(mktemp "$state/.captain-wait-tmp.XXXXXX") || return 1
+    chmod 0600 "$tmp" || { rm -f -- "$tmp"; return 1; }
+    if ! printf 'v=%s\nseq=%s\nendpoint=%s\nident=%s\nwait=%s\nsummary=%s\n' \
+        "$FM_CAPTAIN_WAIT_VERSION" "$seq" "$endpoint" "$ident" \
+        "$(_fm_captain_wait_one_line "$wait")" "$(_fm_captain_wait_one_line "$summary")" > "$tmp"; then
+      rm -f -- "$tmp"
+      return 1
     fi
-    rm -f -- "$prefix"
-  fi
-  if [ -z "$wait" ]; then
-    rm -f -- "$path"
-    return
-  fi
-  tmp=$(mktemp "$state/.captain-wait.XXXXXX") || return 1
-  chmod 0600 "$tmp" || { rm -f -- "$tmp"; return 1; }
-  if ! printf 'v=%s\nseq=%s\nendpoint=%s\nident=%s\nwait=%s\nsummary=%s\n' \
-      "$FM_CAPTAIN_WAIT_VERSION" "$seq" "$endpoint" "$ident" \
-      "$(_fm_captain_wait_one_line "$wait")" "$(_fm_captain_wait_one_line "$summary")" > "$tmp"; then
-    rm -f -- "$tmp"
-    return 1
-  fi
-  mv -f -- "$tmp" "$path"
+    mv -f -- "$tmp" "$path" || { rm -f -- "$tmp"; return 1; }
+  done <<EOF
+$waits
+EOF
+  return 0
 }
 
-# Load <task>'s record and judge it. Sets FM_CAPTAIN_WAIT_SEQ, _WAIT, _SUMMARY,
-# and, when settled, _ENDING (the line that ended the wait). Returns 0 settled,
-# 1 still open or no record, 2 the status log could not be read, 3 the record
-# is stale or malformed.
-fm_captain_wait_settled() {  # <state> <task>
-  local state=$1 task=$2 path f data endpoint ident ending rc
+# Load the record at <path> and judge it. Sets FM_CAPTAIN_WAIT_SEQ, _WAIT,
+# _SUMMARY, and, when settled, _ENDING (the line that ended the wait). Returns
+# 0 settled, 1 still open, 2 the status log could not be read, 3 the record is
+# unconfirmable.
+fm_captain_wait_judge() {  # <state> <path>
+  local state=$1 path=$2 task f data endpoint ident ending rc
   FM_CAPTAIN_WAIT_SEQ='' FM_CAPTAIN_WAIT_WAIT='' FM_CAPTAIN_WAIT_SUMMARY='' FM_CAPTAIN_WAIT_ENDING=''
-  path=$(fm_captain_wait_path "$state" "$task") || return 1
-  [ -e "$path" ] || [ -L "$path" ] || return 1
   [ -f "$path" ] && [ ! -L "$path" ] || return 3
   data=$(LC_ALL=C command cat "$path" 2>/dev/null) || return 3
   FM_CAPTAIN_WAIT_SEQ=$(printf '%s\n' "$data" | sed -n 's/^seq=//p')
-  [ "$(printf '%s\n' "$data" | sed -n 's/^v=//p')" = "$FM_CAPTAIN_WAIT_VERSION" ] || return 3
-  endpoint=$(printf '%s\n' "$data" | sed -n 's/^endpoint=//p')
-  ident=$(printf '%s\n' "$data" | sed -n 's/^ident=//p')
   FM_CAPTAIN_WAIT_WAIT=$(printf '%s\n' "$data" | sed -n 's/^wait=//p')
   FM_CAPTAIN_WAIT_SUMMARY=$(printf '%s\n' "$data" | sed -n 's/^summary=//p')
+  endpoint=$(printf '%s\n' "$data" | sed -n 's/^endpoint=//p')
+  ident=$(printf '%s\n' "$data" | sed -n 's/^ident=//p')
+  [ "$(printf '%s\n' "$data" | sed -n 's/^v=//p')" = "$FM_CAPTAIN_WAIT_VERSION" ] || return 3
   case "$FM_CAPTAIN_WAIT_SEQ:$endpoint" in *[!0-9:]*|:*|*:) return 3 ;; esac
   [ -n "$ident" ] && [ -n "$FM_CAPTAIN_WAIT_WAIT" ] || return 3
+  task=$(fm_captain_wait_task_of "$path")
   f="$state/$task.status"
   [ -f "$f" ] && [ ! -L "$f" ] || return 3
   [ "$(_fm_open_decisions_file_ident "$f" 2>/dev/null)" = "$ident" ] || return 3
@@ -137,13 +169,14 @@ fm_captain_wait_settled() {  # <state> <task>
   return 0
 }
 
-# Remove <task>'s record only while it still names outcome <seq> (as
-# FM_CAPTAIN_WAIT_SEQ read it), so a newer captain outcome recorded meanwhile
-# keeps its own record. The caller holds $STATE/.branch-outcomes.lock.
-fm_captain_wait_clear() {  # <state> <task> <seq>
+# 0 when any of <task>'s records is settled.
+fm_captain_wait_any_settled() {  # <state> <task>
   local path
-  path=$(fm_captain_wait_path "$1" "$2") || return 1
-  [ -e "$path" ] || [ -L "$path" ] || return 0
-  [ "$(sed -n 's/^seq=//p' "$path" 2>/dev/null)" = "$3" ] || return 0
-  rm -f -- "$path"
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    fm_captain_wait_judge "$1" "$path" && return 0
+  done <<EOF
+$(fm_captain_wait_records "$1" "$2")
+EOF
+  return 1
 }
