@@ -241,6 +241,11 @@ stop_one() {  # <id>
   # without it. A refused exit takes it away again.
   fm_idle_stop_record_write "$STATE" "$id" "$reason" "$target" "$VERDICT_STATE" "$VERDICT_STATUS" \
     || { log "$id not now: its stop record could not be written"; return 0; }
+  if fm_idle_stop_unhandled_steer "$STATE" "$id"; then
+    fm_idle_stop_record_clear "$STATE" "$id"
+    log "$id not now: a steer arrived before the exit"
+    return 0
+  fi
   out=$(FM_HOME=$FM_HOME "$CONTROL" "$id" exit --only-if-idle 2>&1) || rc=$?
   case "$rc:$out" in
     0:stopped\ *)

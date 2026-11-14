@@ -4565,15 +4565,20 @@ EOF
     # exemption below, because a mate's steers land in an inbox too.
     [ -z "$task" ] || inbox_steer_check "$w" "$task"
     key=$(window_key "$w")
+    last=$(status_declared_wait_line "$STATE/$task.status")
     # A session stopped while idle is a recorded, expected state, not a quiet,
     # wedged, or dead worker: no stale, wedge, or dead-record path applies to it,
-    # and the per-hash bookkeeping restarts once it runs again.
+    # and the per-hash bookkeeping restarts once it runs again. A declared wait
+    # keeps its deadline and bounded rechecks exactly as a running one does.
     if [ -n "$task" ] && idle_stop_session_stopped "$task"; then
-      clear_pause_tracking "$key"
+      if ! afk_present && status_is_paused_or_captain_held "$last"; then
+        handle_paused_stale "$w" "$task" stopped
+      else
+        clear_pause_tracking "$key"
+      fi
       rm -f "$STATE/.hash-$key" "$STATE/.count-$key"
       continue
     fi
-    last=$(status_declared_wait_line "$STATE/$task.status")
     if ! status_is_paused_or_captain_held "$last" && [ -e "$STATE/.paused-$key" ]; then
       clear_pause_tracking "$key"
     fi

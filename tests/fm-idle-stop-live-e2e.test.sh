@@ -46,8 +46,14 @@ STUB_PID=
 WATCH_PID=
 note() { printf '# %s\n' "$1"; }
 
+kill_tree() {  # <pid>
+  local c
+  for c in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$c"; done
+  kill "$1" 2>/dev/null || true
+}
+
 cleanup() {
-  [ -z "$WATCH_PID" ] || kill "$WATCH_PID" 2>/dev/null || true
+  [ -z "$WATCH_PID" ] || kill_tree "$WATCH_PID"
   [ -z "$STUB_PID" ] || kill "$STUB_PID" 2>/dev/null || true
   "$REAL_TMUX" -S "$SOCK" kill-server 2>/dev/null || true
   if [ "${FM_IDLE_STOP_LIVE_KEEP:-}" = 1 ]; then
@@ -276,6 +282,7 @@ pass "claude $CLAUDE_VERSION: a steer relaunches a stopped worker in its window 
 # Let a few more watcher cycles run over the stopped paused worker, then stop.
 sleep 15
 : > "$LAB/stop-supervising"
+kill_tree "$WATCH_PID"
 wait "$WATCH_PID" 2>/dev/null || true
 WATCH_PID=
 

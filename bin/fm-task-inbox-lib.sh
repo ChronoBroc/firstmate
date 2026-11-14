@@ -406,6 +406,10 @@ fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
   case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
     dead|missing) return 3 ;;
   esac
+  # An idle-session stop in flight holds the task's stop record
+  # (bin/fm-idle-stop-lib.sh); the doorbell waits for its re-ring instead of
+  # starting a turn the exit would cancel.
+  [ ! -e "${rec%.inbox/*}.session-stopped" ] || return 2
   if ! line=$(fm_task_inbox_doorbell_line "$rec"); then
     return 2
   fi

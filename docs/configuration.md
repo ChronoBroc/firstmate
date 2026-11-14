@@ -806,7 +806,7 @@ A refusal is "not now" and the next sweep looks again; nothing is ever forced.
 A parked worker's own open decision is what parks it, and firstmate's answer reaches it as a steer, which relaunches it.
 Secondmates, remote tasks, adopted pull requests, and tasks on a backend other than tmux, the one whose process tree proves the agent holds no running command, are never stopped.
 
-A stopped session is a recorded, expected state, not a crash: `bin/fm-crew-state.sh` reports the worker's declared state with `session stopped (...) at <time>; relaunches on demand` in its detail, the session-start digest names it, the watcher's stale, wedge, and dead-endpoint paths skip it, and it does not count toward the away spend cap.
+A stopped session is a recorded, expected state, not a crash: `bin/fm-crew-state.sh` reports the worker's declared state with `session stopped (...) at <time>; relaunches on demand` in its detail, the session-start digest names it, the watcher's stale, wedge, and dead-endpoint paths skip it while a declared `paused:` or `captain-held` wait keeps its deadline and bounded rechecks, and it does not count toward the away spend cap.
 A steer sent with `bin/fm-send.sh` relaunches the worker through `bin/fm-control.sh <id> relaunch` with a note that carries its recorded state forward and points it at the steer, and `bin/fm-control.sh <id> relaunch` works on it directly.
 A refused relaunch, such as the away spend cap's deferral or an account refusal, wakes firstmate once with the refusal as a wait, keeps the steer in the inbox, and is retried silently after `FM_IDLE_STOP_REVIVE_RETRY_SECS`.
 A typed harness command such as `/compact` to a stopped worker is refused, because its pane holds a bare shell.

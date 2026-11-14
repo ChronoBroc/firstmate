@@ -33,14 +33,17 @@ WATCH="$ROOT/bin/fm-watch.sh"
 TMP_ROOT=$(fm_test_tmproot fm-idle-stop)
 mkdir -p "$TMP_ROOT"
 TMP_ROOT=$(cd "$TMP_ROOT" && pwd)
-TREE_PIDS=()
+TREE_PIDS="$TMP_ROOT/tree-pids"
+kill_tree() {  # <pid>
+  local c
+  for c in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$c"; done
+  kill "$1" 2>/dev/null || true
+}
 cleanup() {
   local p
-  for p in "${TREE_PIDS[@]:-}"; do
-    [ -n "$p" ] || continue
-    pkill -P "$p" 2>/dev/null || true
-    kill "$p" 2>/dev/null || true
-  done
+  while IFS= read -r p; do
+    [ -n "$p" ] && kill_tree "$p"
+  done 2>/dev/null < "$TREE_PIDS" || true
   rm -rf "$TMP_ROOT"
 }
 trap cleanup EXIT
@@ -113,7 +116,7 @@ start_tree() {  # <case-dir> idle|running
   esac
   # shellcheck disable=SC2016  # Expanded by the child bash.
   /bin/bash -c '"$1" -c "$2"; :' _ "$dir/claude" "$inner" >/dev/null 2>&1 &
-  TREE_PIDS+=("$!")
+  printf '%s\n' "$!" >> "$TREE_PIDS"
   printf '%s' "$!" > "$dir/fake/pane_pid"
   # Wait until the tree's leaf sleep is running, three or four levels down.
   local i=0 root=$! frontier kids p depth
@@ -431,6 +434,35 @@ test_stale_path_skips_a_stopped_worker() {
   pass "watcher: a stopped worker reads as stopped only while its pane holds no agent"
 }
 
+test_stopped_paused_worker_keeps_its_due_recheck() {
+  local dir past pid i ack
+  dir=$(new_case paused-due)
+  past=$(( $(date +%s) - 60 ))
+  add_task "$dir" t1 scout "paused [at=$past]: rate limit resets, until $(date -u -r "$past" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$past" +%Y-%m-%dT%H:%M:%SZ), then resuming"
+  config "$dir" 'idle_after=0' "memory_check=$(memory_cmd "$dir" 1)"
+  start_tree "$dir" idle
+  sweep "$dir" >/dev/null
+  assert_grep 'reason=idle-memory' "$dir/home/state/t1.session-stopped" "setup: t1 was not stopped under memory pressure"
+  # The first wake can be the new status line itself; the recheck follows it.
+  : > "$dir/watch.out"
+  for _ in 1 2 3; do
+    run_env "$dir" env FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
+      FM_PAUSE_RESURFACE_SECS=999999 FM_IDLE_STOP_INTERVAL=999999 "$WATCH" >> "$dir/watch.out" &
+    pid=$!
+    printf '%s\n' "$pid" >> "$TREE_PIDS"
+    i=0
+    while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 200 ]; do /bin/sleep 0.1; i=$((i + 1)); done
+    kill_tree "$pid"
+    wait "$pid" 2>/dev/null || true
+    ! grep -qF 'declared clearing time has passed' "$dir/watch.out" || break
+    ack=$(run_env "$dir" "$ROOT/bin/fm-wake-drain.sh" | sed -n 's/^WAKE_ACK_REQUIRED: //p' | tail -n 1)
+    [ -z "$ack" ] || run_env "$dir" bash -c "$ack" >/dev/null
+  done
+  assert_grep 'declared clearing time has passed' "$dir/watch.out" \
+    "a stopped paused worker whose declared time passed must still be rechecked"
+  pass "watcher: a paused worker stopped under memory pressure still gets its due recheck"
+}
+
 # --- 7. exit --only-if-idle -------------------------------------------------------
 
 test_exit_only_if_idle_refuses_busy() {
@@ -457,4 +489,5 @@ test_typed_command_to_stopped_worker_refused
 test_watcher_inbox_relaunches_without_wake
 test_refused_relaunch_is_a_wait_reported_once
 test_stale_path_skips_a_stopped_worker
+test_stopped_paused_worker_keeps_its_due_recheck
 test_exit_only_if_idle_refuses_busy
