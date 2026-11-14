@@ -1096,7 +1096,7 @@ else
   # A session stopped while idle (bin/fm-idle-stop.sh) has a bare shell where
   # its harness was, so typed parser input would run as a shell command there.
   # Typed input holds the idle-session stop's delivery exclusion until exit.
-  if [ "$INBOX_PLANE" = 0 ] && [ -n "$TARGET_SELECTOR" ] && [ -n "$TARGET_META" ]; then
+  if [ "$INBOX_PLANE" = 0 ] && [ -n "$TARGET_META" ]; then
     TYPED_TASK_ID=$(fm_send_id_from_meta "$TARGET_META")
     if [ -n "$TYPED_TASK_ID" ] && ! fm_send_delivery_begin "$TYPED_TASK_ID"; then
       fm_send_known_undelivered_cleanup || true
@@ -1105,7 +1105,7 @@ else
     fi
     if fm_idle_stop_record_valid "$STATE" "$TYPED_TASK_ID" "$TARGET_META"; then
       fm_send_known_undelivered_cleanup || true
-      echo "error: $TARGET_SELECTOR's session was stopped while idle, so a typed harness command has nothing to reach; send an ordinary steer (it relaunches the worker) or run bin/fm-control.sh $TYPED_TASK_ID relaunch first" >&2
+      echo "error: ${TARGET_SELECTOR:-$T}'s session was stopped while idle, so a typed harness command has nothing to reach; send an ordinary steer (it relaunches the worker) or run bin/fm-control.sh $TYPED_TASK_ID relaunch first" >&2
       exit 1
     fi
   fi

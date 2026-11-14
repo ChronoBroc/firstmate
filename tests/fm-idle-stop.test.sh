@@ -385,6 +385,11 @@ test_typed_command_to_stopped_worker_refused() {
   [ "$rc" -ne 0 ] || fail "a typed command to a stopped worker must be refused"
   assert_contains "$out" "stopped while idle" "the refusal names why"
   [ ! -s "$dir/fake/literal" ] || fail "a typed command reached the bare shell: $(cat "$dir/fake/literal")"
+  rc=0
+  out=$(run_env "$dir" "$SEND" fmses:fm-t1 '/compact') || rc=$?
+  [ "$rc" -ne 0 ] || fail "a typed command to a stopped worker's endpoint must be refused: $out"
+  assert_contains "$out" "stopped while idle" "the endpoint-addressed refusal names why"
+  [ ! -s "$dir/fake/literal" ] || fail "an endpoint-addressed typed command reached the bare shell: $(cat "$dir/fake/literal")"
   pass "fm-send: a typed harness command to a stopped worker is refused, never typed into its shell"
 }
 
@@ -405,6 +410,10 @@ test_typed_command_waits_out_a_lifecycle_action() {
   out=$(run_env "$dir" "$SEND" t1 '/compact') || rc=$?
   [ "$rc" -ne 0 ] || fail "a typed command must not be sent while a lifecycle action holds the task: $out"
   assert_contains "$out" "another lifecycle action is running" "the refusal names why"
+  rc=0
+  out=$(run_env "$dir" "$SEND" fmses:fm-t1 '/compact') || rc=$?
+  [ "$rc" -ne 0 ] || fail "an endpoint-addressed typed command must not be sent while a lifecycle action holds the task: $out"
+  assert_contains "$out" "another lifecycle action is running" "the endpoint-addressed refusal names why"
   rc=0
   out=$(run_env "$dir" "$SEND" t1 --key Enter) || rc=$?
   [ "$rc" -ne 0 ] || fail "a key must not be sent while a lifecycle action holds the task: $out"
