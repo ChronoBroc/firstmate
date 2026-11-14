@@ -1,0 +1,19 @@
+
+== 14:03:35 worker appends: needs-decision [key=board-review] [at=1794686615]: round 7 waits for the owner on the Lavish board
+watcher: exited (wake surfaced)
+
+== supervision session records captain outcome; main relays and acks it
+outcome seq=1
+wait records: none
+
+== 14:15:24 board answered; worker (now busy drawing round 8) appends: resolved [key=board-review] [at=1794687324]: round 7 answered, all four as recommended; drawing round 8
+watcher: absorbed
+watcher wake output: 
+queued row: 
+
+== main drains
+(no SETTLED WAITS / BRANCH OUTCOMES section)
+
+== main drains again
+(no SETTLED WAITS section)
+wait records left: none

@@ -1,0 +1,23 @@
+
+== 14:03:35 worker appends: paused [key=board-review] [at=1794686615]: round 7 waits for the owner on the Lavish board
+watcher: exited (wake surfaced)
+
+== supervision session records captain outcome; main relays and acks it
+outcome seq=1
+wait records: .designer.captain-wait.1.board-review
+
+== worker appends an unrelated credential block; supervision records a newer captain outcome for it
+outcome seq=2; credential resolved; wait records: .designer.captain-wait.1.board-review
+
+== 14:15:24 board answered; worker (now busy drawing round 8) appends: resolved [key=board-review] [at=1794687324]: round 7 answered, all four as recommended; drawing round 8
+watcher: exited (wake surfaced)
+watcher wake output: signal: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-replay.hYAsqJ/replay/state/designer.status
+queued row: 1794699415|4|signal|designer.status|needs-decision: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-replay.hYAsqJ/replay/state/designer.status
+
+== main drains
+SETTLED WAITS (a captain outcome recorded while its task declared the wait shown, and the line that has since ended that wait - the task no longer waits on it, so never report it as still waiting; an entry whose wait can no longer be confirmed lost its status log, so check that task before reporting it either way; tell the captain only what is new to them):
+designer outcome 1 ("Round 7 is on the Lavish board with four questions. Waiting for the captain's answers.") waited on: paused [key=board-review] [at=1794686615]: round 7 waits for the owner on the Lavish board -> settled by: resolved [key=board-review] [at=1794687324]: round 7 answered, all four as recommended; drawing round 8
+
+== main drains again
+(no SETTLED WAITS section)
+wait records left: none

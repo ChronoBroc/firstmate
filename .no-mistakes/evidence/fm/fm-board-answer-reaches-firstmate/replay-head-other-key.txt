@@ -1,0 +1,19 @@
+
+== 14:03:35 worker appends: paused [key=board-review] [at=1794686615]: round 7 waits for the owner on the Lavish board
+watcher: exited (wake surfaced)
+
+== supervision session records captain outcome; main relays and acks it
+outcome seq=1
+wait records: .designer.captain-wait.1.board-review
+
+== worker (busy) appends an unrelated resolve instead of the board answer
+watcher: absorbed
+watcher wake output: 
+queued row: 
+
+== main drains
+(no SETTLED WAITS / BRANCH OUTCOMES section)
+
+== main drains again
+(no SETTLED WAITS section)
+wait records left: .designer.captain-wait.1.board-review

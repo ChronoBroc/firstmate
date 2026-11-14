@@ -1,0 +1,18 @@
+1..16
+ok - an answer settling a recorded captain wait reaches main as settled even while the worker is busy
+ok - an answer closing a recorded keyed needs-decision reaches main as settled even while the worker is busy
+ok - only a close of the decision's own key settles a recorded needs-decision
+ok - a recorded captain-held wait settles only on a resolve of its own key
+ok - a recorded pause settles only on a resolve of its own key, never on routine progress
+ok - a settled entry keeps its outcome seq and settling line however long its summary
+ok - a resolve of another key leaves the recorded wait open and stays routine
+ok - a resolve with no recorded captain wait stays routine for a busy worker
+ok - the drain derives the settlement from durable records and holds it while the captain is away
+ok - a captain outcome on another key leaves the board wait to settle visibly
+ok - a newer captain outcome with no wait in force leaves the recorded wait to settle visibly
+ok - an unpresented settlement survives a new same-key wait, which settles on its own answer
+ok - a wait whose status log was replaced is presented once as unconfirmable
+ok - a keyless wait and a [key=default] wait are recorded and settled independently
+ok - an explicit [key=default] needs-decision is recorded and settles visibly on its own answer
+ok - a keyless needs-decision recorded as a captain outcome creates no wait record
+FM_TEST_COMPLETE
