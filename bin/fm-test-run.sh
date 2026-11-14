@@ -200,7 +200,7 @@ CHANGED_DEFAULT_TIMEOUT_SECS=1500
 
 # How many separate-runner shards the portable serial remainder splits into.
 # One owner: CI lane names carry this count and are refused when they disagree.
-PORTABLE_SERIAL_SHARDS=11
+PORTABLE_SERIAL_SHARDS=12
 
 # Conservative balance hint for a portable-serial script with no measurement.
 # Rounded above the current CI mean, including the capability-skipped scripts.
@@ -392,7 +392,8 @@ family_for_basename() {
     fm-herdr-submit-confirm-live-e2e.test.sh|\
     fm-backend-rex-composer-live-e2e.test.sh|\
     fm-watch-wedge-cap-live.test.sh|fm-read-repetition-live.test.sh|\
-    fm-claude-tool-exclude-live.test.sh|fm-claude-busy-progress-live.test.sh)
+    fm-claude-tool-exclude-live.test.sh|fm-claude-busy-progress-live.test.sh|\
+    fm-idle-stop-live-e2e.test.sh)
       printf '%s\n' live-harness-optin
       ;;
     fm-backend-herdr.test.sh|fm-backend-tmux-smoke.test.sh|fm-backend.test.sh|\
@@ -830,6 +831,8 @@ tests/fm-herdr-version-floor-live-e2e.test.sh 50
 tests/fm-home-summary-refresh.test.sh 37057
 tests/fm-host-mirror-live-e2e.test.sh 79
 tests/fm-host-mirror.test.sh 11587
+tests/fm-idle-stop-live-e2e.test.sh 75
+tests/fm-idle-stop.test.sh 60000
 tests/fm-inactive-reconcile.test.sh 60823
 tests/fm-inbox.test.sh 6062
 tests/fm-install-herdr.test.sh 1000
@@ -1705,6 +1708,9 @@ families_for_changed_path() {
       ;;
     tests/fixtures/fm-claude-tool-call-stub.py)
       printf '%s\n' __script__:fm-claude-busy-progress-live.test.sh
+      ;;
+    tests/fixtures/fm-claude-scripted-stub.py)
+      printf '%s\n' __script__:fm-idle-stop-live-e2e.test.sh
       ;;
     .pi/extensions/fm-branch-supervision.ts|.pi/extensions/lib/fm-async-exec.ts|\
     .pi/extensions/lib/fm-branch-dispatch.ts|.pi/extensions/lib/fm-native-contract.ts)

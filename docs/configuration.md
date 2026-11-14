@@ -11,7 +11,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend) and [harness support](#harness-support) |
 | Worker permissions, accounts, or environment | [Codex approval review](#codex-automatic-approval-review), [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [Codex permission mode](#codex-permission-mode-configcodex-permission-mode), [persistent managed-policy failover](#persistent-managed-policy-failover), [worker account pin](#worker-account-pin-configclaude-account-configcodex-account-configpi-account), [several Claude accounts](#several-claude-accounts-configclaude-accounts), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist), and its [Orca environment source](#orca-environment-source-configlaunch-env-tmux-session) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), [external memory tiers](#external-memory-tiers-memory-layering-section), [record export](#record-export-configrecord-export-root), [startup memory budget](#startup-memory-budget-configstartup-memory-budget), and [stow guard](#stow-guard-configstow-guard) |
-| Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), [Codex native Stop park](#codex-native-stop-park-configcodex-stop-park), [warm-cache compaction](#warm-cache-compaction-configwarm-compact), and [Calm preference](#calm-preference-configcalm) |
+| Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), [Codex native Stop park](#codex-native-stop-park-configcodex-stop-park), [warm-cache compaction](#warm-cache-compaction-configwarm-compact), [idle session stop](#idle-session-stop-configidle-session-stop), and [Calm preference](#calm-preference-configcalm) |
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) |
 | Review bots on owned GitHub pull requests | [Contribution review bots](#contribution-review-bots-configcontribution-review-bots) |
 | Per-run overrides and tuning | [Environment variables](#environment-variables) |
@@ -792,6 +792,50 @@ The optional local, gitignored `config/wait-no-turns` presence flag opts this ho
 With it present, ship and scout briefs gain the `# Waiting` section and the foreground no-mistakes drive text, every brief's inbox section keeps the natural-checkpoint check and adds that a waiting worker does not poll or list its inbox because a waiting instruction rings, a pending-reply recovery waits while that mate has its own open decision or blocker, and a fire-and-forget steer whose doorbell did not land gets one later ring.
 With the file absent, generated briefs omit the waiting section and the no-poll inbox line, the drive text backgrounds the call, recovery sends during an open decision, and a fire-and-forget steer is not owed a retry ring.
 The flag is a home-local preference and is not inherited by secondmate homes.
+
+## Idle session stop (config/idle-session-stop)
+
+An idle harness session holds about as much memory as a working one, so a home that opts in has the watcher stop the session of a worker that no longer needs one and bring it back when something does.
+The optional local, gitignored `config/idle-session-stop` file is the opt-in: with it absent nothing is ever stopped, and the watcher does nothing extra.
+With it present, even empty, a done ship or scout worker's session is stopped once it has been idle for `done_after` seconds.
+A paused or parked worker's session is stopped only after `idle_after` seconds idle and only while the configured `memory_check` command reports host memory short; with no `memory_check` line this never happens.
+The stop uses the control plane's own `bin/fm-control.sh <id> exit`, so the window, the worktree, the branch, and every unlanded change stay exactly where they were, and teardown and landing treat a stopped worker as any other.
+
+A worker stays up whenever its harness does not read exactly idle (a turn waiting inside a foreground command such as a CI wait or a validation drive call is busy), a shell is still running below its agent (a background job or monitor its turn left running), a steer waits unread in its steering inbox, a done or paused worker has an open decision, or `exit` itself refuses (pending composer text, a blocking dialog, a state it cannot prove).
+A refusal is "not now" and the next sweep looks again; nothing is ever forced.
+A parked worker's own open decision is what parks it, and firstmate's answer reaches it as a steer, which relaunches it.
+Secondmates, remote tasks, adopted pull requests, and tasks on a backend other than tmux, the one whose process tree proves the agent holds no running command, are never stopped.
+
+A stopped session is a recorded, expected state, not a crash: `bin/fm-crew-state.sh` reports the worker's declared state with `session stopped (...) at <time>; relaunches on demand` in its detail, the session-start digest names it, the watcher's stale, wedge, and dead-endpoint paths skip it while a declared `paused:` or `captain-held` wait keeps its deadline and bounded rechecks, and it does not count toward the away spend cap.
+A steer sent with `bin/fm-send.sh` relaunches the worker through `bin/fm-control.sh <id> relaunch` with a note that carries its recorded state forward and points it at the steer, and `bin/fm-control.sh <id> relaunch` works on it directly.
+A refused relaunch, such as the away spend cap's deferral or an account refusal, wakes firstmate once with the refusal as a wait, keeps the steer in the inbox, and is retried silently after `FM_IDLE_STOP_REVIVE_RETRY_SECS`.
+A typed harness command such as `/compact` to a stopped worker is refused, because its pane holds a bare shell.
+In a home with this file, a doorbell, typed harness command, or key is never delivered while a lifecycle action holds the worker: a typed command or key is refused with a retry-shortly error, and a doorbell is left for its re-ring with the steer kept; an idle-session exit refuses once input reached the worker after its idle check, so a stop never ends a turn that input just started.
+
+The file must be a regular file owned by this user and writable by nobody else, or the feature reads as off.
+Blank lines and `#` comments are skipped:
+
+```text
+# stop a done worker's idle session (default on)
+done=on
+# seconds a done worker must be idle first (default 120)
+done_after=120
+# seconds a paused or parked worker must be idle first (default 1800)
+idle_after=1800
+# exit 0 = memory fine, any other exit = short
+memory_check=/usr/local/bin/host-memory-ok --quiet
+# the off switch: stop nothing
+off
+```
+
+Comments go on their own lines; text after a value is read as part of it.
+
+`memory_check` takes an absolute command path and optional arguments, runs directly with no shell, and is bounded by `FM_IDLE_STOP_MEMORY_TIMEOUT`; a timeout, a missing command, an exit of 126 or above, or a signal death is no answer and stops nothing.
+A malformed value keeps its default, so a typo never widens what is stopped.
+An empty file stops done workers and nothing else.
+Turning the feature off stops nothing new, while a session it already stopped still comes back on demand.
+The file is home-local and not inherited by secondmate homes.
+`bin/fm-idle-stop.sh check <id>` prints the verdict a sweep would reach for one task, and `state/.idle-stop.log` records each stop and each "not now".
 
 ## PR health monitor (config/pr-health-monitor)
 
@@ -3587,6 +3631,9 @@ FM_SECONDMATE_LIVENESS_TIMEOUT=120   # seconds allowed separately for a watcher-
 FM_SECONDMATE_LIVENESS_MAX_ATTEMPTS=3   # automatic relaunch attempts allowed per mate inside the window before the watcher parks auto-relaunch behind state/.secondmate-relaunch-bound-<id> and escalates once; a later live probe clears the marker and restores the full attempt budget (the ledger keeps its history behind a `rearmed` row); zero or invalid values use 3
 FM_SECONDMATE_LIVENESS_WINDOW_SECS=3600   # window the relaunch bound counts state/.secondmate-relaunch-<id> attempt lines over; the file is also the durable per-mate relaunch record; zero or invalid values use 3600
 FM_WEDGE_DEMAND_INSPECT_COUNT=3    # consecutive provably-working stale escalations on the same unchanged pane before demand-deep-inspection is added
+FM_IDLE_STOP_INTERVAL=60      # seconds between the watcher's idle-session stop sweeps (bin/fm-idle-stop.sh); zero or invalid values use 60
+FM_IDLE_STOP_REVIVE_RETRY_SECS=600   # seconds before a refused relaunch of a stopped worker is retried
+FM_IDLE_STOP_MEMORY_TIMEOUT=15       # seconds one config/idle-session-stop memory_check run may take before it counts as no answer
 FM_WEDGE_GUARD_TIMEOUT_SECS=5      # seconds one guard from config/wedge-evidence-guards may run before it counts as no answer; zero or invalid values use 5
 FM_WEDGE_GUARD_DEFER_MAX=3         # consecutive windows a CRITICAL guard answer may defer one pane's wedge escalation before it fires anyway; invalid values use 3
 FM_WEDGE_MAX_ESCALATIONS=0    # optional ceiling on consecutive wedge escalations for one worker window; 0 (the default) leaves the cap off and every escalation produces a wake, and any value from 1 up to 999999999999999999 publishes one terminal PERMANENTLY-WEDGED wake at that count - carrying the same evidence the escalation it replaces carried: the guard verdict, and the `demand-deep-inspection` marker once the count has reached `FM_WEDGE_DEMAND_INSPECT_COUNT` - and then writes the window-scoped state/.wedge-permanent-<key> to silence further wedge escalations for that window whatever hash its pane renders; the wedge path publishes no second terminal wake while the row that episode queued is still unacknowledged, which scopes the suppression to the episode rather than the window so an earlier episode's unconsumed wake cannot silence a later episode's (the away-posture first sight, which releases the markers without ending the episode, can re-open the row within one episode - an over-notify in the safe direction: the queue check bounds duplicate terminal wakes only while the episode marker stands, and the release removed exactly the marker that would have gated the re-fire, so after it a second wake can stand behind an unacknowledged first), the cap marker and the escalation count the cap was counting drop through the one episode-ending reset whose release routes are owned by the cap discussion below, and a fresh wedge escalates normally again; a cap fire also resets the consecutive-deferral budget of a config/wedge-evidence-guards guard, because the guard is not consulted at all while the cap is silencing that window, so its budget must not carry across as if it had been spent, and preserving it would leave a CRITICAL guard that reached its deferral ceiling before the cap fired already at that ceiling on the first escalation after the cap lifts, unable to defer at all; an invalid or out-of-range value uses 0

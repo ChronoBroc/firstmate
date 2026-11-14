@@ -20,7 +20,9 @@
 # absence of the worker's acknowledgement and re-rung on a bounded schedule.
 # A positively dead or missing endpoint bypasses that schedule without being
 # submitted to, and its unhandled record surfaces through the ordinary stale wake
-# into stuck-crewmate-recovery.
+# into stuck-crewmate-recovery - except a session stopped while idle
+# (bin/fm-idle-stop-lib.sh), whose unhandled record relaunches the worker
+# instead (bin/fm-watch.sh inbox_steer_check, bin/fm-idle-stop.sh revive).
 #
 # Layout under <state-dir>:
 #   <task>.inbox/NNN.msg       one durable steer, numeric sequence, atomic rename
@@ -102,6 +104,8 @@ _FM_TASK_INBOX_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$_FM_TASK_INBOX_LIB_DIR/fm-wake-lib.sh"
 # shellcheck source=/dev/null
 . "$_FM_TASK_INBOX_LIB_DIR/fm-backend.sh"
+# shellcheck source=/dev/null
+. "$_FM_TASK_INBOX_LIB_DIR/fm-idle-stop-lib.sh"
 
 FM_TASK_INBOX_SCHEMA='fm-task-inbox.v1'
 FM_TASK_INBOX_GRACE_DEFAULT=90
@@ -400,10 +404,25 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 # fm_composer_queued_enter_verdict reads it as accepted and queued by a busy
 # agent (OpenCode keeps a queued message visible), which is rung.
 fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
-  local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict
-  case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
+  local base rc=0
+  case "$(fm_backend_agent_state "$1" "$2" 2>/dev/null || true)" in
     dead|missing) return 3 ;;
   esac
+  # The doorbell is typed under the idle-session stop's delivery exclusion
+  # (bin/fm-idle-stop-lib.sh); a held task waits for its re-ring.
+  case "$3" in
+    */*.inbox/*)
+      base=${3%.inbox/*}
+      fm_idle_stop_delivery_begin "${base%/*}" "${base##*/}" || return 2
+      ;;
+  esac
+  _fm_task_inbox_ring_type "$@" || rc=$?
+  fm_idle_stop_delivery_end
+  return "$rc"
+}
+
+_fm_task_inbox_ring_type() {  # <backend> <target> <record-path> [expected-label]
+  local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict
   if ! line=$(fm_task_inbox_doorbell_line "$rec"); then
     return 2
   fi

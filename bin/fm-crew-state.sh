@@ -212,6 +212,13 @@
 #      backend's pane busy state, then the resolved status declaration
 #      when its verb maps to a recognized run-state. Decision-only events such as
 #      `resolved` never become current state or detail.
+#   4b. A ship or scout whose session bin/fm-idle-stop.sh stopped while idle
+#      (a VALID stopped-session record: bin/fm-idle-stop-lib.sh) is an expected,
+#      recorded state rather than a dead worker: the pane and busy reads of
+#      rules 4 and 5 are skipped and the status declaration answers through
+#      the rule 4 mapping, with the detail led by "session stopped (...) at
+#      <time>; relaunches on demand". A stale record (its agent back, or its
+#      endpoint missing) is ignored, so rule 5 still reports a real death.
 #   5. Missing meta or torn-down worktree: report unknown · none. If no run is
 #      attributed to this crew, a dead endpoint also reports unknown · none rather
 #      than trusting a stale status log. On tmux, herdr, and rex, which own a
@@ -247,6 +254,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-dod-lib.sh
 . "$SCRIPT_DIR/fm-dod-lib.sh"
+# shellcheck source=bin/fm-idle-stop-lib.sh
+. "$SCRIPT_DIR/fm-idle-stop-lib.sh"
 
 ID=${1:-}
 [ -n "$ID" ] || { echo "usage: fm-crew-state.sh <id>" >&2; exit 2; }
@@ -1535,7 +1544,12 @@ fi
 # verdict reports unknown rather than trusting a possibly-stale status log as
 # the current state.
 [ -n "$BACKEND_TARGET" ] || emit unknown none "no backend target recorded"
-if ! pane_readable "$BACKEND_TARGET"; then
+# Rule 4b: an expected, recorded idle stop answers from the status declaration.
+SESSION_STOPPED=
+if [ "$KIND" != secondmate ] && fm_idle_stop_record_valid "$STATE" "$ID" "$META"; then
+  SESSION_STOPPED=$(fm_idle_stop_record_describe "$STATE" "$ID")
+fi
+if [ -z "$SESSION_STOPPED" ] && ! pane_readable "$BACKEND_TARGET"; then
   # A failed probe is not itself evidence the pane is gone: the herdr CLI can
   # error or stall under load, and tmux can fail to be executed at all (a
   # trimmed PATH) or answer non-definitively, while the pane is alive - a busy
@@ -1594,7 +1608,7 @@ fi
 # Only an exact busy verdict reports working here, and only an exact idle
 # verdict permits the status-log fallback below. Missing, malformed, stale, or
 # unverified semantic state remains unknown.
-if [ "$KIND" != secondmate ]; then
+if [ "$KIND" != secondmate ] && [ -z "$SESSION_STOPPED" ]; then
   BUSY_VERDICT=$(crew_busy_verdict "$BACKEND_TARGET")
   case "${BUSY_VERDICT%% *}" in
     busy) emit working pane "harness busy (${BUSY_VERDICT#* })" ;;
@@ -1615,13 +1629,14 @@ fi
 # `unknown` verdict as the "not a state" test needs no second verb list here.
 if [ -n "$LOG_VERB" ]; then
   if [ "$LOG_VERB" = "done" ]; then
-    emit_ship_status_done
+    emit_ship_status_done "$SESSION_STOPPED"
   fi
   LOG_STATE=$(map_log_state "$LOG_LINE")
   if [ "$LOG_STATE" != unknown ]; then
-    emit "$LOG_STATE" status-log "$(status_line_note "$LOG_LINE")"
+    emit "$LOG_STATE" status-log "${SESSION_STOPPED:+$SESSION_STOPPED$SEP}$(status_line_note "$LOG_LINE")"
   fi
 fi
+[ -z "$SESSION_STOPPED" ] || emit unknown status-log "$SESSION_STOPPED; no recognized status declaration"
 
 # The away spend cap reads this exact line as an idle worker
 # (fm_afk_contract_reading_counts in bin/fm-afk-contract.sh).

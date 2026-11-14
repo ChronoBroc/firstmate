@@ -69,6 +69,11 @@
 # unsubmitted in the composer is reported as not reaching the target (the
 # ring's contract is owned by bin/fm-task-inbox-lib.sh); no composer verdict is
 # delivery proof on this plane, and a failed ring never fails the send.
+# A worker whose session was stopped while idle (bin/fm-idle-stop-lib.sh owns
+# that record) has no agent to ring: its steer is recorded as usual and the
+# worker is relaunched detached to read it (bin/fm-idle-stop.sh revive), which
+# reports a refused relaunch as a wait with the steer kept; a TYPED-plane send
+# to such a worker is refused, since a bare shell would run the text.
 #
 # TYPED - the LOCAL text submitted directly instead of through the inbox. On a
 # pane backend, a harness-native invocation (a leading "/", or a leading "$" to
@@ -292,6 +297,8 @@ fi
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-task-inbox-lib.sh
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
+# shellcheck source=bin/fm-idle-stop-lib.sh
+. "$SCRIPT_DIR/fm-idle-stop-lib.sh"
 
 FM_GUARD_CONTINUE_LINE='This is a supervision warning only; the requested message WILL still be sent.' "$SCRIPT_DIR/fm-guard.sh" || true
 
@@ -939,6 +946,13 @@ fm_send_feed_resolved_holds() { # <answer-text>
 # send implementation. A failed backend send is still surfaced below as a hard
 # error with the attempted resolution attached.
 
+# Hold the idle-session stop's delivery exclusion (bin/fm-idle-stop-lib.sh) for
+# input typed into <task>'s agent, released on exit.
+fm_send_delivery_begin() {  # <task>
+  fm_idle_stop_delivery_begin "$STATE" "$1" || return 1
+  trap 'fm_lease_guard_release; fm_idle_stop_delivery_end' EXIT
+}
+
 if [ "$FM_SEND_KEY_MODE" = 1 ]; then
   [ -z "$FIRE_AND_FORGET_ID" ] ||
     {
@@ -966,9 +980,18 @@ if [ "$FM_SEND_KEY_MODE" = 1 ]; then
       echo "error: key '$key' not sent to remote secondmate $TARGET_REMOTE_ID; completion may be unknown" >&2
       exit 1
     fi
-  elif ! fm_backend_send_key "$TARGET_BACKEND" "$T" "$key" "$EXPECTED_LABEL"; then
-    echo "error: key '$key' not sent to $T ($TARGET_BACKEND send failed; tried $RESOLUTION_TRIED)" >&2
-    exit 1
+  else
+    KEY_TASK_ID=
+    [ -z "$TARGET_META" ] || KEY_TASK_ID=$(fm_send_id_from_meta "$TARGET_META")
+    if [ -n "$KEY_TASK_ID" ] && ! fm_send_delivery_begin "$KEY_TASK_ID"; then
+      echo "error: another lifecycle action is running for task $KEY_TASK_ID, so key '$key' was not sent; retry it shortly" >&2
+      exit 1
+    fi
+    if ! fm_backend_send_key "$TARGET_BACKEND" "$T" "$key" "$EXPECTED_LABEL"; then
+      echo "error: key '$key' not sent to $T ($TARGET_BACKEND send failed; tried $RESOLUTION_TRIED)" >&2
+      exit 1
+    fi
+    fm_idle_stop_delivery_end
   fi
   fm_send_clear_after_interrupt "$semantic_key" || exit 1
   fm_send_record_interrupt "$semantic_key" || exit 1
@@ -1068,6 +1091,22 @@ else
       \$*) [ "$TARGET_HARNESS" = codex ] || INBOX_PLANE=1 ;;
       *) INBOX_PLANE=1 ;;
       esac
+    fi
+  fi
+  # A session stopped while idle (bin/fm-idle-stop.sh) has a bare shell where
+  # its harness was, so typed parser input would run as a shell command there.
+  # Typed input holds the idle-session stop's delivery exclusion until exit.
+  if [ "$INBOX_PLANE" = 0 ] && [ -n "$TARGET_META" ]; then
+    TYPED_TASK_ID=$(fm_send_id_from_meta "$TARGET_META")
+    if [ -n "$TYPED_TASK_ID" ] && ! fm_send_delivery_begin "$TYPED_TASK_ID"; then
+      fm_send_known_undelivered_cleanup || true
+      echo "error: another lifecycle action is running for task $TYPED_TASK_ID, so a typed harness command was not sent; retry it shortly" >&2
+      exit 1
+    fi
+    if fm_idle_stop_record_valid "$STATE" "$TYPED_TASK_ID" "$TARGET_META"; then
+      fm_send_known_undelivered_cleanup || true
+      echo "error: ${TARGET_SELECTOR:-$T}'s session was stopped while idle, so a typed harness command has nothing to reach; send an ordinary steer (it relaunches the worker) or run bin/fm-control.sh $TYPED_TASK_ID relaunch first" >&2
+      exit 1
     fi
   fi
   if [ "$INBOX_PLANE" = 1 ] && [ "$TARGET_BACKEND" = remote ]; then
@@ -1275,10 +1314,19 @@ else
         ;;
       esac
     fi
+    # A worker whose session was stopped while idle comes back for its steer:
+    # the relaunch runs detached (bin/fm-idle-stop.sh revive), and a refusal is
+    # recorded as a wait the watcher reports, with the steer kept here.
+    if [ "$ring_rc" = 3 ] && fm_idle_stop_record_valid "$STATE" "$INBOX_TASK_ID" "$TARGET_META"; then
+      ring_rc=4
+      FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE \
+        nohup "$SCRIPT_DIR/fm-idle-stop.sh" revive "$INBOX_TASK_ID" </dev/null >/dev/null 2>&1 &
+    fi
     case "$ring_rc" in
     1) echo "fm-send: doorbell skipped (composer visibly holds pending text); the steer is durably recorded at $INBOX_RECORD and $ring_retry" >&2 ;;
     2) echo "fm-send: doorbell did not reach $T; the steer is durably recorded at $INBOX_RECORD and $ring_retry" >&2 ;;
     3) echo "fm-send: doorbell not typed because the agent in $T has exited; the steer is durably recorded at $INBOX_RECORD for recovery (stuck-crewmate-recovery), and the watcher will not re-ring a dead pane" >&2 ;;
+    4) echo "fm-send: $INBOX_TASK_ID's session was stopped while idle; it is being relaunched to read the steer durably recorded at $INBOX_RECORD (a refused relaunch is reported as a wait, with the steer kept)" >&2 ;;
     esac
     exit 0
   fi

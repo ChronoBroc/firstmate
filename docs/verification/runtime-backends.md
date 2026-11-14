@@ -767,6 +767,28 @@ The token-free live guard refreshes this evidence and fails naming the Claude Co
 bin/fm-test-run.sh tests/fm-claude-busy-progress-live.test.sh
 ```
 
+## Idle session stop
+
+Verified on 2026-11-13 with Claude Code 2.1.325 on macOS, in a scratch firstmate home on a private tmux server (an explicit `-S` socket), with four interactive `claude` scouts launched by the real `bin/fm-spawn.sh` against a local API stub (`tests/fixtures/fm-claude-scripted-stub.py`) that plays each worker from its own brief, so no model is called.
+The real watcher supervised the home with its idle-stop sweep on a 3-second cadence and a memory check the guard switched between fine and short:
+
+```text
+ok - claude 2.1.325 (Claude Code): a done worker's session exits through fm-control, its window and worktree stay
+ok - claude 2.1.325 (Claude Code): a paused idle worker stays up while the memory check reports fine
+ok - claude 2.1.325 (Claude Code): short memory stops the idle paused worker, never the one in a foreground wait or holding a background job
+ok - claude 2.1.325 (Claude Code): a steer relaunches a stopped worker in its window and worktree, and it reads and acknowledges the steer
+ok - claude 2.1.325 (Claude Code): the watcher raised no stale or dead-worker wake for a stopped worker
+ok - claude 2.1.325 (Claude Code): cleanup of a stopped scout runs as for any finished scout and removes its stop record
+```
+
+A worker waiting inside a foreground Bash call read `busy claude-hook` throughout, and one whose turn ended over a `run_in_background` Bash call read `idle claude-hook` while its pane footer showed `1 shell still running`; the sweep kept that one up because a shell was still running below the `claude` process (`bin/fm-idle-stop.sh check` printed `skip agent holds a running command`).
+An idle Claude Code session held no shell below its process, and `/exit` left the pane's own shell behind, which the tmux classifier reads as `dead`.
+The token-free live guard refreshes this evidence and fails naming the Claude Code version:
+
+```sh
+bin/fm-test-run.sh tests/fm-idle-stop-live-e2e.test.sh
+```
+
 ## Secondmate busy contract
 
 Verified 2026-09-22 on this host with Claude Code 2.1.278, OpenCode 1.18.31, Pi 0.86.1, and Grok 1.0.40.
