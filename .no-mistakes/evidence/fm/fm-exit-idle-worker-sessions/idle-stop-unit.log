@@ -1,0 +1,17 @@
+ok - sweep: a done worker's idle session exits through fm-control, its window, record and worktree stay, and current state names the stop
+ok - sweep: nothing stops without the config file, done_after delays a fresh done, and done=off and off keep sessions up
+ok - sweep: a running shell under the agent, a busy harness, or an unread steer keeps the session up
+ok - sweep: a paused worker stops only past idle_after with memory reported short, never on fine memory or no answer
+ok - sweep: a parked worker is eligible under memory pressure, a secondmate never
+ok - a stop record whose agent is back is ignored and removed
+ok - the away spend cap does not count a stopped worker
+ok - fm-send: a steer to a stopped worker is recorded and relaunches it
+ok - fm-send: a typed harness command to a stopped worker is refused, never typed into its shell
+ok - fm-send: in a home that stops idle sessions, a typed command, key, or doorbell never races a lifecycle action
+ok - watcher: a steer waiting for a stopped worker relaunches it without escalating
+ok - revive: a refused relaunch keeps the record and steer, is recorded as a wait, and is reported once
+ok - watcher: a stopped worker reads as stopped only while its pane holds no agent
+ok - watcher: a paused worker stopped under memory pressure still gets its due recheck
+ok - fm-control exit --only-if-idle defers when input reached the agent after its idle check
+ok - fm-control exit --only-if-idle defers a busy agent with nothing sent
+exit=0

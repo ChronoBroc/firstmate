@@ -1,0 +1,11 @@
+# four claude 2.1.325 (Claude Code) workers launched and settled
+ok - claude 2.1.325 (Claude Code): a done worker's session exits through fm-control, its window and worktree stay
+ok - claude 2.1.325 (Claude Code): a paused idle worker stays up while the memory check reports fine
+ok - claude 2.1.325 (Claude Code): short memory stops the idle paused worker, never the one in a foreground wait or holding a background job
+ok - claude 2.1.325 (Claude Code): a steer relaunches a stopped worker in its window and worktree, and it reads and acknowledges the steer
+ok - claude 2.1.325 (Claude Code): the watcher raised no stale or dead-worker wake for a stopped worker
+ok - claude 2.1.325 (Claude Code): cleanup of a stopped scout runs as for any finished scout and removes its stop record
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-idle-live.rsIbmb/home/state: Directory not empty
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-idle-live.rsIbmb/home: Directory not empty
+rm: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-idle-live.rsIbmb: Directory not empty
+exit=0
