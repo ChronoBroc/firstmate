@@ -127,7 +127,6 @@ MEMORY_VERDICT=
 
 memory_verdict() {
   [ -n "$MEMORY_VERDICT" ] || MEMORY_VERDICT=$(fm_idle_stop_memory_verdict)
-  printf '%s' "$MEMORY_VERDICT"
 }
 
 crew_state() {  # <id>
@@ -212,10 +211,11 @@ verdict() {  # <id>
   [ "$idle" -ge "$after" ] || { printf -v VERDICT 'skip idle %ss of %ss' "$idle" "$after"; return 0; }
   if [ "$reason" = idle-memory ]; then
     [ -n "$FM_IDLE_STOP_MEMORY_CHECK" ] || { printf -v VERDICT 'skip no memory_check configured'; return 0; }
-    case "$(memory_verdict)" in
+    memory_verdict
+    case "$MEMORY_VERDICT" in
       short) ;;
       fine) printf -v VERDICT 'skip host memory is fine'; return 0 ;;
-      *) printf -v VERDICT 'skip memory check: %s' "$(memory_verdict)"; return 0 ;;
+      *) printf -v VERDICT 'skip memory check: %s' "$MEMORY_VERDICT"; return 0 ;;
     esac
   fi
   printf -v VERDICT 'eligible %s' "$reason"
@@ -228,7 +228,8 @@ revive_detached() {  # <id>
 }
 
 stop_one() {  # <id>
-  local id=$1 meta="$STATE/$1.meta" v out rc=0 reason target
+  local id=$1 meta="$STATE/$1.meta" v out rc=0 reason target since
+  since=$(date +%s)
   verdict "$id"
   v=$VERDICT
   case "$v" in
@@ -239,7 +240,7 @@ stop_one() {  # <id>
   # The record goes down first: it is inert while the agent still runs (only a
   # dead endpoint makes it valid), so no reader can ever see the stopped pane
   # without it. A refused exit takes it away again.
-  fm_idle_stop_record_write "$STATE" "$id" "$reason" "$target" "$VERDICT_STATE" "$VERDICT_STATUS" \
+  fm_idle_stop_record_write "$STATE" "$id" "$reason" "$target" "$VERDICT_STATE" "$VERDICT_STATUS" "$since" \
     || { log "$id not now: its stop record could not be written"; return 0; }
   if fm_idle_stop_unhandled_steer "$STATE" "$id"; then
     fm_idle_stop_record_clear "$STATE" "$id"

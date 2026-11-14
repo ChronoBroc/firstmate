@@ -403,16 +403,25 @@ test_typed_command_waits_out_a_lifecycle_action() {
   [ -e "$dir/home/state/.held" ] || fail "setup: the lifecycle lock was not taken"
   : > "$dir/fake/literal"
   out=$(run_env "$dir" "$SEND" t1 '/compact') || rc=$?
-  kill_tree "$holder"
   [ "$rc" -ne 0 ] || fail "a typed command must not be sent while a lifecycle action holds the task: $out"
   assert_contains "$out" "another lifecycle action is running" "the refusal names why"
-  [ ! -s "$dir/fake/literal" ] || fail "a typed command was sent during a lifecycle action: $(cat "$dir/fake/literal")"
+  rc=0
+  out=$(run_env "$dir" "$SEND" t1 --key Enter) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a key must not be sent while a lifecycle action holds the task: $out"
+  [ ! -s "$dir/fake/keys" ] || fail "a key was sent during a lifecycle action: $(cat "$dir/fake/keys")"
+  out=$(run_env "$dir" "$SEND" t1 'please add the missing section')
+  assert_contains "$out" "doorbell did not reach" "a doorbell waits out a lifecycle action"
+  assert_present "$dir/home/state/t1.inbox/001.msg"
+  kill_tree "$holder"
+  [ ! -s "$dir/fake/literal" ] || fail "input was typed during a lifecycle action: $(cat "$dir/fake/literal")"
+  mkdir -p "$dir/home/state/t1.inbox/handled"
+  mv "$dir/home/state/t1.inbox/001.msg" "$dir/home/state/t1.inbox/handled/"
   rc=0
   out=$(run_env "$dir" "$SEND" t1 '/compact') || rc=$?
   assert_contains "$(cat "$dir/fake/literal")" "/compact" "once the action ends the typed command is sent: $out"
   out=$(run_env "$dir" "$CONTROL" t1 exit --only-if-idle 2>&1) || true
   assert_contains "$out" "stopped" "the lifecycle lock is released after the typed send"
-  pass "fm-send: in a home that stops idle sessions, a typed harness command never races a lifecycle action"
+  pass "fm-send: in a home that stops idle sessions, a typed command, key, or doorbell never races a lifecycle action"
 }
 
 test_watcher_inbox_relaunches_without_wake() {
@@ -492,6 +501,24 @@ test_stopped_paused_worker_keeps_its_due_recheck() {
 
 # --- 7. exit --only-if-idle -------------------------------------------------------
 
+test_exit_only_if_idle_refuses_after_a_delivery() {
+  local dir rc=0 out
+  dir=$(new_case only-idle-delivered)
+  add_task "$dir" t1 scout "done [at=$(date +%s)]: report written"
+  config "$dir" 'done_after=0'
+  start_tree "$dir" idle
+  printf 'schema=fm-session-stopped.v1\nat=%s\nreason=done\nendpoint=fmses:fm-t1\n' "$(date +%s)" > "$dir/home/state/t1.session-stopped"
+  out=$(run_env "$dir" "$SEND" t1 '/compact')
+  assert_contains "$(cat "$dir/fake/literal")" "/compact" "setup: the typed command reached the agent: $out"
+  : > "$dir/fake/literal"
+  : > "$dir/fake/keys"
+  out=$(run_env "$dir" "$CONTROL" t1 exit --only-if-idle) || rc=$?
+  expect_code 75 "$rc" "an exit whose idle check predates a delivery must be deferred: $out"
+  [ ! -s "$dir/fake/literal" ] && [ ! -s "$dir/fake/keys" ] \
+    || fail "--only-if-idle sent input after a delivery: $(cat "$dir/fake/literal" "$dir/fake/keys")"
+  pass "fm-control exit --only-if-idle defers when input reached the agent after its idle check"
+}
+
 test_exit_only_if_idle_refuses_busy() {
   local dir rc=0 out
   dir=$(new_case only-idle)
@@ -518,4 +545,5 @@ test_watcher_inbox_relaunches_without_wake
 test_refused_relaunch_is_a_wait_reported_once
 test_stale_path_skips_a_stopped_worker
 test_stopped_paused_worker_keeps_its_due_recheck
+test_exit_only_if_idle_refuses_after_a_delivery
 test_exit_only_if_idle_refuses_busy

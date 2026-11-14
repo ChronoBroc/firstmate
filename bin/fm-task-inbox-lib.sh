@@ -104,6 +104,8 @@ _FM_TASK_INBOX_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$_FM_TASK_INBOX_LIB_DIR/fm-wake-lib.sh"
 # shellcheck source=/dev/null
 . "$_FM_TASK_INBOX_LIB_DIR/fm-backend.sh"
+# shellcheck source=/dev/null
+. "$_FM_TASK_INBOX_LIB_DIR/fm-idle-stop-lib.sh"
 
 FM_TASK_INBOX_SCHEMA='fm-task-inbox.v1'
 FM_TASK_INBOX_GRACE_DEFAULT=90
@@ -402,14 +404,25 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 # fm_composer_queued_enter_verdict reads it as accepted and queued by a busy
 # agent (OpenCode keeps a queued message visible), which is rung.
 fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
-  local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict
-  case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
+  local base rc=0
+  case "$(fm_backend_agent_state "$1" "$2" 2>/dev/null || true)" in
     dead|missing) return 3 ;;
   esac
-  # An idle-session stop in flight holds the task's stop record
-  # (bin/fm-idle-stop-lib.sh); the doorbell waits for its re-ring instead of
-  # starting a turn the exit would cancel.
-  [ ! -e "${rec%.inbox/*}.session-stopped" ] || return 2
+  # The doorbell is typed under the idle-session stop's delivery exclusion
+  # (bin/fm-idle-stop-lib.sh); a held task waits for its re-ring.
+  case "$3" in
+    */*.inbox/*)
+      base=${3%.inbox/*}
+      fm_idle_stop_delivery_begin "${base%/*}" "${base##*/}" || return 2
+      ;;
+  esac
+  _fm_task_inbox_ring_type "$@" || rc=$?
+  fm_idle_stop_delivery_end
+  return "$rc"
+}
+
+_fm_task_inbox_ring_type() {  # <backend> <target> <record-path> [expected-label]
+  local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict
   if ! line=$(fm_task_inbox_doorbell_line "$rec"); then
     return 2
   fi

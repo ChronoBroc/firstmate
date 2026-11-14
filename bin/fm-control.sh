@@ -809,6 +809,10 @@ do_exit() {
   # A busy agent is interrupted first before the exit command is submitted,
   # unless the caller asked for an idle-only stop, which refuses instead.
   if [ "$ONLY_IF_IDLE" = 1 ]; then
+    if fm_idle_stop_delivered_since_record "$STATE" "$ID"; then
+      echo "deferred: input was delivered to task $ID since its idle check; --only-if-idle sent nothing" >&2
+      exit 75
+    fi
     verdict=$(busy_verdict)
     case "$verdict" in
       idle\ *) ;;

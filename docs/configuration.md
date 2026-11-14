@@ -810,6 +810,7 @@ A stopped session is a recorded, expected state, not a crash: `bin/fm-crew-state
 A steer sent with `bin/fm-send.sh` relaunches the worker through `bin/fm-control.sh <id> relaunch` with a note that carries its recorded state forward and points it at the steer, and `bin/fm-control.sh <id> relaunch` works on it directly.
 A refused relaunch, such as the away spend cap's deferral or an account refusal, wakes firstmate once with the refusal as a wait, keeps the steer in the inbox, and is retried silently after `FM_IDLE_STOP_REVIVE_RETRY_SECS`.
 A typed harness command such as `/compact` to a stopped worker is refused, because its pane holds a bare shell.
+In a home with this file, a doorbell, typed harness command, or key sent to a worker waits out any lifecycle action on it, and an idle-session exit refuses once input reached the worker after its idle check, so a stop never ends a turn that input just started.
 
 The file must be a regular file owned by this user and writable by nobody else, or the feature reads as off.
 Blank lines and `#` comments are skipped:

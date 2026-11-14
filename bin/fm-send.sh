@@ -946,6 +946,13 @@ fm_send_feed_resolved_holds() { # <answer-text>
 # send implementation. A failed backend send is still surfaced below as a hard
 # error with the attempted resolution attached.
 
+# Hold the idle-session stop's delivery exclusion (bin/fm-idle-stop-lib.sh) for
+# input typed into <task>'s agent, released on exit.
+fm_send_delivery_begin() {  # <task>
+  fm_idle_stop_delivery_begin "$STATE" "$1" || return 1
+  trap 'fm_lease_guard_release; fm_idle_stop_delivery_end' EXIT
+}
+
 if [ "$FM_SEND_KEY_MODE" = 1 ]; then
   [ -z "$FIRE_AND_FORGET_ID" ] ||
     {
@@ -973,9 +980,18 @@ if [ "$FM_SEND_KEY_MODE" = 1 ]; then
       echo "error: key '$key' not sent to remote secondmate $TARGET_REMOTE_ID; completion may be unknown" >&2
       exit 1
     fi
-  elif ! fm_backend_send_key "$TARGET_BACKEND" "$T" "$key" "$EXPECTED_LABEL"; then
-    echo "error: key '$key' not sent to $T ($TARGET_BACKEND send failed; tried $RESOLUTION_TRIED)" >&2
-    exit 1
+  else
+    KEY_TASK_ID=
+    [ -z "$TARGET_META" ] || KEY_TASK_ID=$(fm_send_id_from_meta "$TARGET_META")
+    if [ -n "$KEY_TASK_ID" ] && ! fm_send_delivery_begin "$KEY_TASK_ID"; then
+      echo "error: another lifecycle action is running for task $KEY_TASK_ID, so key '$key' was not sent; retry it shortly" >&2
+      exit 1
+    fi
+    if ! fm_backend_send_key "$TARGET_BACKEND" "$T" "$key" "$EXPECTED_LABEL"; then
+      echo "error: key '$key' not sent to $T ($TARGET_BACKEND send failed; tried $RESOLUTION_TRIED)" >&2
+      exit 1
+    fi
+    fm_idle_stop_delivery_end
   fi
   fm_send_clear_after_interrupt "$semantic_key" || exit 1
   fm_send_record_interrupt "$semantic_key" || exit 1
@@ -1079,21 +1095,13 @@ else
   fi
   # A session stopped while idle (bin/fm-idle-stop.sh) has a bare shell where
   # its harness was, so typed parser input would run as a shell command there.
-  # In a home that stops idle sessions, typed input holds the task's lifecycle
-  # lock until it exits, so no idle-session exit can run between this check
-  # and the keystrokes.
+  # Typed input holds the idle-session stop's delivery exclusion until exit.
   if [ "$INBOX_PLANE" = 0 ] && [ -n "$TARGET_SELECTOR" ] && [ -n "$TARGET_META" ]; then
     TYPED_TASK_ID=$(fm_send_id_from_meta "$TARGET_META")
-    if [ -n "$TYPED_TASK_ID" ] \
-      && { [ -e "$(fm_idle_stop_config_path "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}")" ] \
-        || [ -e "$(fm_idle_stop_record_path "$STATE" "$TYPED_TASK_ID")" ]; }; then
-      if ! fm_lock_try_acquire "$STATE/.control-$TYPED_TASK_ID.lock"; then
-        fm_send_known_undelivered_cleanup || true
-        echo "error: another lifecycle action is running for task $TYPED_TASK_ID, so a typed harness command was not sent; retry it shortly" >&2
-        exit 1
-      fi
-      TYPED_CONTROL_LOCK="$STATE/.control-$TYPED_TASK_ID.lock"
-      trap 'fm_lease_guard_release; fm_lock_release "$TYPED_CONTROL_LOCK" >/dev/null 2>&1 || true' EXIT
+    if [ -n "$TYPED_TASK_ID" ] && ! fm_send_delivery_begin "$TYPED_TASK_ID"; then
+      fm_send_known_undelivered_cleanup || true
+      echo "error: another lifecycle action is running for task $TYPED_TASK_ID, so a typed harness command was not sent; retry it shortly" >&2
+      exit 1
     fi
     if fm_idle_stop_record_valid "$STATE" "$TYPED_TASK_ID" "$TARGET_META"; then
       fm_send_known_undelivered_cleanup || true

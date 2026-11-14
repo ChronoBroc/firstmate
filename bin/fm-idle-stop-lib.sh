@@ -36,7 +36,7 @@
 # Record: state/<id>.session-stopped, written only by bin/fm-idle-stop.sh after
 # `fm-control.sh <id> exit` reported `stopped`:
 #   schema=fm-session-stopped.v1
-#   at=<epoch the session was stopped>
+#   at=<epoch the stop's idle check began>
 #   reason=done|idle-memory
 #   endpoint=<the recorded backend target it was stopped at>
 #   state=<the fm-crew-state.sh reading that made it eligible>
@@ -61,7 +61,8 @@
 # task's steering inbox throughout.
 #
 # Sourced by bin/fm-idle-stop.sh, bin/fm-watch.sh, bin/fm-crew-state.sh,
-# bin/fm-control.sh, bin/fm-send.sh, and bin/fm-session-start.sh. No side
+# bin/fm-control.sh, bin/fm-send.sh, bin/fm-session-start.sh, and
+# bin/fm-task-inbox-lib.sh. No side
 # effects on source; requires bin/fm-backend.sh's dispatch for the endpoint
 # reads.
 
@@ -239,13 +240,13 @@ fm_idle_stop_record_describe() {  # <state-dir> <id>
   printf 'session stopped (%s) at %s; relaunches on demand' "${reason:-idle}" "$when"
 }
 
-fm_idle_stop_record_write() {  # <state-dir> <id> <reason> <endpoint> <state-line> <status-line>
+fm_idle_stop_record_write() {  # <state-dir> <id> <reason> <endpoint> <state-line> <status-line> [at]
   local rec tmp
   rec=$(fm_idle_stop_record_path "$1" "$2")
   tmp="$rec.tmp.$$"
   {
     printf 'schema=%s\n' "$FM_IDLE_STOP_RECORD_SCHEMA"
-    printf 'at=%s\n' "$(date +%s)"
+    printf 'at=%s\n' "${7:-$(date +%s)}"
     printf 'reason=%s\n' "$3"
     printf 'endpoint=%s\n' "$4"
     printf 'state=%s\n' "$(printf '%s' "$5" | tr '\n' ' ')"
@@ -256,6 +257,52 @@ fm_idle_stop_record_write() {  # <state-dir> <id> <reason> <endpoint> <state-lin
 # Remove the record and any relaunch-wait notice. Idempotent.
 fm_idle_stop_record_clear() {  # <state-dir> <id>
   rm -f "$(fm_idle_stop_record_path "$1" "$2")" "$(fm_idle_stop_notice_path "$1" "$2")"
+}
+
+# --- delivery exclusion -------------------------------------------------------
+
+# Input typed into a task's agent - a doorbell, a typed harness command, a key -
+# and an idle-only exit must never interleave: the input would start a turn the
+# exit then ends. In a home that stops idle sessions, a delivery holds the
+# task's lifecycle lock (the one bin/fm-control.sh holds through `exit`) and
+# stamps <id>.delivered, and `exit --only-if-idle` refuses once a delivery is
+# stamped at or after its stop record's `at`, the moment its idle check began.
+# Requires bin/fm-wake-lib.sh's lock primitives at call time.
+fm_idle_stop_delivery_path() {  # <state-dir> <id>
+  printf '%s/%s.delivered' "$1" "$2"
+}
+
+# 0 with FM_IDLE_STOP_DELIVERY_LOCK set (empty when no exclusion applies) when
+# the delivery may proceed; 1 while another lifecycle action holds the task.
+fm_idle_stop_delivery_begin() {  # <state-dir> <id>
+  local lock="$1/.control-$2.lock"
+  FM_IDLE_STOP_DELIVERY_LOCK=
+  [ -e "$(fm_idle_stop_config_path "${FM_CONFIG_OVERRIDE:-${FM_HOME:-}/config}")" ] \
+    || [ -e "$(fm_idle_stop_record_path "$1" "$2")" ] || return 0
+  fm_lock_try_acquire "$lock" || return 1
+  FM_IDLE_STOP_DELIVERY_LOCK=$lock
+  touch "$(fm_idle_stop_delivery_path "$1" "$2")" 2>/dev/null || true
+}
+
+fm_idle_stop_delivery_end() {
+  [ -n "${FM_IDLE_STOP_DELIVERY_LOCK:-}" ] || return 0
+  fm_lock_release "$FM_IDLE_STOP_DELIVERY_LOCK" >/dev/null 2>&1 || true
+  FM_IDLE_STOP_DELIVERY_LOCK=
+}
+
+# 0 when input was delivered at or after the stop record's `at`.
+fm_idle_stop_delivered_since_record() {  # <state-dir> <id>
+  local at f t
+  at=$(fm_idle_stop_field "$(fm_idle_stop_record_path "$1" "$2")" at 2>/dev/null) || return 1
+  case "$at" in ''|*[!0-9]*) return 1 ;; esac
+  f=$(fm_idle_stop_delivery_path "$1" "$2")
+  [ -e "$f" ] || return 1
+  if [ "$(uname)" = Darwin ]; then
+    t=$(/usr/bin/stat -f %m "$f" 2>/dev/null) || return 1
+  else
+    t=$(stat -c %Y "$f" 2>/dev/null) || return 1
+  fi
+  [ "$t" -ge "$at" ]
 }
 
 # --- relaunch-wait notice -----------------------------------------------------
@@ -378,7 +425,8 @@ fm_idle_stop_last_activity() {  # <state-dir> <id>
   line=$(cat "$(fm_busy_record_path "$state" "$id")" 2>/dev/null) || line=
   t=$(printf '%s\n' "$line" | tr ' ' '\n' | awk -F= '$1 == "ts" { print $2; exit }')
   case "$t" in ''|*[!0-9]*) ;; *) [ "$t" -le "$newest" ] || newest=$t ;; esac
-  for f in "$state/$id.status" "$state/$id.turn-ended" "$state/$id.inbox/handled" "$state/$id.inbox"; do
+  for f in "$state/$id.status" "$state/$id.turn-ended" "$state/$id.inbox/handled" "$state/$id.inbox" \
+    "$(fm_idle_stop_delivery_path "$state" "$id")"; do
     [ -e "$f" ] || continue
     if [ "$(uname)" = Darwin ]; then
       t=$(/usr/bin/stat -f %m "$f" 2>/dev/null) || continue
