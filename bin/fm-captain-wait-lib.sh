@@ -5,7 +5,10 @@
 # CONTRACT (this header is the one owner of the record and its settle rule).
 #   - Record: one file per recorded wait, $STATE/.<task>.captain-wait.<seq>.<key>,
 #     where <seq> is the captain outcome's seq and <key> the wait's phase key
-#     ("default" for the keyless phase). bin/fm-branch-outcome.sh append writes
+#     ("+keyless" for the keyless phase, a name no stated key can take, so a
+#     keyless wait and a [key=default] wait stay distinct; which records are
+#     the same wait is decided from the phase key of each record's wait line,
+#     never from the file name). bin/fm-branch-outcome.sh append writes
 #     them for every captain-verdict row: each wait in force in the task's
 #     status log at the row's captured status provenance (statusEndpoint and
 #     statusIdent) - the declared wait (status_declared_wait_line,
@@ -81,7 +84,6 @@ _fm_captain_wait_one_line() {  # <text>
 _fm_captain_wait_key() {  # <wait-line>
   local key
   key=$(_fm_decision_key "$1" "$_FM_CLASSIFY_KEYLESS_PHASE") || return 1
-  [ "$key" != "$_FM_CLASSIFY_KEYLESS_PHASE" ] || key=default
   printf '%s' "$key"
 }
 
@@ -102,7 +104,7 @@ EOF
 # contract. The caller holds $STATE/.branch-outcomes.lock. Returns 1 only when
 # a record could not be written or replaced.
 fm_captain_wait_note() {  # <state> <task> <seq> <endpoint> <ident> <summary>
-  local state=$1 task=$2 seq=$3 endpoint=$4 ident=$5 summary=$6 f prefix waits='' wait key path old tmp
+  local state=$1 task=$2 seq=$3 endpoint=$4 ident=$5 summary=$6 f prefix waits='' wait key slug path old tmp
   case "$task" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
   case "$seq" in ''|*[!0-9]*) return 1 ;; esac
   case "$endpoint" in ''|0|*[!0-9]*) return 0 ;; esac
@@ -125,7 +127,9 @@ fm_captain_wait_note() {  # <state> <task> <seq> <endpoint> <ident> <summary>
     done <<EOF
 $(fm_captain_wait_records "$state" "$task")
 EOF
-    path="$state/.$task.captain-wait.$seq.$key"
+    slug=$key
+    [ "$key" != "$_FM_CLASSIFY_KEYLESS_PHASE" ] || slug=+keyless
+    path="$state/.$task.captain-wait.$seq.$slug"
     tmp=$(mktemp "$state/.captain-wait-tmp.XXXXXX") || return 1
     chmod 0600 "$tmp" || { rm -f -- "$tmp"; return 1; }
     if ! printf 'v=%s\nseq=%s\nendpoint=%s\nident=%s\nwait=%s\nsummary=%s\n' \
