@@ -13,7 +13,9 @@
 #     status log at the row's captured status provenance (statusEndpoint and
 #     statusIdent) - the declared wait (status_declared_wait_line,
 #     bin/fm-classify-lib.sh) and every open keyed needs-decision
-#     (status_open_decisions; keyless and "default" decisions excluded) - gets
+#     (status_open_decisions; one whose opening line states its key, including
+#     an explicit [key=default], while a keyless needs-decision, which the fold
+#     also files under "default", is excluded) - gets
 #     its own record. Waits are independent per key: a row never removes,
 #     replaces or touches a record for another key, and records nothing when no
 #     wait is in force. A same-key record still open is replaced by the newer
@@ -87,13 +89,27 @@ _fm_captain_wait_key() {  # <wait-line>
   printf '%s' "$key"
 }
 
-# Every wait in force in <status-file>: the declared wait, then each open keyed
-# needs-decision as a decision line.
+# 0 when the newest line opening the fold's "default" decision in
+# <status-file> states [key=default] rather than no key at all.
+_fm_captain_wait_default_is_explicit() {  # <status-file>
+  local line verb explicit=1
+  while IFS= read -r line || [ -n "$line" ]; do
+    status_line_verb "$line" verb
+    case "$verb" in needs-decision|blocked) ;; *) continue ;; esac
+    [ "$(_fm_decision_key "$line")" = default ] || continue
+    if [ "$(_fm_decision_key "$line" '')" = default ]; then explicit=0; else explicit=1; fi
+  done < "$1"
+  return "$explicit"
+}
+
+# Every wait in force in <status-file>: the declared wait, then each open
+# needs-decision whose opening line states its key, as a decision line.
 _fm_captain_wait_in_force() {  # <status-file> <kind>
   local key verb note
   status_declared_wait_line "$1"
   while IFS=$'\t' read -r key verb note; do
-    [ "$verb" = needs-decision ] && [ -n "$key" ] && [ "$key" != default ] || continue
+    [ "$verb" = needs-decision ] && [ -n "$key" ] || continue
+    [ "$key" != default ] || _fm_captain_wait_default_is_explicit "$1" || continue
     printf 'needs-decision [key=%s]: %s\n' "$key" "$note"
   done <<EOF
 $(status_open_decisions "$1" "$2")

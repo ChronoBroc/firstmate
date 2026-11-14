@@ -343,6 +343,41 @@ test_unpresented_settlement_survives_a_new_same_key_wait() {
   pass "an unpresented settlement survives a new same-key wait, which settles on its own answer"
 }
 
+test_explicit_default_key_decision_settles_visibly() {
+  local dir state fakebin out drain_out seq pid verdict answer
+  dir=$(make_case explicit-default-decision); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; drain_out="$dir/drain.out"
+  answer='resolved [key=default] [at=1794687324]: answered'
+  seq=$(setup_recorded_wait "$dir" 'needs-decision [key=default] [at=1794686615]: round 7 waits for the owner') \
+    || fail "setup of the recorded [key=default] decision failed"
+  printf '%s\n' "$answer" >> "$state/designer.status"
+  export FM_FAKE_CREW_STATE='state: working · source: pane · busy drawing round 8'
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  verdict=$(watch_verdict "$state" "$pid")
+  [ "$verdict" = exit ] || reap "$pid"
+  unset FM_FAKE_CREW_STATE
+  [ "$verdict" = exit ] \
+    || fail "the answer closing a [key=default] decision was $verdict by the watcher instead of reaching a session"
+  grep -F "$(printf '\tneeds-decision: ')" "$state/.wake-queue" | grep -F designer.status >/dev/null \
+    || fail "the answer's queued row is not main-owned: $(cat "$state/.wake-queue")"
+  drain_and_ack "$state" "$drain_out" || fail "main's drain failed"
+  grep -F "designer outcome $seq (" "$drain_out" | grep -F "$answer" >/dev/null \
+    || fail "the [key=default] decision was not presented as settled: $(cat "$drain_out")"
+  pass "an explicit [key=default] needs-decision is recorded and settles visibly on its own answer"
+}
+
+# The record files are the persisted state bin/fm-captain-wait-lib.sh owns.
+test_keyless_decision_records_no_wait() {
+  local dir state
+  dir=$(make_case keyless-decision); state="$dir/state"
+  setup_recorded_wait "$dir" 'needs-decision [at=1794686615]: pick one' >/dev/null \
+    || fail "setup of the keyless decision outcome failed"
+  ! ls "$state"/.designer.captain-wait.* >/dev/null 2>&1 \
+    || fail "a keyless needs-decision was recorded as a wait: $(ls -a "$state")"
+  pass "a keyless needs-decision recorded as a captain outcome creates no wait record"
+}
+
 test_keyless_wait_and_default_key_wait_stay_distinct() {
   local dir state drain_out seq next answer
   dir=$(make_case keyless-vs-default); state="$dir/state"; drain_out="$dir/drain.out"
@@ -390,4 +425,6 @@ fm_test_run \
   test_newer_captain_outcome_without_a_wait_leaves_the_open_wait \
   test_unpresented_settlement_survives_a_new_same_key_wait \
   test_wait_whose_status_log_was_replaced_is_presented_once_as_unconfirmable \
-  test_keyless_wait_and_default_key_wait_stay_distinct
+  test_keyless_wait_and_default_key_wait_stay_distinct \
+  test_explicit_default_key_decision_settles_visibly \
+  test_keyless_decision_records_no_wait
