@@ -179,6 +179,7 @@ wait_until() {  # <seconds> <description> <command...>
 
 status_has() { grep -q "$2" "$STATE/$1.status" 2>/dev/null; }
 busy_is() { grep -q "state=$2 " "$STATE/$1.busy-state" 2>/dev/null; }
+# shellcheck disable=SC2016  # Expanded by the child bash.
 agent_state() { fm bash -c '. "$1/bin/fm-backend.sh"; m="$2/$3.meta"; fm_backend_agent_state tmux "$(fm_backend_target_of_meta "$m")" "$m"' _ "$ROOT" "$STATE" "$1"; }
 agent_is() { [ "$(agent_state "$1")" = "$2" ]; }
 stopped() { [ -f "$STATE/$1.session-stopped" ] && agent_is "$1" dead; }
@@ -243,8 +244,8 @@ wait_until 90 "the paused worker's session to stop" stopped w-paused
 T_PAUSED_STOP=$(date +%s)
 agent_is w-paused dead || die_with "the paused worker's record stands but its agent reads $(agent_state w-paused)"
 sleep 12
-agent_is w-busy alive && ! stopped w-busy || die_with "the worker inside a foreground wait was stopped"
-agent_is w-bg alive && ! stopped w-bg || die_with "the worker holding a background job was stopped"
+if ! agent_is w-busy alive || stopped w-busy; then die_with "the worker inside a foreground wait was stopped"; fi
+if ! agent_is w-bg alive || stopped w-bg; then die_with "the worker holding a background job was stopped"; fi
 # Each stayed up for its own reason, not by luck of timing.
 verdict=$(fm "$ROOT/bin/fm-idle-stop.sh" check w-busy)
 case "$verdict" in "skip harness is not proven idle (busy "*) ;; *) die_with "the foreground-wait worker's verdict is '$verdict'" ;; esac
@@ -262,8 +263,9 @@ case "$out" in *"stopped while idle"*) ;; *) die_with "fm-send did not say the w
 wait_until 120 "the relaunched worker to read its steer" test -s "$STATE/w-done.inbox.read"
 grep -q 'one more section' "$STATE/w-done.inbox.read" || die_with "the relaunched worker read something else"
 wait_until 30 "the steer's acknowledgement" test -n "$(ls "$STATE/w-done.inbox/handled/" 2>/dev/null)"
-[ ! -e "$STATE/w-done.session-stopped" ] && agent_is w-done alive \
-  || die_with "the relaunched worker is not running, or still has its stop record"
+if [ -e "$STATE/w-done.session-stopped" ] || ! agent_is w-done alive; then
+  die_with "the relaunched worker is not running, or still has its stop record"
+fi
 [ "$(meta_field w-done window)" = "$WIN_DONE" ] \
   || die_with "the relaunch moved the worker to another window"
 [ "$(meta_field w-done worktree)" = "$WT_DONE" ] \
@@ -285,13 +287,13 @@ fi
 pass "claude $CLAUDE_VERSION: the watcher raised no stale or dead-worker wake for a stopped worker"
 
 # Cleanup treats a stopped worker as any other: a finished scout tears down.
-stopped w-paused && agent_is w-paused dead || die_with "the paused worker is no longer stopped before its cleanup"
+stopped w-paused || die_with "the paused worker is no longer stopped before its cleanup"
 printf '# report\n' > "$H/data/w-paused/report.md"
 out=$(fm "$ROOT/bin/fm-captain-hold.sh" complete w-paused --none 2>&1) \
   || die_with "the scout's captain-call inventory could not be recorded: $out"
 out=$(fm "$ROOT/bin/fm-teardown.sh" w-paused 2>&1) || die_with "teardown of a stopped scout failed: $out"
 [ ! -e "$STATE/w-paused.meta" ] && [ ! -e "$STATE/w-paused.session-stopped" ] \
-  || die_with "teardown left the stopped scout's records: $(ls "$STATE" | grep w-paused)"
+  || die_with "teardown left the stopped scout's records: $(printf '%s ' "$STATE"/w-paused.*)"
 ! "$REAL_TMUX" -S "$SOCK" list-windows -t fmlab -F '#{window_name}' | grep -qx fm-w-paused \
   || die_with "teardown left the stopped scout's window"
 pass "claude $CLAUDE_VERSION: cleanup of a stopped scout runs as for any finished scout and removes its stop record"

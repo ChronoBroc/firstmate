@@ -111,6 +111,7 @@ start_tree() {  # <case-dir> idle|running
     idle) inner='/bin/sleep 600; :' ;;
     running) inner='/bin/sh -c "/bin/sleep 600; :"; :' ;;
   esac
+  # shellcheck disable=SC2016  # Expanded by the child bash.
   /bin/bash -c '"$1" -c "$2"; :' _ "$dir/claude" "$inner" >/dev/null 2>&1 &
   TREE_PIDS+=("$!")
   printf '%s' "$!" > "$dir/fake/pane_pid"
@@ -193,7 +194,7 @@ crew_state() { run_env "$1" env FM_CREW_STATE_NO_FORGE=1 "$CREW_STATE" "$2"; }
 
 test_done_worker_is_stopped_and_window_kept() {
   local dir out
-  dir=$(new_case done)
+  dir=$(new_case 'done')
   add_task "$dir" t1 scout "done [at=$(date +%s)]: report written"
   config "$dir" 'done_after=0'
   start_tree "$dir" idle
@@ -389,6 +390,7 @@ test_watcher_inbox_relaunches_without_wake() {
   dir=$(stopped_case watch-revive)
   mkdir -p "$dir/home/state/t1.inbox/handled"
   printf 'schema=fm-task-inbox.v1\nat=x\n--\nplease look again\n' > "$dir/home/state/t1.inbox/001.msg"
+  # shellcheck disable=SC2016  # Expanded by the child bash.
   run_env "$dir" env FM_IDLE_STOP_CONTROL="$dir/control" \
     bash -c '. "$1" && inbox_steer_check fmses:fm-t1 t1' _ "$WATCH" >/dev/null
   wait_for "$dir/fake/control-calls" 'relaunch' || fail "the watcher's inbox check did not relaunch the stopped worker"
@@ -404,8 +406,10 @@ test_refused_relaunch_is_a_wait_reported_once() {
   assert_present "$dir/home/state/t1.session-stopped"
   assert_grep 'surfaced=0' "$dir/home/state/t1.session-revive" "the refusal is waiting to be reported"
   assert_grep 'spend cap' "$dir/home/state/t1.session-revive" "the notice keeps the refusal's words"
+  # shellcheck disable=SC2016  # Expanded by the child bash.
   out=$(run_env "$dir" bash -c '. "$1"; wake() { printf "WAKE %s\n" "$1"; exit 0; }; idle_stop_notice_surface; echo no-wake' _ "$WATCH")
   assert_contains "$out" "WAKE check: idle-stop: t1 relaunch waits: deferred: the away spend cap is full" "the refusal is reported"
+  # shellcheck disable=SC2016  # Expanded by the child bash.
   out=$(run_env "$dir" bash -c '. "$1"; wake() { printf "WAKE %s\n" "$1"; exit 0; }; idle_stop_notice_surface; echo no-wake' _ "$WATCH")
   assert_equals "no-wake" "$out" "one refusal is reported once"
   run_env "$dir" env FM_IDLE_STOP_CONTROL="$dir/control" FM_FAKE_RELAUNCH=cap "$SWEEP" revive t1 >/dev/null
@@ -416,9 +420,11 @@ test_refused_relaunch_is_a_wait_reported_once() {
 test_stale_path_skips_a_stopped_worker() {
   local dir
   dir=$(stopped_case stale-skip)
+  # shellcheck disable=SC2016  # Expanded by the child bash.
   run_env "$dir" bash -c '. "$1"; idle_stop_session_stopped t1' _ "$WATCH" >/dev/null \
     || fail "the watcher must read t1 as stopped"
   printf 'claude' > "$dir/fake/command"
+  # shellcheck disable=SC2016  # Expanded by the child bash.
   if run_env "$dir" bash -c '. "$1"; idle_stop_session_stopped t1' _ "$WATCH" >/dev/null; then
     fail "an agent that came back must not read as stopped"
   fi
