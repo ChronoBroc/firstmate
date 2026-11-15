@@ -5429,10 +5429,12 @@ exec "$REAL_PS_FOR_TEST" "$@"
 SH
   chmod +x "$case_dir/fakebin/lsof" "$case_dir/fakebin/ps"
 
+  # The fake ps counts identity reads, so this pins the reaper's own sequence:
+  # a forced cleanup sends no pause and reaps exactly as this test models.
   rc=0
   FM_PROC_ROOT_OVERRIDE="$case_dir/no-proc" \
   FM_FAKE_REUSED_PID="$pid" FM_FAKE_PS_COUNT="$case_dir/ps-count" \
-    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+    run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
   expect_code 0 "$rc" "reused-pid-identity: teardown should skip the replacement process"
   if ! kill -0 "$pid" 2>/dev/null; then
@@ -5528,8 +5530,11 @@ test_process_spawned_during_grace_is_reaped_on_later_pass() {
   disown
   sleep 0.2
 
+  # A checked cleanup pauses its processes for the final proof and ends them
+  # with SIGKILL, so no TERM handler runs; a forced cleanup has no proof to
+  # protect and still sends TERM, which is the grace period exercised here.
   rc=0
-  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
   if [ -f "$child_file" ]; then child_pid=$(cat "$child_file"); fi
   if [ -n "$child_pid" ] && kill -0 "$child_pid" 2>/dev/null; then

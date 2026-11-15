@@ -2638,13 +2638,14 @@ TASK_FROZEN_PIDS=()
 TASK_FROZEN_IDENTITIES=()
 
 # Prints the given pids parents-first, so a shell is stopped before the job it
-# waits on and never sees that job stop. Parents outside the list count as roots.
+# waits on and never sees that job stop. Parents outside the list count as roots,
+# and a pid ps does not report still prints, last, so no process escapes the pause.
 task_pids_parents_first() {  # <pid-list>
-  local pids
-  pids=$(printf '%s\n' "$1" | grep -E '^[0-9]+$' | paste -sd, -)
+  local pids ordered pid
+  pids=$(printf '%s\n' "$1" | grep -E '^[0-9]+$' || true)
   [ -n "$pids" ] || return 0
-  ps -o pid=,ppid= -p "$pids" 2>/dev/null | awk '
-    { parent[$1] = $2; order[++n] = $1 }
+  ordered=$(ps -o pid=,ppid= -p "$(printf '%s\n' "$pids" | paste -sd, -)" 2>/dev/null | awk '
+    $1 ~ /^[0-9]+$/ { parent[$1] = $2; order[++n] = $1 }
     END {
       for (i = 1; i <= n; i++) {
         p = order[i]; d = 0; q = parent[p]
@@ -2652,27 +2653,24 @@ task_pids_parents_first() {  # <pid-list>
         print d, p
       }
     }
-  ' | sort -n -k1,1 | awk '{ print $2 }'
+  ' | sort -n -k1,1 | awk '{ print $2 }') || ordered=
+  printf '%s\n' "$ordered" | grep -E '^[0-9]+$' || true
+  while IFS= read -r pid; do
+    printf '%s\n' "$ordered" | grep -Fxq "$pid" || printf '%s\n' "$pid"
+  done <<EOF
+$pids
+EOF
 }
 
-task_pid_is_frozen() {  # <pid>
-  local frozen
-  for frozen in ${TASK_FROZEN_PIDS[@]+"${TASK_FROZEN_PIDS[@]}"}; do
-    [ "$frozen" != "$1" ] || return 0
-  done
-  return 1
-}
-
-# Resumes every process this teardown stopped, children first, and only while
-# its identity still matches. Safe to call when nothing is frozen.
+TASK_FREEZE_SEEN=" "
+# Resumes every process this teardown stopped, children first. A stopped
+# process cannot exit, so its pid cannot have been reused, and no identity
+# read is trusted over that. Safe to call when nothing is frozen.
 thaw_task_processes() {
-  local i pid
+  local i
   [ "${#TASK_FROZEN_PIDS[@]}" -gt 0 ] || return 0
   for ((i=${#TASK_FROZEN_PIDS[@]} - 1; i >= 0; i--)); do
-    pid=${TASK_FROZEN_PIDS[$i]}
-    if task_process_identity_matches "$pid" "${TASK_FROZEN_IDENTITIES[$i]}"; then
-      kill -CONT "$pid" 2>/dev/null || true
-    fi
+    kill -CONT "${TASK_FROZEN_PIDS[$i]}" 2>/dev/null || true
   done
   echo "teardown: resumed the task process(es) for $ID: ${TASK_FROZEN_PIDS[*]}" >&2
   TASK_FROZEN_PIDS=()
@@ -2681,11 +2679,13 @@ thaw_task_processes() {
 
 # Stops every process rooted (by cwd) under the given dirs, rescanning until no
 # new one appears, because a process started during the scan could still write.
-# Any scan or identity failure resumes what was stopped and refuses. Without
-# lsof there is nothing to scan: the proof then runs unfrozen and the reaper's
-# process-group fallback applies as before.
+# A pid that is gone, or that this user cannot signal, is passed over as the
+# reaper passes it over. A scan failure, or a live process whose identity cannot
+# be read, resumes what was stopped and refuses. Without lsof there is nothing
+# to scan: the proof then runs unfrozen and the reaper's process-group fallback
+# applies as before.
 freeze_task_processes() {  # <dir>...
-  local pass=1 max_passes=5 pids pid identity new
+  local pass=1 max_passes=5 pid identity new
   if ! command -v lsof >/dev/null 2>&1; then
     echo "warning: lsof is unavailable; the final safety check for $ID runs without pausing the task's processes" >&2
     return 0
@@ -2693,13 +2693,14 @@ freeze_task_processes() {  # <dir>...
   while [ "$pass" -le "$max_passes" ]; do
     if ! task_pids_under_roots "$@"; then
       thaw_task_processes
-      echo "REFUSED: cannot determine the task processes under ${TASK_PIDS_FAILED_DIR:-<missing>} for $ID (lsof failed); nothing was ended, so the worktree/tasktmp is preserved for manual inspection or retry." >&2
+      echo "REFUSED: cannot determine leaked processes under ${TASK_PIDS_FAILED_DIR:-<missing>} for $ID (lsof failed); nothing was ended, so the worktree/tasktmp is preserved for manual inspection or retry." >&2
       return 1
     fi
     new=
     while IFS= read -r pid; do
       [ -n "$pid" ] || continue
-      task_pid_is_frozen "$pid" || new="$new $pid"
+      case "$TASK_FREEZE_SEEN" in *" $pid "*) continue ;; esac
+      new="$new $pid"
     done <<EOF
 $TASK_PIDS
 EOF
@@ -2710,6 +2711,7 @@ EOF
     fi
     while IFS= read -r pid; do
       [ -n "$pid" ] || continue
+      TASK_FREEZE_SEEN="$TASK_FREEZE_SEEN$pid "
       identity=$(task_process_identity "$pid") || {
         kill -0 "$pid" 2>/dev/null || continue
         thaw_task_processes
@@ -2717,10 +2719,6 @@ EOF
         return 1
       }
       kill -STOP "$pid" 2>/dev/null || continue
-      if ! task_process_identity_matches "$pid" "$identity"; then
-        kill -CONT "$pid" 2>/dev/null || true
-        continue
-      fi
       TASK_FROZEN_PIDS+=("$pid")
       TASK_FROZEN_IDENTITIES+=("$identity")
     done <<EOF
@@ -2734,16 +2732,19 @@ EOF
 }
 
 # Ends the frozen processes once the proof passed. SIGKILL acts on a stopped
-# process without running it again, so no handler can write after the proof;
-# the reaper below still sweeps anything that appeared since.
+# process without running it again, so no handler can write after the proof.
+# A process whose identity no longer reads back the same is resumed rather than
+# killed, and the reaper below decides it, as it does anything that appeared since.
 kill_frozen_task_processes() {
   local i pid
   [ "${#TASK_FROZEN_PIDS[@]}" -gt 0 ] || return 0
-  echo "teardown: ending the paused task process(es) for $ID: ${TASK_FROZEN_PIDS[*]}" >&2
+  echo "teardown: reaping leaked worktree process(es) for $ID, paused since the final safety check: ${TASK_FROZEN_PIDS[*]}" >&2
   for i in "${!TASK_FROZEN_PIDS[@]}"; do
     pid=${TASK_FROZEN_PIDS[$i]}
     if task_process_identity_matches "$pid" "${TASK_FROZEN_IDENTITIES[$i]}"; then
       kill -KILL "$pid" 2>/dev/null || true
+    else
+      kill -CONT "$pid" 2>/dev/null || true
     fi
   done
   TASK_FROZEN_PIDS=()
