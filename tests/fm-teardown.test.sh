@@ -6510,10 +6510,60 @@ SH
   pass "a cleanup refused for work written after its first check leaves the worker running and its copy unreturned"
 }
 
+test_unverifiable_paused_identity_refuses_without_ending_the_worker() {
+  local case_dir rc=0 worker state
+  case_dir=$(make_case paused-identity-unverifiable)
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  ( cd "$case_dir/wt" && exec sleep 300 ) &
+  worker=$!
+  disown
+  sleep 0.3
+  kill -0 "$worker" 2>/dev/null || fail "paused-identity-unverifiable: setup worker did not start"
+  cat > "$case_dir/fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *" lstart= "*)
+    if [ "$1" = -p ] && "$REAL_PS_FOR_TEST" -o stat= -p "$2" 2>/dev/null | grep -q '^ *T'; then
+      : > "$FM_REAP_CASE/paused-identity-read"
+      exit 1
+    fi
+    ;;
+esac
+exec "$REAL_PS_FOR_TEST" "$@"
+SH
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+printf 'treehouse %s\n' "$*" >> "$FM_REAP_CASE/treehouse.log"
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/ps" "$case_dir/fakebin/treehouse"
+
+  FM_PROC_ROOT_OVERRIDE="$case_dir/no-proc" FM_REAP_CASE="$case_dir" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+  assert_present "$case_dir/paused-identity-read" "paused-identity-unverifiable: teardown never re-read a paused identity"
+  expect_code 1 "$rc" "paused-identity-unverifiable: an unverifiable paused process must refuse cleanup"
+  assert_grep "REFUSED: cannot verify paused task process $worker identity" "$case_dir/stderr" \
+    "paused-identity-unverifiable: refusal reason missing"
+  if ! kill -0 "$worker" 2>/dev/null; then
+    fail "paused-identity-unverifiable: the refused cleanup ended the worker: $(cat "$case_dir/stderr")"
+  fi
+  state=$("$REAL_PS_FOR_TEST" -o stat= -p "$worker" | tr -d ' ')
+  kill -KILL "$worker" 2>/dev/null || true
+  case "$state" in
+    T*) fail "paused-identity-unverifiable: the refused cleanup left the worker paused (state $state)" ;;
+  esac
+  assert_absent "$case_dir/treehouse.log" "paused-identity-unverifiable: the refused cleanup returned the copy"
+  assert_present "$case_dir/state/task-x1.meta" "paused-identity-unverifiable: the task record is gone"
+  pass "a paused process whose identity cannot be re-read is resumed and the cleanup refuses with nothing ended"
+}
+
 test_hidden_untracked_work_refuses_before_return
 test_content_fallback_git_capability_boundary
 test_work_written_at_reap_boundary_is_preserved
 test_refused_cleanup_leaves_the_worker_running
+test_unverifiable_paused_identity_refuses_without_ending_the_worker
 test_status_archive_opt_in
 test_record_export_config_absent_never_reads_the_exporter
 test_record_export_unopted_symlinked_config_does_not_block_teardown

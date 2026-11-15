@@ -2737,19 +2737,21 @@ EOF
 # job is orphaned by its parent's death and resumed (SIGHUP then SIGCONT). SIGKILL
 # acts on a stopped process without running it again, so no handler can write
 # after the proof.
-# A process whose identity no longer reads back the same is resumed rather than
-# killed, and the reaper below decides it, as it does anything that appeared since.
+# Every identity is read back before any is killed; if one does not match, all
+# are resumed and the cleanup refuses with nothing ended.
 kill_frozen_task_processes() {
   local i pid
   [ "${#TASK_FROZEN_PIDS[@]}" -gt 0 ] || return 0
+  for i in "${!TASK_FROZEN_PIDS[@]}"; do
+    pid=${TASK_FROZEN_PIDS[$i]}
+    task_process_identity_matches "$pid" "${TASK_FROZEN_IDENTITIES[$i]}" && continue
+    thaw_task_processes
+    echo "REFUSED: cannot verify paused task process $pid identity for $ID; nothing was ended, so the worktree/tasktmp is preserved for manual inspection or retry." >&2
+    return 1
+  done
   echo "teardown: reaping leaked worktree process(es) for $ID, paused since the final safety check: ${TASK_FROZEN_PIDS[*]}" >&2
   for ((i=${#TASK_FROZEN_PIDS[@]} - 1; i >= 0; i--)); do
-    pid=${TASK_FROZEN_PIDS[$i]}
-    if task_process_identity_matches "$pid" "${TASK_FROZEN_IDENTITIES[$i]}"; then
-      kill -KILL "$pid" 2>/dev/null || true
-    else
-      kill -CONT "$pid" 2>/dev/null || true
-    fi
+    kill -KILL "${TASK_FROZEN_PIDS[$i]}" 2>/dev/null || true
   done
   TASK_FROZEN_PIDS=()
   TASK_FROZEN_IDENTITIES=()
@@ -4121,7 +4123,7 @@ if [ "$BACKEND" = herdr ]; then
   fi
 fi
 
-kill_frozen_task_processes
+kill_frozen_task_processes || exit 1
 if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
   reap_task_worktree_processes worktree "$WT" "$TASK_TMP"
 elif [ "$KIND" != secondmate ]; then
