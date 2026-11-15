@@ -31,7 +31,8 @@
 #     every reconcile never moves its delivery time. A new round's receipt
 #     removes the same board's acknowledged receipts for earlier rounds.
 #   - Pickup: fm_board_receipt_read writes <source>.<seq>.read beside a
-#     delivered receipt, holding read_at, the epoch of the worker's read.
+#     delivered receipt, under the source lock, holding read_at, the epoch of
+#     the worker's read.
 #   - Judge: fm_board_receipt_tick, from reconcile, under each source's lock. A
 #     delivered receipt with a pickup, an inbox record in handled/, or a round
 #     handled marker becomes acknowledged, dated at the pickup when there is one. One still delivered after its
@@ -220,9 +221,13 @@ state=delivered
 
 # Record that the owning worker read captured round <result-file>: only in a
 # worker process whose FM_TASK_INBOX is the inbox of the task a still-delivered
-# receipt for that round names. Best-effort; always returns 0.
+# receipt for that round names. It takes the source lock, which publication
+# holds from the inbox write through the receipt write, so a read that races a
+# delivery waits for its receipt; read_at is the moment of the read.
+# Best-effort; always returns 0.
 fm_board_receipt_read() {  # <result-file>
-  local inbox=${FM_TASK_INBOX:-} state task id seq path marker text
+  local inbox=${FM_TASK_INBOX:-} state task id seq path marker text now
+  now=$(date +%s)
   case "$inbox" in */*.inbox) ;; *) return 0 ;; esac
   state=${inbox%/*}
   task=${inbox##*/}
@@ -233,12 +238,15 @@ fm_board_receipt_read() {  # <result-file>
   case "$seq" in ''|*[!0-9]*) return 0 ;; esac
   path=$(fm_board_receipt_path "$state" "$id" "$seq")
   marker=${path%.receipt}.read
-  [ -f "$path" ] && [ ! -L "$path" ] && [ ! -e "$marker" ] || return 0
-  text=$(cat -- "$path" 2>/dev/null) || return 0
-  [ "$(_fm_board_receipt_get "$text" task)" = "$task" ] || return 0
-  [ "$(_fm_board_receipt_get "$text" state)" = delivered ] || return 0
-  _fm_board_receipt_store "$marker" "read_at=$(date +%s)
+  fm_procevent_source_lock_acquire "$id" || return 0
+  if [ -f "$path" ] && [ ! -L "$path" ] && [ ! -e "$marker" ] \
+    && text=$(cat -- "$path" 2>/dev/null) \
+    && [ "$(_fm_board_receipt_get "$text" task)" = "$task" ] \
+    && [ "$(_fm_board_receipt_get "$text" state)" = delivered ]; then
+    _fm_board_receipt_store "$marker" "read_at=$now
 " || true
+  fi
+  fm_procevent_source_lock_release "$id"
   return 0
 }
 

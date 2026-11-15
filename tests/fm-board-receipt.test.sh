@@ -148,6 +148,46 @@ test_answer_read_then_worked_at_length_is_acknowledged_at_pickup() {
   pass "a worker that reads its round, works it for an hour, then files it is acknowledged at the read and never alarms"
 }
 
+# Hold the board's source lock as publication does between writing the inbox
+# record and its receipt, with the receipt not yet written, until <go> exists;
+# then write the receipt back and release. Touches <ready> once held.
+hold_publication() {  # <ready> <go>
+  local saved
+  saved=$(cat "$(receipt 1)")
+  rm -f "$(receipt 1)"
+  FM_HOME="$HOME_DIR" bash -c '
+    . "$1/bin/fm-pr-lib.sh"; . "$1/bin/fm-wake-lib.sh"; . "$1/bin/fm-procevent-lib.sh"
+    fm_procevent_source_lock_acquire "$2" || exit 1
+    : > "$3"
+    while [ ! -e "$4" ]; do sleep 0.1; done
+    printf "%s\n" "$6" > "$5"
+    fm_procevent_source_lock_release "$2"
+  ' _ "$ROOT" "$SRC" "$1" "$2" "$(receipt 1)" "$saved" &
+  HOLDER=$!
+  for _ in $(seq 1 100); do [ -e "$1" ] && return 0; sleep 0.1; done
+  fail "the publication lock could not be held"
+}
+
+test_read_racing_its_delivery_is_still_the_pickup() {
+  armed_board racing w-race
+  hold_publication "$TMP_ROOT/race.ready" "$TMP_ROOT/race.go"
+  before=$(date +%s)
+  worker_read w-race 1 &
+  reader=$!
+  sleep 1
+  : > "$TMP_ROOT/race.go"
+  wait "$HOLDER" || fail "the publication holder failed"
+  wait "$reader" || fail "the worker's read failed"
+  age_delivery 1 3600
+  cycle
+  [ "$(field "$(receipt 1)" acknowledged_by)" = read ] \
+    || fail "a read made while its delivery was being published was lost: $(cat "$(receipt 1)")"
+  [ "$(field "$(receipt 1)" acknowledged_at)" -le "$((before + 1))" ] \
+    || fail "the pickup is not dated at the read: $(field "$(receipt 1)" acknowledged_at)"
+  [ "$(row_count ":$SRC:")" = 0 ] || fail "a read racing its delivery raised an alarm: $(wake_rows ":$SRC:")"
+  pass "a worker reading its round while the delivery is still being published is acknowledged at the read"
+}
+
 test_untaken_answer_alarms_once_and_clears_on_pickup() {
   armed_board untaken w-stuck
   env -u FM_TASK_INBOX "$ROOT/bin/fm-procevent-lavish.sh" read "$(result_file 1)" >/dev/null \
@@ -223,6 +263,7 @@ test_retired_worker_receipt_is_pruned_without_an_alarm() {
 fm_test_run \
   test_taken_answer_is_acknowledged_without_a_wake \
   test_answer_read_then_worked_at_length_is_acknowledged_at_pickup \
+  test_read_racing_its_delivery_is_still_the_pickup \
   test_untaken_answer_alarms_once_and_clears_on_pickup \
   test_acknowledged_round_counts_when_the_record_was_not_filed \
   test_alarm_delay_is_tunable_and_bounded \
