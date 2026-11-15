@@ -259,6 +259,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-board-receipt-lib.sh
+. "$SCRIPT_DIR/fm-board-receipt-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage() { sed -n '2,/^set -u$/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//'; exit 2; }
@@ -415,6 +417,12 @@ source_field() {  # <source-id> <field>
   sed -n "s/^$2=//p" "$(source_file "$1")" | head -1
 }
 source_kind() { source_field "$1" kind; }
+# The board artifact a Lavish registration polls (`<adapter> poll <artifact>`),
+# or nothing for any other registered command.
+source_board_artifact() {  # <source-id>
+  awk '/^argv:$/ { on = 1; next } on { n++; a[n] = $0 } END { if (a[2] == "poll" && n >= 3) print a[3] }' \
+    "$(source_file "$1")" 2>/dev/null
+}
 source_owner_task() { source_field "$1" owner_task; }
 # Every captured round of one source with no handled acknowledgement yet.
 source_pending() {  # <source-id>
@@ -811,7 +819,7 @@ cmd_register_extension() {
 # and drains until `fm_procevent_mark_handled` records it.
 publish_result() {  # <result-file>
   local result=$1 id seq adapter line status=1 owner_task='' message='' record=''
-  local ring_backend ring_target ring_meta inbox_dir handled_dir pre_existing existing new_record
+  local ring_backend ring_target ring_meta inbox_dir handled_dir pre_existing existing new_record round=feedback
   id=$(fm_procevent_result_source_id "$result")
   seq=$(fm_procevent_result_sequence "$result")
   fm_procevent_source_id_valid "$id" || return 1
@@ -823,6 +831,7 @@ publish_result() {  # <result-file>
   if ! fm_procevent_is_handled "$STATE" "$id" "$seq"; then
     if [ -n "$owner_task" ]; then
       if adapter_result_is_terminal "$adapter" "$result"; then
+        round=terminal
         message="Lavish review result $id sequence $seq is terminal at $result. Read it with bin/fm-procevent-lavish.sh read $result, stop and conclude the review, and do not re-arm the board. The board stays yours until you acknowledge this round with bin/fm-procevent.sh handled $id $seq, which retires it."
       else
         export FM_PROCEVENT_CAPTURE_SOURCE_LOCK_HELD=1
@@ -858,6 +867,13 @@ publish_result() {  # <result-file>
         done <<EOF
 $pre_existing
 EOF
+      fi
+      # The delivery's receipt, judged on every reconcile without a firstmate
+      # turn (bin/fm-board-receipt-lib.sh). A failed write retries on the next
+      # republication of this still-unhandled round.
+      if [ "$status" -eq 0 ]; then
+        fm_board_receipt_delivered "$STATE" "$id" "$seq" "$owner_task" "$round" "$record" \
+          "$(source_board_artifact "$id")" || true
       fi
       fm_procevent_source_lock_release "$id"
       if [ "$new_record" -eq 1 ]; then
@@ -1724,6 +1740,8 @@ cmd_reconcile() {
     || die "FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS must be whole seconds from $FM_PROCEVENT_LAUNCH_CONFIRM_MIN_SECONDS to $FM_PROCEVENT_LAUNCH_CONFIRM_MAX_SECONDS"
   owner_lease_refresh
   published=$(publish_pending)
+  # Acknowledge or alarm each delivered board answer (bin/fm-board-receipt-lib.sh).
+  fm_board_receipt_tick "$STATE" "$REG"
 
   # Stop a runner this home owns whose source is no longer registered. Without
   # this, unregistering a source that never completes leaves its child blocked

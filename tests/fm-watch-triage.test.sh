@@ -4300,6 +4300,24 @@ test_procevent_headlines_classify_queue_keys() {
   grep -F "check: process-event result captured: procevent:cap2-src:1; process-event source stranded: procevent:str2-src:stranded:tok-2" "$out" >/dev/null \
     || fail "a cycle with a capture and a strand did not carry both headlines joined: $(cat "$out")"
   FM_STATE_OVERRIDE="$state" "$DRAIN" >/dev/null 2>&1 || fail "joined headline fixture drain failed"
+
+  dir=$(make_case procevent-headline-unread); state="$dir/state"; out="$dir/watch.out"
+  append_wake "$state" check "procevent:unr-src:unacknowledged:3" "check: board answer not picked up: task w has not taken Lavish board unr-src round 3"
+  surface_once "$dir" "$out" || fail "an unacknowledged board answer was not surfaced: $(cat "$out")"
+  grep -F "check: board answer not picked up by its worker: procevent:unr-src:unacknowledged:3" "$out" >/dev/null \
+    || fail "an unacknowledged board answer did not surface under its own headline: $(cat "$out")"
+  ! grep -F "result captured" "$out" >/dev/null \
+    || fail "an unacknowledged board answer was headlined as a captured result: $(cat "$out")"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" >/dev/null 2>&1 || fail "unread headline fixture drain failed"
+
+  dir=$(make_case procevent-headline-read-late); state="$dir/state"; out="$dir/watch.out"
+  append_wake "$state" check "procevent:late-src:acknowledged:3" "check: board answer picked up after its alarm: task w has now taken Lavish board late-src round 3"
+  surface_once "$dir" "$out" || fail "a late board pickup was not surfaced: $(cat "$out")"
+  grep -F "check: board answer picked up after its alarm: procevent:late-src:acknowledged:3" "$out" >/dev/null \
+    || fail "a late board pickup did not surface under its own headline: $(cat "$out")"
+  ! grep -F "not picked up" "$out" >/dev/null \
+    || fail "a late board pickup was headlined as still missed: $(cat "$out")"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" >/dev/null 2>&1 || fail "read-late headline fixture drain failed"
   pass "process-event queue keys surface under their own headlines"
 }
 
