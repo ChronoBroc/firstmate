@@ -80,8 +80,21 @@
 # local-only projects additionally accept work merged into the local default
 # branch (firstmate performs that merge after configured approval) as a fallback
 # for the common case where there is no remote at all.
-# Safety is proved again after task processes are reaped, before backlog-close
-# publication, branch deletion, or worktree return.
+# Freeze-then-decide: a worker can still write after that first proof, so the
+# final proof runs on a frozen copy. Every process rooted (by cwd) in the copy
+# or the task's tasktmp is stopped with SIGSTOP, parents first, and the landed-work
+# checks run again. A refusal resumes them all with SIGCONT, children first, and
+# ends nothing: the worker keeps running in a copy that is still its own. Ending
+# the worker before refusing is what lost work - the interactive `treehouse get`
+# holding the slot then offers to clean and return it, and one Enter discards
+# the copy. A pass ends the frozen processes with SIGKILL, which never runs them
+# again, so no handler can write after the proof. A Herdr pane resumes for its
+# locked close instead, whose copy is durably leased. Any scan or identity
+# failure while freezing resumes what was stopped and refuses, and an exit by any
+# path resumes processes still paused. Without lsof the proof runs unfrozen.
+# Safety is proved once more after the processes are gone, before backlog-close
+# publication, branch deletion, or worktree return; only a process outside the
+# copy can make that last check refuse, and it then leaves the copy in place.
 # Scout tasks (kind=scout in meta) carve out of that check: their worktree is
 # declared scratch and the report at data/<task-id>/report.md is the work
 # product. Teardown proceeds only once the report exists and the shared
@@ -275,8 +288,8 @@
 # removal so the operator can see what happened.
 #
 # Pre-teardown cleanup sequence (starts after the initial landed/discard-work
-# safety checks pass, and BEFORE any worktree return or branch
-# deletion below - a still-active run or a leaked process may
+# safety checks and the frozen final proof pass, and BEFORE any worktree return
+# or branch deletion below - a still-active run or a leaked process may
 # own live work in that worktree):
 #   Fix 1 - conclude the task's own no-mistakes run. A ship task's worktree can
 #     be torn down while its no-mistakes pipeline run is still PARKED at a gate
@@ -616,6 +629,10 @@ DESCENDANT_TASK_HOMES=()
 DESCENDANT_TREEHOUSE_LOCK_PATHS=()
 teardown_release_locks() {
   local status=$? i
+  # A teardown that stops for any reason never leaves the task's processes paused.
+  if declare -F thaw_task_processes >/dev/null 2>&1; then
+    thaw_task_processes || true
+  fi
   if declare -F teardown_release_herdr_locks >/dev/null 2>&1; then
     teardown_release_herdr_locks || true
   fi
@@ -2613,6 +2630,126 @@ EOF
   return 1
 }
 
+# Freeze-then-decide (see the script header): the task's processes are held
+# with SIGSTOP while the final safety proof runs, so nothing in the copy can
+# write between that proof and the kill, and a refusal resumes every one of
+# them with SIGCONT instead of ending them.
+TASK_FROZEN_PIDS=()
+TASK_FROZEN_IDENTITIES=()
+
+# Prints the given pids parents-first, so a shell is stopped before the job it
+# waits on and never sees that job stop. Parents outside the list count as roots.
+task_pids_parents_first() {  # <pid-list>
+  local pids
+  pids=$(printf '%s\n' "$1" | grep -E '^[0-9]+$' | paste -sd, -)
+  [ -n "$pids" ] || return 0
+  ps -o pid=,ppid= -p "$pids" 2>/dev/null | awk '
+    { parent[$1] = $2; order[++n] = $1 }
+    END {
+      for (i = 1; i <= n; i++) {
+        p = order[i]; d = 0; q = parent[p]
+        while ((q in parent) && d <= n) { d++; q = parent[q] }
+        print d, p
+      }
+    }
+  ' | sort -n -k1,1 | awk '{ print $2 }'
+}
+
+task_pid_is_frozen() {  # <pid>
+  local frozen
+  for frozen in ${TASK_FROZEN_PIDS[@]+"${TASK_FROZEN_PIDS[@]}"}; do
+    [ "$frozen" != "$1" ] || return 0
+  done
+  return 1
+}
+
+# Resumes every process this teardown stopped, children first, and only while
+# its identity still matches. Safe to call when nothing is frozen.
+thaw_task_processes() {
+  local i pid
+  [ "${#TASK_FROZEN_PIDS[@]}" -gt 0 ] || return 0
+  for ((i=${#TASK_FROZEN_PIDS[@]} - 1; i >= 0; i--)); do
+    pid=${TASK_FROZEN_PIDS[$i]}
+    if task_process_identity_matches "$pid" "${TASK_FROZEN_IDENTITIES[$i]}"; then
+      kill -CONT "$pid" 2>/dev/null || true
+    fi
+  done
+  echo "teardown: resumed the task process(es) for $ID: ${TASK_FROZEN_PIDS[*]}" >&2
+  TASK_FROZEN_PIDS=()
+  TASK_FROZEN_IDENTITIES=()
+}
+
+# Stops every process rooted (by cwd) under the given dirs, rescanning until no
+# new one appears, because a process started during the scan could still write.
+# Any scan or identity failure resumes what was stopped and refuses. Without
+# lsof there is nothing to scan: the proof then runs unfrozen and the reaper's
+# process-group fallback applies as before.
+freeze_task_processes() {  # <dir>...
+  local pass=1 max_passes=5 pids pid identity new
+  if ! command -v lsof >/dev/null 2>&1; then
+    echo "warning: lsof is unavailable; the final safety check for $ID runs without pausing the task's processes" >&2
+    return 0
+  fi
+  while [ "$pass" -le "$max_passes" ]; do
+    if ! task_pids_under_roots "$@"; then
+      thaw_task_processes
+      echo "REFUSED: cannot determine the task processes under ${TASK_PIDS_FAILED_DIR:-<missing>} for $ID (lsof failed); nothing was ended, so the worktree/tasktmp is preserved for manual inspection or retry." >&2
+      return 1
+    fi
+    new=
+    while IFS= read -r pid; do
+      [ -n "$pid" ] || continue
+      task_pid_is_frozen "$pid" || new="$new $pid"
+    done <<EOF
+$TASK_PIDS
+EOF
+    if [ -z "$new" ]; then
+      [ "${#TASK_FROZEN_PIDS[@]}" -eq 0 ] \
+        || echo "teardown: paused the task process(es) for $ID for the final safety check: ${TASK_FROZEN_PIDS[*]}" >&2
+      return 0
+    fi
+    while IFS= read -r pid; do
+      [ -n "$pid" ] || continue
+      identity=$(task_process_identity "$pid") || {
+        kill -0 "$pid" 2>/dev/null || continue
+        thaw_task_processes
+        echo "REFUSED: cannot verify task process $pid identity for $ID; nothing was ended, so the worktree/tasktmp is preserved for manual inspection or retry." >&2
+        return 1
+      }
+      kill -STOP "$pid" 2>/dev/null || continue
+      if ! task_process_identity_matches "$pid" "$identity"; then
+        kill -CONT "$pid" 2>/dev/null || true
+        continue
+      fi
+      TASK_FROZEN_PIDS+=("$pid")
+      TASK_FROZEN_IDENTITIES+=("$identity")
+    done <<EOF
+$(task_pids_parents_first "$(printf '%s' "$new" | tr ' ' '\n')")
+EOF
+    pass=$((pass + 1))
+  done
+  thaw_task_processes
+  echo "REFUSED: new task processes for $ID kept appearing after $max_passes pause attempts; nothing was ended, so the worktree/tasktmp is preserved for manual inspection or retry." >&2
+  return 1
+}
+
+# Ends the frozen processes once the proof passed. SIGKILL acts on a stopped
+# process without running it again, so no handler can write after the proof;
+# the reaper below still sweeps anything that appeared since.
+kill_frozen_task_processes() {
+  local i pid
+  [ "${#TASK_FROZEN_PIDS[@]}" -gt 0 ] || return 0
+  echo "teardown: ending the paused task process(es) for $ID: ${TASK_FROZEN_PIDS[*]}" >&2
+  for i in "${!TASK_FROZEN_PIDS[@]}"; do
+    pid=${TASK_FROZEN_PIDS[$i]}
+    if task_process_identity_matches "$pid" "${TASK_FROZEN_IDENTITIES[$i]}"; then
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+  done
+  TASK_FROZEN_PIDS=()
+  TASK_FROZEN_IDENTITIES=()
+}
+
 require_orca_worktree_path_match() {
   local worktree_id=$1 inspected=$2 resolved inspected_abs resolved_abs
   resolved=$(fm_backend_worktree_path orca "$worktree_id") || {
@@ -3863,20 +4000,35 @@ if [ "$BACKLOG_TRANSITION" = close ] && { [ "$KIND" = ship ] || [ "$KIND" = scou
 fi
 
 # The initial landed/discard-work checks above have passed (or --force skipped
-# them). Fix 1 and Fix 2 (see script header) run here, unconditionally on
+# them). The final proof runs next on a frozen copy (freeze-then-decide in the
+# script header): a refusal here resumes the task's processes, so a refused
+# cleanup never ends the worker or exposes its copy to reuse.
+if [ "$KIND" != secondmate ] && [ "$KIND" != scout ] && [ "$FORCE" != "--force" ] \
+   && teardown_owns_worktree && [ -d "$WT" ]; then
+  freeze_task_processes "$WT" "$TASK_TMP" || exit 1
+  if ! validate_worktree_teardown_safety; then
+    thaw_task_processes
+    echo "Nothing was ended or returned: the worker and its copy are as they were before this cleanup." >&2
+    exit 1
+  fi
+fi
+
+# Fix 1 and Fix 2 (see script header) run here, unconditionally on
 # --force, and before branch deletion or worktree return - a still-parked run or a
 # leaked process can own live work in this exact worktree. Not for
 # kind=secondmate: a secondmate home's own runtime lifecycle is owned by the
 # dedicated process-event and firstmate-home removal machinery further below,
 # not by task-worktree cleanup.
 if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
-  conclude_task_no_mistakes_run "$WT"
+  conclude_task_no_mistakes_run "$WT" || { thaw_task_processes; exit 1; }
 fi
 
 # A Herdr pane's top-level shell lives in its leased copy, so the reap and the
 # Treehouse return below would end it and Herdr would remove the pane outside
 # the locked, focus-preserving close. Herdr therefore closes its exact pane here,
-# before anything ends processes in the copy.
+# before anything ends processes in the copy, and that close needs the pane's
+# processes running, so they resume first.
+[ "$BACKEND" != herdr ] || thaw_task_processes
 HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"
 # teardown_herdr_journal_orphaned: true when the task's own journal names
 # nothing the session-start sweep could still close - a version 1 attempt whose
@@ -3964,17 +4116,21 @@ if [ "$BACKEND" = herdr ]; then
   fi
 fi
 
+kill_frozen_task_processes
 if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
   reap_task_worktree_processes worktree "$WT" "$TASK_TMP"
 elif [ "$KIND" != secondmate ]; then
   reap_task_worktree_processes tasktmp "$TASK_TMP"
 fi
 
-# A worker can write after the first proof, including while its run is concluded
-# or its processes exit. Inspect the stopped copy before dropping its branch or
-# returning it on either backend path.
+# Nothing in the copy ran after the frozen proof, but a process outside it can
+# still have written there. Inspect the stopped copy once more before dropping
+# its branch or returning it on either backend path.
 if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
-  validate_worktree_teardown_safety || exit 1
+  validate_worktree_teardown_safety || {
+    echo "The task's processes were already ended after the final safety check passed; the copy changed since, from outside it, and is left in place unreturned." >&2
+    exit 1
+  }
 fi
 
 if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
