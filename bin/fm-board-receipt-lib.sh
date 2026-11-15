@@ -10,11 +10,15 @@
 # watcher runs once per supervision cycle, so neither the receipt nor its
 # acknowledgement costs a firstmate turn.
 #
-# The acknowledgement is the worker's own filing of that round's steering-inbox
-# record into handled/: bin/fm-task-inbox-lib.sh owns that move as the worker's
-# acknowledgement of a delivery, and it happens as soon as the worker reads the
-# answer. The round's handled marker (re-arm, or the conclude of a terminal
-# round) also counts, because it can only follow the worker taking the round.
+# The acknowledgement is the owning worker reading the round with
+# `bin/fm-procevent-lavish.sh read <result>`, the first step the delivered
+# instruction gives it, before it works the round: fm_board_receipt_read, run
+# from that command in a process whose FM_TASK_INBOX (bin/fm-spawn.sh exports it
+# into every worker launch) is the receipt's task's inbox, dates the pickup.
+# Anyone else reading the result, firstmate included, records nothing. The
+# worker's later filing of the round's steering-inbox record into handled/, or
+# the round's handled marker (re-arm, or the conclude of a terminal round), also
+# counts, for a worker that took the round without that read.
 # A worker's resolved status line is not used: it is free text the worker may
 # not write, under a key it chooses, naming no source or round.
 #
@@ -26,9 +30,11 @@
 #     receipt already present is left alone, so the runner's republication on
 #     every reconcile never moves its delivery time. A new round's receipt
 #     removes the same board's acknowledged receipts for earlier rounds.
+#   - Pickup: fm_board_receipt_read writes <source>.<seq>.read beside a
+#     delivered receipt, holding read_at, the epoch of the worker's read.
 #   - Judge: fm_board_receipt_tick, from reconcile, under each source's lock. A
-#     delivered receipt whose inbox record sits in handled/, or whose round has
-#     its handled marker, becomes acknowledged. One still delivered after its
+#     delivered receipt with a pickup, an inbox record in handled/, or a round
+#     handled marker becomes acknowledged, dated at the pickup when there is one. One still delivered after its
 #     alarm_after (FM_PROCEVENT_RECEIPT_ALARM_SECONDS, default 300, 1..86400,
 #     as it was when the receipt was written) queues one `check` wake keyed
 #     procevent:<source>:unacknowledged:<seq> and records alarmed_at; the wake
@@ -39,7 +45,7 @@
 #     procevent_surface_queued).
 #   - Prune: a receipt whose task has no metadata (retired), and an
 #     acknowledged receipt whose board registration is gone (concluded or
-#     retired), are removed.
+#     retired), are removed with their pickup.
 # A receipt is a cache of facts the inbox and the procevent inbox already hold;
 # losing one loses only this presentation and its alarm.
 
@@ -60,6 +66,11 @@ fm_board_receipt_alarm_seconds() {
     value=$FM_BOARD_RECEIPT_ALARM_DEFAULT_SECONDS
   fi
   printf '%s\n' "$value"
+}
+
+# Remove a receipt and its pickup.
+_fm_board_receipt_remove() {  # <receipt-path>
+  rm -f -- "$1" "${1%.receipt}.read"
 }
 
 _fm_board_receipt_get() {  # <receipt-text> <field>
@@ -134,7 +145,7 @@ fm_board_receipt_delivered() {  # <state> <source-id> <seq> <task> <round> <reco
     case "$old_seq" in ''|*[!0-9]*) continue ;; esac
     [ "$old_seq" -lt "$seq" ] || continue
     [ "$(_fm_board_receipt_get "$(cat -- "$old" 2>/dev/null)" state)" = acknowledged ] || continue
-    rm -f -- "$old"
+    _fm_board_receipt_remove "$old"
   done
   return 0
 }
@@ -150,16 +161,16 @@ _fm_board_receipt_waited() {  # <seconds>
 
 # Judge one receipt. The caller holds its source lock.
 _fm_board_receipt_judge_locked() {  # <state> <path> <source-id> <seq> <registry-dir>
-  local state=$1 path=$2 id=$3 seq=$4 reg=$5 text task name round board delivered alarmed now by='' waited where after
+  local state=$1 path=$2 id=$3 seq=$4 reg=$5 text task name round board delivered alarmed now by='' at waited where after
   text=$(cat -- "$path" 2>/dev/null) || return 0
   [ "$(_fm_board_receipt_get "$text" v)" = "$FM_BOARD_RECEIPT_VERSION" ] || return 0
   task=$(_fm_board_receipt_get "$text" task)
   if ! fm_pr_task_id_valid "$task" || [ ! -f "$state/$task.meta" ]; then
-    rm -f -- "$path"
+    _fm_board_receipt_remove "$path"
     return 0
   fi
   if [ "$(_fm_board_receipt_get "$text" state)" = acknowledged ]; then
-    [ -f "$reg/$id.source" ] || rm -f -- "$path"
+    [ -f "$reg/$id.source" ] || _fm_board_receipt_remove "$path"
     return 0
   fi
   name=$(_fm_board_receipt_get "$text" inbox_record)
@@ -171,9 +182,11 @@ _fm_board_receipt_judge_locked() {  # <state> <path> <source-id> <seq> <registry
   text=$(printf '%s\n' "$text" | grep -v '^state=')
   now=$(date +%s)
   where=$(_fm_board_receipt_record_place "$state" "$task" "$name")
-  if [ "$where" = handled ]; then
+  at=$(_fm_board_receipt_get "$(cat -- "${path%.receipt}.read" 2>/dev/null)" read_at)
+  case "$at" in ''|*[!0-9]*) at=$now ;; *) by="read" ;; esac
+  if [ -z "$by" ] && [ "$where" = handled ]; then
     by=inbox
-  elif fm_procevent_is_handled "$state" "$id" "$seq"; then
+  elif [ -z "$by" ] && fm_procevent_is_handled "$state" "$id" "$seq"; then
     by="round-handled"
   fi
   [ -n "$board" ] || board="no artifact path recorded"
@@ -184,7 +197,7 @@ _fm_board_receipt_judge_locked() {  # <state> <path> <source-id> <seq> <registry
         || return 0
     fi
     _fm_board_receipt_store "$path" "$text
-acknowledged_at=$now
+acknowledged_at=$at
 acknowledged_by=$by
 state=acknowledged
 " || return 0
@@ -197,12 +210,36 @@ state=acknowledged
   [ "${#after}" -le 5 ] || after=$(fm_board_receipt_alarm_seconds)
   [ "$waited" -ge "$after" ] || return 0
   fm_wake_append check "procevent:$id:unacknowledged:$seq" \
-    "check: board answer not picked up: task $task has not taken Lavish board $id round $seq ($board, a $round round) $(_fm_board_receipt_waited "$waited") after it reached its steering inbox as $name (that record is now: $where); whoever answered the board sees nothing until the worker takes it. Inspect the worker and recover it if it is stuck (stuck-crewmate-recovery); this alarm clears itself once the worker files that record or acknowledges the round." \
+    "check: board answer not picked up: task $task has not taken Lavish board $id round $seq ($board, a $round round) $(_fm_board_receipt_waited "$waited") after it reached its steering inbox as $name (that record is now: $where); whoever answered the board sees nothing until the worker takes it. Inspect the worker and recover it if it is stuck (stuck-crewmate-recovery); this alarm clears itself once the worker reads the round, files that record, or acknowledges the round." \
     || return 0
   _fm_board_receipt_store "$path" "$text
 alarmed_at=$now
 state=delivered
 " || return 0
+}
+
+# Record that the owning worker read captured round <result-file>: only in a
+# worker process whose FM_TASK_INBOX is the inbox of the task a still-delivered
+# receipt for that round names. Best-effort; always returns 0.
+fm_board_receipt_read() {  # <result-file>
+  local inbox=${FM_TASK_INBOX:-} state task id seq path marker text
+  case "$inbox" in */*.inbox) ;; *) return 0 ;; esac
+  state=${inbox%/*}
+  task=${inbox##*/}
+  task=${task%.inbox}
+  id=$(fm_procevent_result_source_id "$1")
+  seq=$(fm_procevent_result_sequence "$1")
+  fm_procevent_source_id_valid "$id" || return 0
+  case "$seq" in ''|*[!0-9]*) return 0 ;; esac
+  path=$(fm_board_receipt_path "$state" "$id" "$seq")
+  marker=${path%.receipt}.read
+  [ -f "$path" ] && [ ! -L "$path" ] && [ ! -e "$marker" ] || return 0
+  text=$(cat -- "$path" 2>/dev/null) || return 0
+  [ "$(_fm_board_receipt_get "$text" task)" = "$task" ] || return 0
+  [ "$(_fm_board_receipt_get "$text" state)" = delivered ] || return 0
+  _fm_board_receipt_store "$marker" "read_at=$(date +%s)
+" || true
+  return 0
 }
 
 # Judge every receipt in <state> (see the header).

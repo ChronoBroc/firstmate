@@ -3124,7 +3124,7 @@ The Lavish version floors and feature probe are owned by `bin/fm-bootstrap.sh`.
 **Board answer receipts**
 
 Every round delivered to a worker's steering inbox gets one receipt, `state/board-receipts/<source-id>.<seq>.receipt`, so a board answer the worker took and one it never took no longer look the same until its next round.
-The worker has taken the answer when it files that round's inbox record into `handled/`, or when the round itself is acknowledged by re-arm or conclude; a worker's resolved status line is free text and is not read.
+The worker has taken the answer when it reads the round with `bin/fm-procevent-lavish.sh read <result>`, the delivered instruction's first step, before it works the round; only a read from the owning worker's own session (its `FM_TASK_INBOX`) counts. A worker that took the round without that read is acknowledged later, when it files that round's inbox record into `handled/` or the round itself is acknowledged by re-arm or conclude; a worker's resolved status line is free text and is not read.
 Each supervision cycle's `reconcile` judges every receipt, so recording the delivery, the pickup, and the alarm costs no firstmate turn.
 A receipt still waiting `FM_PROCEVENT_RECEIPT_ALARM_SECONDS` (default 300, 1..86400, the value in force when the receipt was written) after delivery wakes firstmate once with a main-owned `check` wake headlined `board answer not picked up by its worker`, naming the task, the board, and how long the answer has waited; a pickup after that alarm wakes once more, headlined `board answer picked up after its alarm`, and nothing repeats.
 `bin/fm-board-receipt-lib.sh` owns the lifecycle; this is the record a reader such as a dashboard consumes.
@@ -3143,9 +3143,10 @@ The receipt is private (mode 0600), replaced atomically, and holds one `key=valu
 | `delivered_at` | epoch seconds when the round reached the inbox |
 | `alarm_after` | the alarm delay, in seconds, this receipt is judged by |
 | `alarmed_at` | epoch seconds of the alarm, present only once it fired |
-| `acknowledged_at`, `acknowledged_by` | epoch seconds of the pickup and `inbox` or `round-handled`, present only once taken |
+| `acknowledged_at`, `acknowledged_by` | epoch seconds of the pickup and `read`, `inbox`, or `round-handled`, present only once taken |
 | `state` | `delivered` (waiting on the worker) or `acknowledged` (the worker has it) |
 
+The worker's read is kept beside the receipt as `<source-id>.<seq>.read` (`read_at=<epoch>`) and is removed with the receipt.
 A receipt is removed when its worker is retired; an acknowledged one is also removed when a later round of the same board is delivered or the board is concluded or retired.
 
 **Conclude a terminal round**

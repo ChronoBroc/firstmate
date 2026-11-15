@@ -6,7 +6,8 @@
 # Each case arms a real worker-owned Lavish board through the public adapter
 # against a fake lavish-axi that returns one answered round and then blocks, so
 # the round reaches the worker's steering inbox exactly as it does in a live
-# home. The worker is played by moving (or not moving) that inbox record, and
+# home. The worker is played by reading its round from its own session and
+# moving (or not moving) that inbox record, and
 # firstmate's supervision cycle by `bin/fm-procevent.sh reconcile`, which the
 # watcher runs once per cycle. No firstmate turn is involved anywhere.
 set -u
@@ -85,6 +86,12 @@ armed_board() {  # <case-name> <task>
 receipt() { printf '%s/state/board-receipts/%s.%s.receipt\n' "$HOME_DIR" "$SRC" "$1"; }
 field() { sed -n "s/^$2=//p" "$1" | head -1; }
 cycle() { FM_HOME="$HOME_DIR" "$ROOT/bin/fm-procevent.sh" reconcile >/dev/null 2>&1 || true; }
+result_file() { printf '%s/state/procevent-inbox/%s.%s.result\n' "$HOME_DIR" "$SRC" "$1"; }
+# The worker reads its round from its own session, as the delivered record says.
+worker_read() {  # <task> <seq>
+  FM_TASK_INBOX="$HOME_DIR/state/$1.inbox" "$ROOT/bin/fm-procevent-lavish.sh" read "$(result_file "$2")" >/dev/null \
+    || fail "the worker could not read round $2"
+}
 take() { mv "$HOME_DIR/state/$1.inbox/001.msg" "$HOME_DIR/state/$1.inbox/handled/001.msg"; }
 wake_rows() {  # <key-fragment>: queue rows whose key contains it
   [ -f "$HOME_DIR/state/.wake-queue" ] || return 0
@@ -118,8 +125,35 @@ test_taken_answer_is_acknowledged_without_a_wake() {
   pass "an answer the worker took is acknowledged by the next cycle and costs no wake"
 }
 
+test_answer_read_then_worked_at_length_is_acknowledged_at_pickup() {
+  armed_board drawing w-draw
+  [ -f "$(result_file 1)" ] || fail "the captured round is not where its record says"
+  before=$(date +%s)
+  worker_read w-draw 1
+  after=$(date +%s)
+  cycle
+  [ "$(field "$(receipt 1)" state)" = acknowledged ] \
+    || fail "the worker reading its round was not recorded as the pickup: $(cat "$(receipt 1)")"
+  [ "$(field "$(receipt 1)" acknowledged_by)" = read ] || fail "the acknowledgement does not name the read"
+  at=$(field "$(receipt 1)" acknowledged_at)
+  [ "$at" -ge "$before" ] && [ "$at" -le "$after" ] \
+    || fail "the acknowledgement is not dated at the read ($before..$after): $at"
+  age_delivery 1 3600
+  cycle
+  cycle
+  take w-draw
+  cycle
+  [ "$(row_count ":$SRC:")" = 0 ] || fail "a worker drawing for an hour after reading woke firstmate: $(wake_rows ":$SRC:")"
+  [ "$(field "$(receipt 1)" acknowledged_at)" = "$at" ] || fail "the later filing moved the pickup time"
+  pass "a worker that reads its round, works it for an hour, then files it is acknowledged at the read and never alarms"
+}
+
 test_untaken_answer_alarms_once_and_clears_on_pickup() {
   armed_board untaken w-stuck
+  env -u FM_TASK_INBOX "$ROOT/bin/fm-procevent-lavish.sh" read "$(result_file 1)" >/dev/null \
+    || fail "firstmate could not read the round"
+  FM_TASK_INBOX="$HOME_DIR/state/w-other.inbox" "$ROOT/bin/fm-procevent-lavish.sh" read "$(result_file 1)" >/dev/null \
+    || fail "another worker could not read the round"
   cycle
   [ "$(row_count ":$SRC:")" = 0 ] || fail "an answer still inside its alarm delay woke firstmate"
   age_delivery 1 400
@@ -188,6 +222,7 @@ test_retired_worker_receipt_is_pruned_without_an_alarm() {
 
 fm_test_run \
   test_taken_answer_is_acknowledged_without_a_wake \
+  test_answer_read_then_worked_at_length_is_acknowledged_at_pickup \
   test_untaken_answer_alarms_once_and_clears_on_pickup \
   test_acknowledged_round_counts_when_the_record_was_not_filed \
   test_alarm_delay_is_tunable_and_bounded \
