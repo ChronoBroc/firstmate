@@ -84,7 +84,10 @@
 # final proof runs on a frozen copy. Every process rooted (by cwd) in the copy
 # or the task's tasktmp is stopped with SIGSTOP, parents first, and the landed-work
 # checks run again. A refusal resumes them all with SIGCONT, children first, and
-# ends nothing: the worker keeps running in a copy that is still its own. Ending
+# ends nothing: the worker keeps running in a copy that is still its own. A pane
+# shell that saw its foreground job stop takes the terminal back, so the refusal
+# types `fg` into the task's own tmux pane to hand the worker its terminal again
+# (other backends get a warning to do that by hand). Ending
 # the worker before refusing is what lost work - the interactive `treehouse get`
 # holding the slot then offers to clean and return it, and one Enter discards
 # the copy. A pass ends the frozen processes with SIGKILL, children first, which
@@ -2639,6 +2642,9 @@ EOF
 # them with SIGCONT instead of ending them.
 TASK_FROZEN_PIDS=()
 TASK_FROZEN_IDENTITIES=()
+# "<leader> <shell> <tty>" for each paused job that held its terminal under a
+# job-control shell (the interactive `treehouse get` shell running the worker).
+TASK_FROZEN_FG_JOBS=()
 
 # Prints the given pids parents-first, so a shell is stopped before the job it
 # waits on and never sees that job stop. Parents outside the list count as roots,
@@ -2665,10 +2671,71 @@ $pids
 EOF
 }
 
+# Prints "<pid> <shell> <tty>" when pid leads the process group that holds its
+# terminal and its parent is in another group: a foreground job of a job-control
+# shell. That shell sees the job stop even while it is paused itself (zsh always,
+# bash sometimes), so a resume alone leaves the job stopped or in the background.
+task_foreground_job_of() {  # <pid>
+  local pid=$1 ppid pgid tpgid tty shell_pgid
+  read -r ppid pgid tpgid tty <<<"$(ps -o ppid=,pgid=,tpgid=,tty= -p "$pid" 2>/dev/null)" || return 1
+  case "$ppid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$pgid" = "$pid" ] && [ "$tpgid" = "$pgid" ] || return 1
+  case "$tty" in ''|'?'|'??') return 1 ;; esac
+  shell_pgid=$(ps -o pgid= -p "$ppid" 2>/dev/null | tr -d ' ') || return 1
+  [ -n "$shell_pgid" ] && [ "$shell_pgid" != "$pgid" ] || return 1
+  printf '%s %s %s\n' "$pid" "$ppid" "$tty"
+}
+
+task_terminal_pgid_of() {  # <pid>
+  ps -o tpgid= -p "$1" 2>/dev/null | tr -d ' '
+}
+
+# After a refusal resumes the task, a job-control shell that saw its foreground
+# job stop takes the terminal back and keeps the job as stopped, so the worker
+# no longer gets pane input. When that happened, `fg` is typed into the task's
+# own tmux pane - proved to be the job's terminal, and read by the shell because
+# the shell holds it - and the job is confirmed back in the foreground.
+# Anything else is reported for the operator rather than typed blind.
+restore_task_foreground_jobs() {
+  local job leader shell tty i shell_pgid took pane_tty
+  [ "${#TASK_FROZEN_FG_JOBS[@]}" -gt 0 ] || return 0
+  for job in "${TASK_FROZEN_FG_JOBS[@]}"; do
+    read -r leader shell tty <<<"$job"
+    took=0
+    shell_pgid=
+    for ((i = 0; i < 10; i++)); do
+      kill -0 "$leader" 2>/dev/null && kill -0 "$shell" 2>/dev/null || break
+      shell_pgid=$(ps -o pgid= -p "$shell" 2>/dev/null | tr -d ' ')
+      if [ -n "$shell_pgid" ] && [ "$(task_terminal_pgid_of "$leader")" = "$shell_pgid" ]; then
+        took=1
+        break
+      fi
+      sleep 0.1
+    done
+    [ "$took" = 1 ] || continue
+    if [ "$BACKEND" = tmux ] && [ -n "${T:-}" ] \
+       && pane_tty=$(tmux display-message -p -t "$T" '#{pane_tty}' 2>/dev/null) \
+       && [ "$pane_tty" = "/dev/$tty" ] \
+       && [ "$(task_terminal_pgid_of "$leader")" = "$shell_pgid" ] \
+       && tmux send-keys -t "$T" fg Enter 2>/dev/null; then
+      for ((i = 0; i < 30; i++)); do
+        if [ "$(task_terminal_pgid_of "$leader")" = "$leader" ]; then
+          echo "teardown: returned task process $leader to the foreground of its pane for $ID" >&2
+          continue 2
+        fi
+        sleep 0.1
+      done
+    fi
+    echo "warning: the shell in $ID's pane took its terminal back from task process $leader while it was paused; run \`fg\` in that pane to give the worker its terminal again." >&2
+  done
+}
+
 TASK_FREEZE_SEEN=" "
 # Resumes every process this teardown stopped, children first. A stopped
 # process cannot exit, so its pid cannot have been reused, and no identity
-# read is trusted over that. Safe to call when nothing is frozen.
+# read is trusted over that. Safe to call when nothing is frozen. The task's
+# foreground jobs are then put back in the foreground, except for a resume
+# that is about to close the pane (--closing).
 thaw_task_processes() {
   local i
   [ "${#TASK_FROZEN_PIDS[@]}" -gt 0 ] || return 0
@@ -2678,6 +2745,8 @@ thaw_task_processes() {
   echo "teardown: resumed the task process(es) for $ID: ${TASK_FROZEN_PIDS[*]}" >&2
   TASK_FROZEN_PIDS=()
   TASK_FROZEN_IDENTITIES=()
+  [ "${1:-}" = --closing ] || restore_task_foreground_jobs
+  TASK_FROZEN_FG_JOBS=()
 }
 
 # Stops every process rooted (by cwd) under the given dirs, rescanning until no
@@ -2687,7 +2756,7 @@ thaw_task_processes() {
 # be read, resumes what was stopped and refuses. Without lsof there is nothing
 # to scan, so nothing can be paused and the cleanup refuses.
 freeze_task_processes() {  # <dir>...
-  local pass=1 max_passes=5 pid identity new
+  local pass=1 max_passes=5 pid identity new fg_job
   if ! command -v lsof >/dev/null 2>&1; then
     echo "REFUSED: lsof is unavailable, so $ID's task processes cannot be paused for the final safety check; nothing was ended, so the worktree/tasktmp is preserved. Rerun with --force to discard the task's work." >&2
     return 1
@@ -2720,7 +2789,9 @@ EOF
         echo "REFUSED: cannot verify task process $pid identity for $ID; nothing was ended, so the worktree/tasktmp is preserved for manual inspection or retry." >&2
         return 1
       }
+      fg_job=$(task_foreground_job_of "$pid") || fg_job=
       kill -STOP "$pid" 2>/dev/null || continue
+      [ -z "$fg_job" ] || TASK_FROZEN_FG_JOBS+=("$fg_job")
       TASK_FROZEN_PIDS+=("$pid")
       TASK_FROZEN_IDENTITIES+=("$identity")
     done <<EOF
@@ -2755,6 +2826,7 @@ kill_frozen_task_processes() {
   done
   TASK_FROZEN_PIDS=()
   TASK_FROZEN_IDENTITIES=()
+  TASK_FROZEN_FG_JOBS=()
 }
 
 require_orca_worktree_path_match() {
@@ -4035,7 +4107,7 @@ fi
 # the locked, focus-preserving close. Herdr therefore closes its exact pane here,
 # before anything ends processes in the copy, and that close needs the pane's
 # processes running, so they resume first.
-[ "$BACKEND" != herdr ] || thaw_task_processes
+[ "$BACKEND" != herdr ] || thaw_task_processes --closing
 HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"
 # teardown_herdr_journal_orphaned: true when the task's own journal names
 # nothing the session-start sweep could still close - a version 1 attempt whose
