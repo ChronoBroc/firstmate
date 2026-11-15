@@ -87,11 +87,14 @@
 # ends nothing: the worker keeps running in a copy that is still its own. Ending
 # the worker before refusing is what lost work - the interactive `treehouse get`
 # holding the slot then offers to clean and return it, and one Enter discards
-# the copy. A pass ends the frozen processes with SIGKILL, which never runs them
-# again, so no handler can write after the proof. A Herdr pane resumes for its
+# the copy. A pass ends the frozen processes with SIGKILL, children first, which
+# never runs them again, so no handler can write after the proof and no stopped
+# job is orphaned and resumed by its parent's death. A Herdr pane resumes for its
 # locked close instead, whose copy is durably leased. Any scan or identity
 # failure while freezing resumes what was stopped and refuses, and an exit by any
-# path resumes processes still paused. Without lsof the proof runs unfrozen.
+# path resumes processes still paused. Without lsof nothing can be paused, so a
+# checked teardown refuses before ending anything; --force and scout cleanups,
+# which skip the proof, keep the reaper's process-group fallback.
 # Safety is proved once more after the processes are gone, before backlog-close
 # publication, branch deletion, or worktree return; only a process outside the
 # copy can make that last check refuse, and it then leaves the copy in place.
@@ -2682,13 +2685,12 @@ thaw_task_processes() {
 # A pid that is gone, or that this user cannot signal, is passed over as the
 # reaper passes it over. A scan failure, or a live process whose identity cannot
 # be read, resumes what was stopped and refuses. Without lsof there is nothing
-# to scan: the proof then runs unfrozen and the reaper's process-group fallback
-# applies as before.
+# to scan, so nothing can be paused and the cleanup refuses.
 freeze_task_processes() {  # <dir>...
   local pass=1 max_passes=5 pid identity new
   if ! command -v lsof >/dev/null 2>&1; then
-    echo "warning: lsof is unavailable; the final safety check for $ID runs without pausing the task's processes" >&2
-    return 0
+    echo "REFUSED: lsof is unavailable, so $ID's task processes cannot be paused for the final safety check; nothing was ended, so the worktree/tasktmp is preserved. Rerun with --force to discard the task's work." >&2
+    return 1
   fi
   while [ "$pass" -le "$max_passes" ]; do
     if ! task_pids_under_roots "$@"; then
@@ -2731,15 +2733,17 @@ EOF
   return 1
 }
 
-# Ends the frozen processes once the proof passed. SIGKILL acts on a stopped
-# process without running it again, so no handler can write after the proof.
+# Ends the frozen processes once the proof passed, children first, so no stopped
+# job is orphaned by its parent's death and resumed (SIGHUP then SIGCONT). SIGKILL
+# acts on a stopped process without running it again, so no handler can write
+# after the proof.
 # A process whose identity no longer reads back the same is resumed rather than
 # killed, and the reaper below decides it, as it does anything that appeared since.
 kill_frozen_task_processes() {
   local i pid
   [ "${#TASK_FROZEN_PIDS[@]}" -gt 0 ] || return 0
   echo "teardown: reaping leaked worktree process(es) for $ID, paused since the final safety check: ${TASK_FROZEN_PIDS[*]}" >&2
-  for i in "${!TASK_FROZEN_PIDS[@]}"; do
+  for ((i=${#TASK_FROZEN_PIDS[@]} - 1; i >= 0; i--)); do
     pid=${TASK_FROZEN_PIDS[$i]}
     if task_process_identity_matches "$pid" "${TASK_FROZEN_IDENTITIES[$i]}"; then
       kill -KILL "$pid" 2>/dev/null || true

@@ -5353,19 +5353,39 @@ fi
 exit 0
 EOF
   chmod +x "$case_dir/fakebin/tmux"
+  cat > "$case_dir/fakebin/treehouse" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$case_dir/treehouse.log"
+EOF
+  chmod +x "$case_dir/fakebin/treehouse"
 
   rc=0
   FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
-    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/checked.stderr" || rc=$?
 
-  expect_code 0 "$rc" "lsof-absent-process-group-reap: teardown should succeed"
+  expect_code 1 "$rc" "lsof-absent-process-group-reap: a checked teardown should refuse without lsof"
+  assert_grep "cannot be paused for the final safety check" "$case_dir/checked.stderr" \
+    "lsof-absent-process-group-reap: checked refusal did not explain the missing pause"
+  assert_grep "--force" "$case_dir/checked.stderr" \
+    "lsof-absent-process-group-reap: checked refusal did not name --force"
+  kill -0 "$pid" 2>/dev/null \
+    || fail "lsof-absent-process-group-reap: the checked refusal ended the task process"
+  assert_present "$case_dir/wt" "lsof-absent-process-group-reap: the checked refusal removed the worktree"
+  assert_present "$case_dir/state/task-x1.meta" "lsof-absent-process-group-reap: the checked refusal removed task metadata"
+  assert_absent "$case_dir/treehouse.log" "lsof-absent-process-group-reap: the checked refusal returned the worktree"
+
+  rc=0
+  FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+    run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+  expect_code 0 "$rc" "lsof-absent-process-group-reap: a forced teardown should succeed"
   if kill -0 "$pid" 2>/dev/null; then
     kill -KILL "$pid" 2>/dev/null || true
     fail "lsof-absent-process-group-reap: tmux process group survived teardown"
   fi
   assert_grep "reaping leaked worktree process group" "$case_dir/stderr" \
     "lsof-absent-process-group-reap: teardown did not use the process-group fallback"
-  pass "missing lsof falls back to reaping the tmux pane process group"
+  pass "missing lsof refuses a checked teardown with the worker alive, and a forced one reaps the tmux pane process group"
 }
 
 test_lsof_error_refuses_before_removal() {
