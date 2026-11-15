@@ -1,0 +1,47 @@
+== lab: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.XcmBEC  root: {run-worktree}  scenario: no-lsof
+-- git status before:
+-- processes rooted in the copy (lsof cwd):
+48590 48503 Ss   bash -i
+49974 48590 S+   bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.XcmBEC/worker.sh
+52299 49974 S+   sleep 0.2
+-- lsof on stripped PATH: absent
+
+===== fm-teardown.sh task-x1 (checked) =====
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.XcmBEC
+REFUSED: lsof is unavailable, so task-x1's task processes cannot be paused for the final safety check; nothing was ended, so the worktree/tasktmp is preserved. Rerun with --force to discard the task's work.
+===== exit 1
+-- after: pane shell 48590 alive? yes
+-- processes rooted in the copy (lsof cwd):
+48590 48503 Ss   bash -i
+49974 48590 S+   bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.XcmBEC/worker.sh
+74721 49974 S+   sleep 0.2
+-- 2s later, worker states:
+-- processes rooted in the copy (lsof cwd):
+48590 48503 Ss   bash -i
+49974 48590 S+   bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.XcmBEC/worker.sh
+78962 49974 S+   sleep 0.2
+-- worker heartbeat age: 1794761596s
+-- pane screen:
+The default interactive shell is now zsh.
+To update your account to use zsh, please run `chsh -s /bin/zsh`.
+For more details, please visit https://support.apple.com/kb/HT208050.
+bash-3.2$ bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.X
+cmBEC/worker.sh
+-- tmux windows: primary fm-task-x1 
+-- worktree present? yes; git status:
+-- worker.txt: base|
+-- meta present? yes
+-- treehouse.log: <none: copy never returned>
+
+===== fm-teardown.sh task-x1 --force (no lsof) =====
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.XcmBEC
+teardown: reaping leaked worktree process group for task-x1: 48590
+teardown: force-killing leaked worktree process group for task-x1: 48590
+/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.XcmBEC/repos/project: already current
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.XcmBEC/repos/wt)
+Backlog: task-x1 just finished (this home keeps no markdown backlog at /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.XcmBEC/data/backlog.md). Update /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.XcmBEC/data/backlog.md - move task-x1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+===== exit 0
+-- after: pane shell alive? no
+-- processes rooted in the copy (lsof cwd):
+-- treehouse.log: treehouse return --force /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.XcmBEC/repos/wt
+== lab removed: yes

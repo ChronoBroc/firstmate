@@ -1,0 +1,23 @@
+== lab: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.uFFC37  root: {run-worktree}  scenario: term-writer
+-- git status before:
+-- processes rooted in the copy (lsof cwd):
+49858 49818 Ss   bash -i
+51167 49858 S+   bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.uFFC37/worker.sh
+52040 51167 S+   sleep 0.2
+
+===== fm-teardown.sh task-x1 (checked) =====
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.uFFC37
+teardown: paused the task process(es) for task-x1 for the final safety check: 49858 51167 54082
+teardown: reaping leaked worktree process(es) for task-x1, paused since the final safety check: 49858 51167 54082
+/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.uFFC37/repos/project: already current
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.uFFC37/repos/wt)
+Backlog: task-x1 just finished (this home keeps no markdown backlog at /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.uFFC37/data/backlog.md). Update /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.uFFC37/data/backlog.md - move task-x1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+===== exit 0
+-- after: pane shell 49858 alive? NO
+-- processes rooted in the copy (lsof cwd):
+-- tmux windows: primary 
+-- worktree present? yes; git status:
+-- worker.txt: base|
+-- meta present? no
+-- treehouse.log: treehouse return --force /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.uFFC37/repos/wt
+== lab removed: yes

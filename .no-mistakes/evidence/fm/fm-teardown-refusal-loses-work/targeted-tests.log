@@ -1,0 +1,10 @@
+ok - a cleanup refused for work written after its first check leaves the worker running and its copy unreturned
+ok - a paused process whose identity cannot be re-read is resumed and the cleanup refuses with nothing ended
+ok - missing lsof refuses a checked teardown with the worker alive, and a forced one reaps the tmux pane process group
+orca/reap-refusal: teardown_exit=1 replay_exit=0 metadata_after_replay=retained backlog_after_replay=in_flight
+tmux/reap-refusal: teardown_exit=1 replay_exit=0 metadata_after_replay=retained backlog_after_replay=in_flight
+ok - post-reap proof retains late work and retry records on ordinary and Orca paths, preserving clean/force/scout behavior
+ok - a reused pid with a different start time is never force-killed
+ok - a process spawned during grace is reaped on a later pass
+ok - a leaked descendant process rooted under the task's worktree is reaped by teardown, not left surviving
+ok - an erroring lsof scan refuses teardown and preserves the task

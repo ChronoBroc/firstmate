@@ -1,0 +1,43 @@
+== lab: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.EugQUJ  root: {run-worktree}  scenario: late-writer
+-- git status before:
+-- processes rooted in the copy (lsof cwd):
+79448 79377 Ss   bash -i
+80991 79448 S+   bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.EugQUJ/worker.sh
+
+===== fm-teardown.sh task-x1 (checked) =====
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.EugQUJ
+teardown: paused the task process(es) for task-x1 for the final safety check: 79448 80991
+REFUSED: worktree /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.EugQUJ/repos/wt has uncommitted changes.
+uncommitted changes present (includes tracked edits)
+Commit them (or get the captain's explicit OK to discard, then --force).
+teardown: resumed the task process(es) for task-x1: 79448 80991
+teardown: returned task process 80991 to the foreground of its pane for task-x1
+Nothing was ended or returned: the worker and its copy are as they were before this cleanup.
+===== exit 1
+-- after: pane shell 79448 alive? yes
+-- processes rooted in the copy (lsof cwd):
+79448 79377 Ss   bash -i
+80991 79448 S+   bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.EugQUJ/worker.sh
+-- 2s later, worker states:
+-- processes rooted in the copy (lsof cwd):
+79448 79377 Ss   bash -i
+80991 79448 S+   bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.EugQUJ/worker.sh
+-- worker heartbeat age: 1794763052s
+-- pane screen:
+The default interactive shell is now zsh.
+To update your account to use zsh, please run `chsh -s /bin/zsh`.
+For more details, please visit https://support.apple.com/kb/HT208050.
+bash-3.2$ bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.E
+ugQUJ/worker.sh
+[1]+  Stopped                 bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgw
+kqm0000gn/T/fm-lab.EugQUJ/worker.sh
+bash-3.2$ fg
+bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.EugQUJ/work
+er.sh
+-- tmux windows: primary fm-task-x1 
+-- worktree present? yes; git status:
+ M worker.txt
+-- worker.txt: base|late-scan-edit|
+-- meta present? yes
+-- treehouse.log: <none: copy never returned>
+== lab removed: yes

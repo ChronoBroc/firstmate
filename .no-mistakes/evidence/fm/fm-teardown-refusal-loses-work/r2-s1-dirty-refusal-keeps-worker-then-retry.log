@@ -1,0 +1,56 @@
+== lab: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0  root: {run-worktree}  scenario: dirty-then-commit
+-- git status before:
+ M worker.txt
+-- processes rooted in the copy (lsof cwd):
+42196 42187 Ss   bash -i
+43008 42196 S+   bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0/worker.sh
+45747 43008 S+   sleep 0.2
+
+===== fm-teardown.sh task-x1 (checked) =====
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0
+REFUSED: worktree /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0/repos/wt has uncommitted changes.
+uncommitted changes present (includes tracked edits)
+Commit them (or get the captain's explicit OK to discard, then --force).
+===== exit 1
+-- after: pane shell 42196 alive? yes
+-- processes rooted in the copy (lsof cwd):
+42196 42187 Ss   bash -i
+43008 42196 S+   bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0/worker.sh
+48076 43008 S+   sleep 0.2
+-- 2s later, worker states:
+-- processes rooted in the copy (lsof cwd):
+42196 42187 Ss   bash -i
+43008 42196 S+   bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0/worker.sh
+52346 43008 S+   sleep 0.2
+-- worker heartbeat age: 1794763034s
+-- pane screen:
+The default interactive shell is now zsh.
+To update your account to use zsh, please run `chsh -s /bin/zsh`.
+For more details, please visit https://support.apple.com/kb/HT208050.
+bash-3.2$ bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.F
+gCqt0/worker.sh
+-- tmux windows: primary fm-task-x1 
+-- worktree present? yes; git status:
+ M worker.txt
+-- worker.txt: base|uncommitted edit|
+-- meta present? yes
+-- treehouse.log: <none: copy never returned>
+
+== worker resumes; operator commits+pushes the edit, then reruns cleanup
+-- processes rooted in the copy (lsof cwd):
+42196 42187 Ss   bash -i
+43008 42196 S+   bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0/worker.sh
+===== fm-teardown.sh task-x1 (second run) =====
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0
+teardown: paused the task process(es) for task-x1 for the final safety check: 42196 43008
+teardown: reaping leaked worktree process(es) for task-x1, paused since the final safety check: 42196 43008
+/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0/repos/project: already current
+teardown task-x1 complete (window firstmate:fm-task-x1, worktree /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0/repos/wt)
+Backlog: task-x1 just finished (this home keeps no markdown backlog at /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0/data/backlog.md). Update /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0/data/backlog.md - move task-x1 to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due.
+===== exit 0
+-- after: pane shell alive? no
+-- processes rooted in the copy (lsof cwd):
+-- tmux windows: primary 
+-- treehouse.log: treehouse return --force /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.FgCqt0/repos/wt
+-- meta present? no
+== lab removed: yes
