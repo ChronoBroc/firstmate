@@ -5353,19 +5353,39 @@ fi
 exit 0
 EOF
   chmod +x "$case_dir/fakebin/tmux"
+  cat > "$case_dir/fakebin/treehouse" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$case_dir/treehouse.log"
+EOF
+  chmod +x "$case_dir/fakebin/treehouse"
 
   rc=0
   FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
-    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/checked.stderr" || rc=$?
 
-  expect_code 0 "$rc" "lsof-absent-process-group-reap: teardown should succeed"
+  expect_code 1 "$rc" "lsof-absent-process-group-reap: a checked teardown should refuse without lsof"
+  assert_grep "cannot be paused for the final safety check" "$case_dir/checked.stderr" \
+    "lsof-absent-process-group-reap: checked refusal did not explain the missing pause"
+  assert_grep "--force" "$case_dir/checked.stderr" \
+    "lsof-absent-process-group-reap: checked refusal did not name --force"
+  kill -0 "$pid" 2>/dev/null \
+    || fail "lsof-absent-process-group-reap: the checked refusal ended the task process"
+  assert_present "$case_dir/wt" "lsof-absent-process-group-reap: the checked refusal removed the worktree"
+  assert_present "$case_dir/state/task-x1.meta" "lsof-absent-process-group-reap: the checked refusal removed task metadata"
+  assert_absent "$case_dir/treehouse.log" "lsof-absent-process-group-reap: the checked refusal returned the worktree"
+
+  rc=0
+  FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+    run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+  expect_code 0 "$rc" "lsof-absent-process-group-reap: a forced teardown should succeed"
   if kill -0 "$pid" 2>/dev/null; then
     kill -KILL "$pid" 2>/dev/null || true
     fail "lsof-absent-process-group-reap: tmux process group survived teardown"
   fi
   assert_grep "reaping leaked worktree process group" "$case_dir/stderr" \
     "lsof-absent-process-group-reap: teardown did not use the process-group fallback"
-  pass "missing lsof falls back to reaping the tmux pane process group"
+  pass "missing lsof refuses a checked teardown with the worker alive, and a forced one reaps the tmux pane process group"
 }
 
 test_lsof_error_refuses_before_removal() {
@@ -5429,10 +5449,12 @@ exec "$REAL_PS_FOR_TEST" "$@"
 SH
   chmod +x "$case_dir/fakebin/lsof" "$case_dir/fakebin/ps"
 
+  # The fake ps counts identity reads, so this pins the reaper's own sequence:
+  # a forced cleanup sends no pause and reaps exactly as this test models.
   rc=0
   FM_PROC_ROOT_OVERRIDE="$case_dir/no-proc" \
   FM_FAKE_REUSED_PID="$pid" FM_FAKE_PS_COUNT="$case_dir/ps-count" \
-    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+    run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
   expect_code 0 "$rc" "reused-pid-identity: teardown should skip the replacement process"
   if ! kill -0 "$pid" 2>/dev/null; then
@@ -5528,8 +5550,11 @@ test_process_spawned_during_grace_is_reaped_on_later_pass() {
   disown
   sleep 0.2
 
+  # A checked cleanup pauses its processes for the final proof and ends them
+  # with SIGKILL, so no TERM handler runs; a forced cleanup has no proof to
+  # protect and still sends TERM, which is the grace period exercised here.
   rc=0
-  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
 
   if [ -f "$child_file" ]; then child_pid=$(cat "$child_file"); fi
   if [ -n "$child_pid" ] && kill -0 "$child_pid" 2>/dev/null; then
@@ -6433,9 +6458,112 @@ SH
   pass "post-reap proof retains late work and retry records on ordinary and Orca paths, preserving clean/force/scout behavior"
 }
 
+# A refused cleanup must leave the worker running. The worker here is a real
+# process rooted in the copy, and the edit lands after the first proof: the
+# lsof shim writes it at teardown's first process scan, then hands that scan to
+# the real lsof so the worker is genuinely found. Ending the worker before that
+# refusal is what let the pool reset the copy, because the interactive
+# `treehouse get` holding the slot then offers to clean and return it.
+test_refused_cleanup_leaves_the_worker_running() {
+  local case_dir rc=0 worker state
+  case_dir=$(make_case refusal-keeps-worker)
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit_file "$case_dir" worker.txt baseline
+  git -C "$case_dir/wt" push -q origin fm/task-x1
+  git -C "$case_dir/project" fetch -q origin
+  ( cd "$case_dir/wt" && exec sleep 300 ) &
+  worker=$!
+  disown
+  sleep 0.3
+  kill -0 "$worker" 2>/dev/null || fail "refusal-keeps-worker: setup worker did not start"
+  cat > "$case_dir/fakebin/lsof" <<'SH'
+#!/usr/bin/env bash
+if [ ! -e "$FM_REAP_CASE/late-edit-written" ]; then
+  : > "$FM_REAP_CASE/late-edit-written"
+  printf 'late edit\n' > "$FM_REAP_CASE/wt/worker.txt"
+fi
+exec "$REAL_LSOF_FOR_TEST" "$@"
+SH
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+printf 'treehouse %s\n' "$*" >> "$FM_REAP_CASE/treehouse.log"
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/lsof" "$case_dir/fakebin/treehouse"
+
+  FM_REAP_CASE="$case_dir" run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+  assert_present "$case_dir/late-edit-written" "refusal-keeps-worker: teardown never scanned for task processes"
+  expect_code 1 "$rc" "refusal-keeps-worker: the late edit must refuse cleanup"
+  assert_grep 'uncommitted changes' "$case_dir/stderr" "refusal-keeps-worker: refusal reason missing"
+  if ! kill -0 "$worker" 2>/dev/null; then
+    fail "refusal-keeps-worker: the refused cleanup ended the worker: $(cat "$case_dir/stderr")"
+  fi
+  state=$("$REAL_PS_FOR_TEST" -o stat= -p "$worker" | tr -d ' ')
+  kill -KILL "$worker" 2>/dev/null || true
+  case "$state" in
+    T*) fail "refusal-keeps-worker: the refused cleanup left the worker paused (state $state)" ;;
+  esac
+  assert_grep 'late edit' "$case_dir/wt/worker.txt" "refusal-keeps-worker: the late edit is gone"
+  assert_absent "$case_dir/treehouse.log" "refusal-keeps-worker: the refused cleanup returned the copy"
+  assert_present "$case_dir/state/task-x1.meta" "refusal-keeps-worker: the task record is gone"
+  pass "a cleanup refused for work written after its first check leaves the worker running and its copy unreturned"
+}
+
+test_unverifiable_paused_identity_refuses_without_ending_the_worker() {
+  local case_dir rc=0 worker state
+  case_dir=$(make_case paused-identity-unverifiable)
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  ( cd "$case_dir/wt" && exec sleep 300 ) &
+  worker=$!
+  disown
+  sleep 0.3
+  kill -0 "$worker" 2>/dev/null || fail "paused-identity-unverifiable: setup worker did not start"
+  cat > "$case_dir/fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *" lstart= "*)
+    if [ "$1" = -p ] && "$REAL_PS_FOR_TEST" -o stat= -p "$2" 2>/dev/null | grep -q '^ *T'; then
+      : > "$FM_REAP_CASE/paused-identity-read"
+      exit 1
+    fi
+    ;;
+esac
+exec "$REAL_PS_FOR_TEST" "$@"
+SH
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+printf 'treehouse %s\n' "$*" >> "$FM_REAP_CASE/treehouse.log"
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/ps" "$case_dir/fakebin/treehouse"
+
+  FM_PROC_ROOT_OVERRIDE="$case_dir/no-proc" FM_REAP_CASE="$case_dir" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+
+  assert_present "$case_dir/paused-identity-read" "paused-identity-unverifiable: teardown never re-read a paused identity"
+  expect_code 1 "$rc" "paused-identity-unverifiable: an unverifiable paused process must refuse cleanup"
+  assert_grep "REFUSED: cannot verify paused task process $worker identity" "$case_dir/stderr" \
+    "paused-identity-unverifiable: refusal reason missing"
+  if ! kill -0 "$worker" 2>/dev/null; then
+    fail "paused-identity-unverifiable: the refused cleanup ended the worker: $(cat "$case_dir/stderr")"
+  fi
+  state=$("$REAL_PS_FOR_TEST" -o stat= -p "$worker" | tr -d ' ')
+  kill -KILL "$worker" 2>/dev/null || true
+  case "$state" in
+    T*) fail "paused-identity-unverifiable: the refused cleanup left the worker paused (state $state)" ;;
+  esac
+  assert_absent "$case_dir/treehouse.log" "paused-identity-unverifiable: the refused cleanup returned the copy"
+  assert_present "$case_dir/state/task-x1.meta" "paused-identity-unverifiable: the task record is gone"
+  pass "a paused process whose identity cannot be re-read is resumed and the cleanup refuses with nothing ended"
+}
+
 test_hidden_untracked_work_refuses_before_return
 test_content_fallback_git_capability_boundary
 test_work_written_at_reap_boundary_is_preserved
+test_refused_cleanup_leaves_the_worker_running
+test_unverifiable_paused_identity_refuses_without_ending_the_worker
 test_status_archive_opt_in
 test_record_export_config_absent_never_reads_the_exporter
 test_record_export_unopted_symlinked_config_does_not_block_teardown

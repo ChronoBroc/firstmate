@@ -80,8 +80,27 @@
 # local-only projects additionally accept work merged into the local default
 # branch (firstmate performs that merge after configured approval) as a fallback
 # for the common case where there is no remote at all.
-# Safety is proved again after task processes are reaped, before backlog-close
-# publication, branch deletion, or worktree return.
+# Freeze-then-decide: a worker can still write after that first proof, so the
+# final proof runs on a frozen copy. Every process rooted (by cwd) in the copy
+# or the task's tasktmp is stopped with SIGSTOP, parents first, and the landed-work
+# checks run again. A refusal resumes them all with SIGCONT, children first, and
+# ends nothing: the worker keeps running in a copy that is still its own. A pane
+# shell that saw its foreground job stop takes the terminal back, so the refusal
+# types `fg` into the task's own tmux pane to hand the worker its terminal again
+# (other backends get a warning to do that by hand). Ending
+# the worker before refusing is what lost work - the interactive `treehouse get`
+# holding the slot then offers to clean and return it, and one Enter discards
+# the copy. A pass ends the frozen processes with SIGKILL, children first, which
+# never runs them again, so no handler can write after the proof and no stopped
+# job is orphaned and resumed by its parent's death. A Herdr pane resumes for its
+# locked close instead, whose copy is durably leased. Any scan or identity
+# failure while freezing resumes what was stopped and refuses, and an exit by any
+# path resumes processes still paused. Without lsof nothing can be paused, so a
+# checked teardown refuses before ending anything; --force and scout cleanups,
+# which skip the proof, keep the reaper's process-group fallback.
+# Safety is proved once more after the processes are gone, before backlog-close
+# publication, branch deletion, or worktree return; only a process outside the
+# copy can make that last check refuse, and it then leaves the copy in place.
 # Scout tasks (kind=scout in meta) carve out of that check: their worktree is
 # declared scratch and the report at data/<task-id>/report.md is the work
 # product. Teardown proceeds only once the report exists and the shared
@@ -275,8 +294,8 @@
 # removal so the operator can see what happened.
 #
 # Pre-teardown cleanup sequence (starts after the initial landed/discard-work
-# safety checks pass, and BEFORE any worktree return or branch
-# deletion below - a still-active run or a leaked process may
+# safety checks and the frozen final proof pass, and BEFORE any worktree return
+# or branch deletion below - a still-active run or a leaked process may
 # own live work in that worktree):
 #   Fix 1 - conclude the task's own no-mistakes run. A ship task's worktree can
 #     be torn down while its no-mistakes pipeline run is still PARKED at a gate
@@ -616,6 +635,10 @@ DESCENDANT_TASK_HOMES=()
 DESCENDANT_TREEHOUSE_LOCK_PATHS=()
 teardown_release_locks() {
   local status=$? i
+  # A teardown that stops for any reason never leaves the task's processes paused.
+  if declare -F thaw_task_processes >/dev/null 2>&1; then
+    thaw_task_processes || true
+  fi
   if declare -F teardown_release_herdr_locks >/dev/null 2>&1; then
     teardown_release_herdr_locks || true
   fi
@@ -2613,6 +2636,201 @@ EOF
   return 1
 }
 
+# Freeze-then-decide (see the script header): the task's processes are held
+# with SIGSTOP while the final safety proof runs, so nothing in the copy can
+# write between that proof and the kill, and a refusal resumes every one of
+# them with SIGCONT instead of ending them.
+TASK_FROZEN_PIDS=()
+TASK_FROZEN_IDENTITIES=()
+# "<leader> <shell> <tty>" for each paused job that held its terminal under a
+# job-control shell (the interactive `treehouse get` shell running the worker).
+TASK_FROZEN_FG_JOBS=()
+
+# Prints the given pids parents-first, so a shell is stopped before the job it
+# waits on and never sees that job stop. Parents outside the list count as roots,
+# and a pid ps does not report still prints, last, so no process escapes the pause.
+task_pids_parents_first() {  # <pid-list>
+  local pids ordered pid
+  pids=$(printf '%s\n' "$1" | grep -E '^[0-9]+$' || true)
+  [ -n "$pids" ] || return 0
+  ordered=$(ps -o pid=,ppid= -p "$(printf '%s\n' "$pids" | paste -sd, -)" 2>/dev/null | awk '
+    $1 ~ /^[0-9]+$/ { parent[$1] = $2; order[++n] = $1 }
+    END {
+      for (i = 1; i <= n; i++) {
+        p = order[i]; d = 0; q = parent[p]
+        while ((q in parent) && d <= n) { d++; q = parent[q] }
+        print d, p
+      }
+    }
+  ' | sort -n -k1,1 | awk '{ print $2 }') || ordered=
+  printf '%s\n' "$ordered" | grep -E '^[0-9]+$' || true
+  while IFS= read -r pid; do
+    printf '%s\n' "$ordered" | grep -Fxq "$pid" || printf '%s\n' "$pid"
+  done <<EOF
+$pids
+EOF
+}
+
+# Prints "<pid> <shell> <tty>" when pid leads the process group that holds its
+# terminal and its parent is in another group: a foreground job of a job-control
+# shell. That shell sees the job stop even while it is paused itself (zsh always,
+# bash sometimes), so a resume alone leaves the job stopped or in the background.
+task_foreground_job_of() {  # <pid>
+  local pid=$1 ppid pgid tpgid tty shell_pgid
+  read -r ppid pgid tpgid tty <<<"$(ps -o ppid=,pgid=,tpgid=,tty= -p "$pid" 2>/dev/null)" || return 1
+  case "$ppid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$pgid" = "$pid" ] && [ "$tpgid" = "$pgid" ] || return 1
+  case "$tty" in ''|'?'|'??') return 1 ;; esac
+  shell_pgid=$(ps -o pgid= -p "$ppid" 2>/dev/null | tr -d ' ') || return 1
+  [ -n "$shell_pgid" ] && [ "$shell_pgid" != "$pgid" ] || return 1
+  printf '%s %s %s\n' "$pid" "$ppid" "$tty"
+}
+
+task_terminal_pgid_of() {  # <pid>
+  ps -o tpgid= -p "$1" 2>/dev/null | tr -d ' '
+}
+
+# After a refusal resumes the task, a job-control shell that saw its foreground
+# job stop takes the terminal back and keeps the job as stopped, so the worker
+# no longer gets pane input. When that happened, `fg` is typed into the task's
+# own tmux pane - proved to be the job's terminal, and read by the shell because
+# the shell holds it - and the job is confirmed back in the foreground.
+# Anything else is reported for the operator rather than typed blind.
+restore_task_foreground_jobs() {
+  local job leader shell tty i shell_pgid took pane_tty
+  [ "${#TASK_FROZEN_FG_JOBS[@]}" -gt 0 ] || return 0
+  for job in "${TASK_FROZEN_FG_JOBS[@]}"; do
+    read -r leader shell tty <<<"$job"
+    took=0
+    shell_pgid=
+    for ((i = 0; i < 10; i++)); do
+      if ! kill -0 "$leader" 2>/dev/null || ! kill -0 "$shell" 2>/dev/null; then
+        break
+      fi
+      shell_pgid=$(ps -o pgid= -p "$shell" 2>/dev/null | tr -d ' ')
+      if [ -n "$shell_pgid" ] && [ "$(task_terminal_pgid_of "$leader")" = "$shell_pgid" ]; then
+        took=1
+        break
+      fi
+      sleep 0.1
+    done
+    [ "$took" = 1 ] || continue
+    if [ "$BACKEND" = tmux ] && [ -n "${T:-}" ] \
+       && pane_tty=$(tmux display-message -p -t "$T" '#{pane_tty}' 2>/dev/null) \
+       && [ "$pane_tty" = "/dev/$tty" ] \
+       && [ "$(task_terminal_pgid_of "$leader")" = "$shell_pgid" ] \
+       && tmux send-keys -t "$T" fg Enter 2>/dev/null; then
+      for ((i = 0; i < 30; i++)); do
+        if [ "$(task_terminal_pgid_of "$leader")" = "$leader" ]; then
+          echo "teardown: returned task process $leader to the foreground of its pane for $ID" >&2
+          continue 2
+        fi
+        sleep 0.1
+      done
+    fi
+    echo "warning: the shell in $ID's pane took its terminal back from task process $leader while it was paused; run \`fg\` in that pane to give the worker its terminal again." >&2
+  done
+}
+
+TASK_FREEZE_SEEN=" "
+# Resumes every process this teardown stopped, children first. A stopped
+# process cannot exit, so its pid cannot have been reused, and no identity
+# read is trusted over that. Safe to call when nothing is frozen. The task's
+# foreground jobs are then put back in the foreground, except for a resume
+# that is about to close the pane (--closing).
+thaw_task_processes() {
+  local i
+  [ "${#TASK_FROZEN_PIDS[@]}" -gt 0 ] || return 0
+  for ((i=${#TASK_FROZEN_PIDS[@]} - 1; i >= 0; i--)); do
+    kill -CONT "${TASK_FROZEN_PIDS[$i]}" 2>/dev/null || true
+  done
+  echo "teardown: resumed the task process(es) for $ID: ${TASK_FROZEN_PIDS[*]}" >&2
+  TASK_FROZEN_PIDS=()
+  TASK_FROZEN_IDENTITIES=()
+  [ "${1:-}" = --closing ] || restore_task_foreground_jobs
+  TASK_FROZEN_FG_JOBS=()
+}
+
+# Stops every process rooted (by cwd) under the given dirs, rescanning until no
+# new one appears, because a process started during the scan could still write.
+# A pid that is gone, or that this user cannot signal, is passed over as the
+# reaper passes it over. A scan failure, or a live process whose identity cannot
+# be read, resumes what was stopped and refuses. Without lsof there is nothing
+# to scan, so nothing can be paused and the cleanup refuses.
+freeze_task_processes() {  # <dir>...
+  local pass=1 max_passes=5 pid identity new fg_job
+  if ! command -v lsof >/dev/null 2>&1; then
+    echo "REFUSED: lsof is unavailable, so $ID's task processes cannot be paused for the final safety check; nothing was ended, so the worktree/tasktmp is preserved. Rerun with --force to discard the task's work." >&2
+    return 1
+  fi
+  while [ "$pass" -le "$max_passes" ]; do
+    if ! task_pids_under_roots "$@"; then
+      thaw_task_processes
+      echo "REFUSED: cannot determine leaked processes under ${TASK_PIDS_FAILED_DIR:-<missing>} for $ID (lsof failed); nothing was ended, so the worktree/tasktmp is preserved for manual inspection or retry." >&2
+      return 1
+    fi
+    new=
+    while IFS= read -r pid; do
+      [ -n "$pid" ] || continue
+      case "$TASK_FREEZE_SEEN" in *" $pid "*) continue ;; esac
+      new="$new $pid"
+    done <<EOF
+$TASK_PIDS
+EOF
+    if [ -z "$new" ]; then
+      [ "${#TASK_FROZEN_PIDS[@]}" -eq 0 ] \
+        || echo "teardown: paused the task process(es) for $ID for the final safety check: ${TASK_FROZEN_PIDS[*]}" >&2
+      return 0
+    fi
+    while IFS= read -r pid; do
+      [ -n "$pid" ] || continue
+      TASK_FREEZE_SEEN="$TASK_FREEZE_SEEN$pid "
+      identity=$(task_process_identity "$pid") || {
+        kill -0 "$pid" 2>/dev/null || continue
+        thaw_task_processes
+        echo "REFUSED: cannot verify task process $pid identity for $ID; nothing was ended, so the worktree/tasktmp is preserved for manual inspection or retry." >&2
+        return 1
+      }
+      fg_job=$(task_foreground_job_of "$pid") || fg_job=
+      kill -STOP "$pid" 2>/dev/null || continue
+      [ -z "$fg_job" ] || TASK_FROZEN_FG_JOBS+=("$fg_job")
+      TASK_FROZEN_PIDS+=("$pid")
+      TASK_FROZEN_IDENTITIES+=("$identity")
+    done <<EOF
+$(task_pids_parents_first "$(printf '%s' "$new" | tr ' ' '\n')")
+EOF
+    pass=$((pass + 1))
+  done
+  thaw_task_processes
+  echo "REFUSED: new task processes for $ID kept appearing after $max_passes pause attempts; nothing was ended, so the worktree/tasktmp is preserved for manual inspection or retry." >&2
+  return 1
+}
+
+# Ends the frozen processes once the proof passed, children first, so no stopped
+# job is orphaned by its parent's death and resumed (SIGHUP then SIGCONT). SIGKILL
+# acts on a stopped process without running it again, so no handler can write
+# after the proof.
+# Every identity is read back before any is killed; if one does not match, all
+# are resumed and the cleanup refuses with nothing ended.
+kill_frozen_task_processes() {
+  local i pid
+  [ "${#TASK_FROZEN_PIDS[@]}" -gt 0 ] || return 0
+  for i in "${!TASK_FROZEN_PIDS[@]}"; do
+    pid=${TASK_FROZEN_PIDS[$i]}
+    task_process_identity_matches "$pid" "${TASK_FROZEN_IDENTITIES[$i]}" && continue
+    thaw_task_processes
+    echo "REFUSED: cannot verify paused task process $pid identity for $ID; nothing was ended, so the worktree/tasktmp is preserved for manual inspection or retry." >&2
+    return 1
+  done
+  echo "teardown: reaping leaked worktree process(es) for $ID, paused since the final safety check: ${TASK_FROZEN_PIDS[*]}" >&2
+  for ((i=${#TASK_FROZEN_PIDS[@]} - 1; i >= 0; i--)); do
+    kill -KILL "${TASK_FROZEN_PIDS[$i]}" 2>/dev/null || true
+  done
+  TASK_FROZEN_PIDS=()
+  TASK_FROZEN_IDENTITIES=()
+  TASK_FROZEN_FG_JOBS=()
+}
+
 require_orca_worktree_path_match() {
   local worktree_id=$1 inspected=$2 resolved inspected_abs resolved_abs
   resolved=$(fm_backend_worktree_path orca "$worktree_id") || {
@@ -3863,20 +4081,35 @@ if [ "$BACKLOG_TRANSITION" = close ] && { [ "$KIND" = ship ] || [ "$KIND" = scou
 fi
 
 # The initial landed/discard-work checks above have passed (or --force skipped
-# them). Fix 1 and Fix 2 (see script header) run here, unconditionally on
+# them). The final proof runs next on a frozen copy (freeze-then-decide in the
+# script header): a refusal here resumes the task's processes, so a refused
+# cleanup never ends the worker or exposes its copy to reuse.
+if [ "$KIND" != secondmate ] && [ "$KIND" != scout ] && [ "$FORCE" != "--force" ] \
+   && teardown_owns_worktree && [ -d "$WT" ]; then
+  freeze_task_processes "$WT" "$TASK_TMP" || exit 1
+  if ! validate_worktree_teardown_safety; then
+    thaw_task_processes
+    echo "Nothing was ended or returned: the worker and its copy are as they were before this cleanup." >&2
+    exit 1
+  fi
+fi
+
+# Fix 1 and Fix 2 (see script header) run here, unconditionally on
 # --force, and before branch deletion or worktree return - a still-parked run or a
 # leaked process can own live work in this exact worktree. Not for
 # kind=secondmate: a secondmate home's own runtime lifecycle is owned by the
 # dedicated process-event and firstmate-home removal machinery further below,
 # not by task-worktree cleanup.
 if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
-  conclude_task_no_mistakes_run "$WT"
+  conclude_task_no_mistakes_run "$WT" || { thaw_task_processes; exit 1; }
 fi
 
 # A Herdr pane's top-level shell lives in its leased copy, so the reap and the
 # Treehouse return below would end it and Herdr would remove the pane outside
 # the locked, focus-preserving close. Herdr therefore closes its exact pane here,
-# before anything ends processes in the copy.
+# before anything ends processes in the copy, and that close needs the pane's
+# processes running, so they resume first.
+[ "$BACKEND" != herdr ] || thaw_task_processes --closing
 HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"
 # teardown_herdr_journal_orphaned: true when the task's own journal names
 # nothing the session-start sweep could still close - a version 1 attempt whose
@@ -3964,17 +4197,21 @@ if [ "$BACKEND" = herdr ]; then
   fi
 fi
 
+kill_frozen_task_processes || exit 1
 if [ "$KIND" != secondmate ] && teardown_owns_worktree; then
   reap_task_worktree_processes worktree "$WT" "$TASK_TMP"
 elif [ "$KIND" != secondmate ]; then
   reap_task_worktree_processes tasktmp "$TASK_TMP"
 fi
 
-# A worker can write after the first proof, including while its run is concluded
-# or its processes exit. Inspect the stopped copy before dropping its branch or
-# returning it on either backend path.
+# Nothing in the copy ran after the frozen proof, but a process outside it can
+# still have written there. Inspect the stopped copy once more before dropping
+# its branch or returning it on either backend path.
 if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
-  validate_worktree_teardown_safety || exit 1
+  validate_worktree_teardown_safety || {
+    echo "The task's processes were already ended after the final safety check passed; the copy changed since, from outside it, and is left in place unreturned." >&2
+    exit 1
+  }
 fi
 
 if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
