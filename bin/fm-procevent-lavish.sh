@@ -19,7 +19,9 @@
 # read       Print a structured presentation of one already-captured result so a
 #            handler consumes every queued item without grepping the raw file.
 #            It is read-only over the capture: it does not arm, poll, or change
-#            what Lavish delivered. The freeform message (tag=message) is its
+#            what Lavish delivered. Run by the round's owning worker, it also
+#            records that worker's pickup of the round
+#            (bin/fm-board-receipt-lib.sh). The freeform message (tag=message) is its
 #            own labeled field, printed first and distinct from per-element
 #            annotations; it is labeled SESSION-ENDING MESSAGE, and counted as
 #            session_ending_message_count, only when the session ended, and is
@@ -158,6 +160,8 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-procevent-lib.sh
 . "$SCRIPT_DIR/fm-procevent-lib.sh"
+# shellcheck source=bin/fm-board-receipt-lib.sh
+. "$SCRIPT_DIR/fm-board-receipt-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage() { sed -n '2,/^set -u$/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//'; exit 2; }
@@ -958,7 +962,9 @@ cmd_read() {
       print "ANNOTATIONS: (none)\n";
     }
     print "END LAVISH RESULT ($presented of $want)\n";
-  ' "$file" "$lifecycle" "$session_ended"
+  ' "$file" "$lifecycle" "$session_ended" || return
+  # The owning worker's read is its pickup of the round (bin/fm-board-receipt-lib.sh).
+  fm_board_receipt_read "$file"
 }
 
 case "${1-}" in

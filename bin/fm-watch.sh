@@ -3246,7 +3246,7 @@ procevent_surface_after_output() {
 }
 
 procevent_surface_queued() {
-  local key reason captured="" stranded="" unstarted=""
+  local key reason captured="" stranded="" unstarted="" unread="" read_late=""
   PROCEVENT_SURFACED=
   [ -s "$FM_WAKE_QUEUE" ] || return 0
   fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK"
@@ -3258,9 +3258,13 @@ procevent_surface_queued() {
     # of a captured result: nothing is collecting for it. Headlining either as
     # a capture would present it as healthy, which is the shape of defect
     # these wakes exist to surface.
+    # A board answer its worker has not taken is a miss, not a capture, and
+    # its later pickup is that alarm clearing (bin/fm-board-receipt-lib.sh).
     case "$key" in
       procevent:*:stranded:*) stranded="$stranded $key" ;;
       procevent:*:launch-failed:*) unstarted="$unstarted $key" ;;
+      procevent:*:unacknowledged:*) unread="$unread $key" ;;
+      procevent:*:acknowledged:*) read_late="$read_late $key" ;;
       *) captured="$captured $key" ;;
     esac
   done < <(fm_wake_queued_keys_locked check)
@@ -3277,6 +3281,14 @@ procevent_surface_queued() {
   if [ -n "$unstarted" ]; then
     [ "$reason" = "check:" ] || reason="$reason;"
     reason="$reason process-event source failed to start:$unstarted"
+  fi
+  if [ -n "$unread" ]; then
+    [ "$reason" = "check:" ] || reason="$reason;"
+    reason="$reason board answer not picked up by its worker:$unread"
+  fi
+  if [ -n "$read_late" ]; then
+    [ "$reason" = "check:" ] || reason="$reason;"
+    reason="$reason board answer picked up after its alarm:$read_late"
   fi
   # shellcheck disable=SC2034 # Consumed by wake() in the separately linted transition owner.
   FM_WAKE_POST_OUTPUT_ACTION=procevent_surface_after_output

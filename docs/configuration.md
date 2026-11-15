@@ -3121,6 +3121,34 @@ The Lavish version floors and feature probe are owned by `bin/fm-bootstrap.sh`.
 - A task-owned source with an unhandled capture is not relaunched, so delivery failure cannot consume a round and start another poll.
 - That record is the only ownership evidence there is, so while any captured round of it is unacknowledged every retirement path refuses - the runner's own terminal retirement and an explicit `retire` alike - and the refusal names the acknowledgement that releases it.
 
+**Board answer receipts**
+
+Every round delivered to a worker's steering inbox gets one receipt, `state/board-receipts/<source-id>.<seq>.receipt`, so a board answer the worker took and one it never took no longer look the same until its next round.
+The worker has taken the answer when it reads the round with `bin/fm-procevent-lavish.sh read <result>`, the delivered instruction's first step, before it works the round; only a read from the owning worker's own session (its `FM_TASK_INBOX`) counts. A worker that took the round without that read is acknowledged later, when it files that round's inbox record into `handled/` or the round itself is acknowledged by re-arm or conclude; a worker's resolved status line is free text and is not read.
+Each supervision cycle's `reconcile` judges every receipt, so recording the delivery, the pickup, and the alarm costs no firstmate turn.
+A receipt still waiting `FM_PROCEVENT_RECEIPT_ALARM_SECONDS` (default 300, 1..86400, the value in force when the receipt was written) after delivery wakes firstmate once with a main-owned `check` wake headlined `board answer not picked up by its worker`, naming the task, the board, and how long the answer has waited; a pickup after that alarm wakes once more, headlined `board answer picked up after its alarm`, and nothing repeats.
+`bin/fm-board-receipt-lib.sh` owns the lifecycle; this is the record a reader such as a dashboard consumes.
+
+The receipt is private (mode 0600), replaced atomically, and holds one `key=value` per line:
+
+| Field | Meaning |
+| --- | --- |
+| `v` | `fm-board-receipt-v1` |
+| `source` | the board's process-event source id (`bin/fm-procevent-lavish.sh source-id <artifact>`) |
+| `seq` | the captured round's sequence, as in `state/procevent-inbox/<source>.<seq>.result` |
+| `task` | the owning worker's task id |
+| `round` | `feedback`, or `terminal` for a round that ends the board |
+| `board` | the board artifact's resolved path, empty when the registration names none |
+| `inbox_record` | the round's record name in `state/<task>.inbox/`, then in `handled/` once taken |
+| `delivered_at` | epoch seconds when the round reached the inbox |
+| `alarm_after` | the alarm delay, in seconds, this receipt is judged by |
+| `alarmed_at` | epoch seconds of the alarm, present only once it fired |
+| `acknowledged_at`, `acknowledged_by` | epoch seconds of the pickup and `read`, `inbox`, or `round-handled`, present only once taken |
+| `state` | `delivered` (waiting on the worker) or `acknowledged` (the worker has it) |
+
+The worker's read is kept beside the receipt as `<source-id>.<seq>.read` (`read_at=<epoch>`) and is removed with the receipt.
+A receipt is removed when its worker is retired; an acknowledged one is also removed when a later round of the same board is delivered or the board is concluded or retired.
+
 **Conclude a terminal round**
 
 - A terminal result, including `session_ended`, an empty End, or missing, is delivered to the owner with an explicit stop-and-conclude instruction and is never auto-rearmed.
@@ -3561,6 +3589,7 @@ FM_PROCEVENT_OWNER_LEASE_SECONDS=600    # how long a source runner keeps going w
 FM_PROCEVENT_OWNER_CHECK_SECONDS=15     # a runner guard's detection interval, read twice per interval; 1..3600
 FM_PROCEVENT_LAUNCH_FLOOR_SECONDS=1     # minimum interval between launches of one registration generation's source command; 1..3600
 FM_PROCEVENT_LAUNCH_CONFIRM_SECONDS=3   # how long reconcile waits for the runners it started to prove they are running; 1..600, keep well below FM_POLL
+FM_PROCEVENT_RECEIPT_ALARM_SECONDS=300  # how long a board answer delivered to its worker may wait untaken before one alarm wakes firstmate; 1..86400, otherwise 300
 FM_WHEN_OUTPUT_TAIL_BYTES=8192          # bound on the command-output tail inside one condition->action outcome document
 FM_CODEX_WATCH_CHECKPOINT=180   # seconds per foreground watcher checkpoint in Codex primary supervision
 FM_CODEX_WATCH_CHECKPOINT_AWAY=3600  # requested away checkpoint bound on a home that runs the supervision host; longer of this and attended bound, capped at 27000

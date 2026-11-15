@@ -457,7 +457,7 @@ family_for_basename() {
     fm-no-mistakes-required.test.sh|fm-peek-remote.test.sh|\
     fm-pending-reply.test.sh|fm-pi-branch-extension.test.sh|\
     fm-procevent-extension-errors.test.sh|fm-procevent-quota.test.sh|fm-procevent-when.test.sh|fm-procevent.test.sh|\
-    fm-live-gate.test.sh|\
+    fm-board-receipt.test.sh|fm-live-gate.test.sh|\
     fm-project-origin.test.sh|fm-public-followup.test.sh|fm-quota-choose.test.sh|\
     fm-remote-entrypoint.test.sh|fm-remote-secondmate-parent-binding.test.sh|\
     fm-send-remote-delivery.test.sh|fm-spawn-pool-base-freshen.test.sh|\
@@ -760,6 +760,7 @@ tests/fm-bearings-board-lavish-live-e2e.test.sh 51
 tests/fm-bearings-board-render.test.sh 15612
 tests/fm-bearings-board.test.sh 40817
 tests/fm-bearings-snapshot.test.sh 186219
+tests/fm-board-receipt.test.sh 145000
 tests/fm-bootstrap-network-parallel.test.sh 30424
 tests/fm-bootstrap.test.sh 50965
 tests/fm-branch-supervision.test.sh 22979
@@ -1775,7 +1776,11 @@ families_for_changed_path() {
       printf '%s\n' __script__:fm-extension-binding.test.sh
       printf '%s\n' __script__:fm-procevent-extension-errors.test.sh
       ;;
+    bin/fm-board-receipt-lib.sh)
+      printf '%s\n' __script__:fm-board-receipt.test.sh
+      ;;
     bin/fm-procevent.sh|bin/fm-procevent-lib.sh|bin/fm-procevent-extension-capture.pl)
+      printf '%s\n' __script__:fm-board-receipt.test.sh
       printf '%s\n' __script__:fm-extension-binding.test.sh
       printf '%s\n' __script__:fm-procevent-extension-errors.test.sh
       printf '%s\n' __script__:fm-procevent.test.sh
