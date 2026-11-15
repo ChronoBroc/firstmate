@@ -1,0 +1,125 @@
+===== Scenario A: prompt worker reads its round, then draws past the alarm delay =====
+$ fm-procevent-lavish.sh arm boardA.html --for w-prompt
+registered: lavish-e58b2fc3e713eff3 (lavish, task=w-prompt)
+armed: lavish-e58b2fc3e713eff3
+artifact: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-receipt-walk.5KPeMJ/boardA.html
+owner-task: w-prompt
+--- inbox of w-prompt:
+001.msg
+handled
+--- /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-receipt-walk.5KPeMJ/home/state/board-receipts/lavish-e58b2fc3e713eff3.1.receipt
+v=fm-board-receipt-v1
+source=lavish-e58b2fc3e713eff3
+seq=1
+task=w-prompt
+round=feedback
+board=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-receipt-walk.5KPeMJ/boardA.html
+inbox_record=001.msg
+delivered_at=1794711465
+alarm_after=5
+state=delivered
+$ FM_TASK_INBOX=state/w-prompt.inbox fm-procevent-lavish.sh read <result>   # the worker's first step
+CAPTAIN MESSAGE
+| go with option B
+END CAPTAIN MESSAGE
+
+declared_items: 1
+$ fm-procevent.sh reconcile   # one supervision cycle
+--- /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-receipt-walk.5KPeMJ/home/state/board-receipts/lavish-e58b2fc3e713eff3.1.receipt
+v=fm-board-receipt-v1
+source=lavish-e58b2fc3e713eff3
+seq=1
+task=w-prompt
+round=feedback
+board=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-receipt-walk.5KPeMJ/boardA.html
+inbox_record=001.msg
+delivered_at=1794711465
+alarm_after=5
+acknowledged_at=1794711466
+acknowledged_by=read
+state=acknowledged
+(sleeping 7s, past the 5s alarm delay, worker still 'drawing', record not filed)
+$ fm-procevent.sh reconcile   # one supervision cycle
+$ fm-procevent.sh reconcile   # one supervision cycle
+--- wake queue rows for :lavish-e58b2fc3e713eff3::
+  (end)
+
+===== Scenario B: stuck worker; firstmate and another worker read it, owner never does =====
+$ fm-procevent-lavish.sh arm boardB.html --for w-stuck
+registered: lavish-659ebf8c467f7559 (lavish, task=w-stuck)
+armed: lavish-659ebf8c467f7559
+artifact: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-receipt-walk.5KPeMJ/boardB.html
+owner-task: w-stuck
+--- inbox of w-stuck:
+001.msg
+handled
+--- /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-receipt-walk.5KPeMJ/home/state/board-receipts/lavish-659ebf8c467f7559.1.receipt
+v=fm-board-receipt-v1
+source=lavish-659ebf8c467f7559
+seq=1
+task=w-stuck
+round=feedback
+board=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-receipt-walk.5KPeMJ/boardB.html
+inbox_record=001.msg
+delivered_at=1794711481
+alarm_after=5
+state=delivered
+$ fm-procevent-lavish.sh read <result>   # firstmate's own read, no FM_TASK_INBOX
+$ FM_TASK_INBOX=state/w-other.inbox fm-procevent-lavish.sh read <result>   # a different worker
+$ fm-procevent.sh reconcile   # one supervision cycle
+--- /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-receipt-walk.5KPeMJ/home/state/board-receipts/lavish-659ebf8c467f7559.1.receipt
+v=fm-board-receipt-v1
+source=lavish-659ebf8c467f7559
+seq=1
+task=w-stuck
+round=feedback
+board=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-receipt-walk.5KPeMJ/boardB.html
+inbox_record=001.msg
+delivered_at=1794711481
+alarm_after=5
+state=delivered
+--- wake queue rows for :lavish-659ebf8c467f7559::
+  (end)
+(sleeping 7s past alarm delay)
+$ fm-procevent.sh reconcile   # one supervision cycle
+$ fm-procevent.sh reconcile   # one supervision cycle
+$ fm-procevent.sh reconcile   # one supervision cycle
+--- /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-receipt-walk.5KPeMJ/home/state/board-receipts/lavish-659ebf8c467f7559.1.receipt
+v=fm-board-receipt-v1
+source=lavish-659ebf8c467f7559
+seq=1
+task=w-stuck
+round=feedback
+board=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-receipt-walk.5KPeMJ/boardB.html
+inbox_record=001.msg
+delivered_at=1794711481
+alarm_after=5
+alarmed_at=1794711492
+state=delivered
+--- wake queue rows for :lavish-659ebf8c467f7559::
+  check	procevent:lavish-659ebf8c467f7559:unacknowledged:1	check: board answer not picked up: task w-stuck has not taken Lavish board lavish-659ebf8c467f7559 round 1 (/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-receipt-walk.5KPeMJ/boardB.html, a feedback round) 11s after it reached its steering inbox as 001.msg (that record is now: inbox); whoever answered the board sees nothing until the worker takes it. Inspect the worker and recover it if it is stuck (stuck-crewmate-recovery); this alarm clears itself once the worker reads the round, files that record, or acknowledges the round.
+  (end)
+$ worker finally (after nudge) reads its round
+$ fm-procevent.sh reconcile   # one supervision cycle
+$ fm-procevent.sh reconcile   # one supervision cycle
+--- /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-receipt-walk.5KPeMJ/home/state/board-receipts/lavish-659ebf8c467f7559.1.receipt
+v=fm-board-receipt-v1
+source=lavish-659ebf8c467f7559
+seq=1
+task=w-stuck
+round=feedback
+board=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-receipt-walk.5KPeMJ/boardB.html
+inbox_record=001.msg
+delivered_at=1794711481
+alarm_after=5
+alarmed_at=1794711492
+acknowledged_at=1794711498
+acknowledged_by=read
+state=acknowledged
+--- wake queue rows for :lavish-659ebf8c467f7559::
+  check	procevent:lavish-659ebf8c467f7559:unacknowledged:1	check: board answer not picked up: task w-stuck has not taken Lavish board lavish-659ebf8c467f7559 round 1 (/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-receipt-walk.5KPeMJ/boardB.html, a feedback round) 11s after it reached its steering inbox as 001.msg (that record is now: inbox); whoever answered the board sees nothing until the worker takes it. Inspect the worker and recover it if it is stuck (stuck-crewmate-recovery); this alarm clears itself once the worker reads the round, files that record, or acknowledges the round.
+  check	procevent:lavish-659ebf8c467f7559:acknowledged:1	check: board answer picked up after its alarm: task w-stuck has now taken Lavish board lavish-659ebf8c467f7559 round 1 (/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-receipt-walk.5KPeMJ/boardB.html), 19s after delivery; the worker has the answer, so stop any recovery started for that alarm and tell the captain only if they were told it was missed.
+  (end)
+
+===== cleanup =====
+sweep-home exit 1
