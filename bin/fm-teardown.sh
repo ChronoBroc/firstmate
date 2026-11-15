@@ -2704,7 +2704,9 @@ restore_task_foreground_jobs() {
     took=0
     shell_pgid=
     for ((i = 0; i < 10; i++)); do
-      kill -0 "$leader" 2>/dev/null && kill -0 "$shell" 2>/dev/null || break
+      if ! kill -0 "$leader" 2>/dev/null || ! kill -0 "$shell" 2>/dev/null; then
+        break
+      fi
       shell_pgid=$(ps -o pgid= -p "$shell" 2>/dev/null | tr -d ' ')
       if [ -n "$shell_pgid" ] && [ "$(task_terminal_pgid_of "$leader")" = "$shell_pgid" ]; then
         took=1
