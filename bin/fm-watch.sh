@@ -292,6 +292,10 @@ WATCH_HOME_EXISTED=0
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
 # shellcheck source=bin/fm-busy-lib.sh
 . "$SCRIPT_DIR/fm-busy-lib.sh"
+# A captain outcome's recorded wait: a signal whose line ends it is never
+# routine progress (signal_files_actionable).
+# shellcheck source=bin/fm-captain-wait-lib.sh
+. "$SCRIPT_DIR/fm-captain-wait-lib.sh"
 # Steering-inbox loss detection: bin/fm-task-inbox-lib.sh owns the record,
 # doorbell, re-ring ladder, and unavailable-endpoint contracts; this watcher
 # supplies their live endpoint and busy checks plus wake emission
@@ -3459,8 +3463,9 @@ fm_wait_tmp_cleanup() {
 # paths) with exactly the files whose newly classified span carries one of the
 # decision-owned classes defined by the status-span contract, so the caller can
 # route those - and only those - signal rows as main-only
-# (docs/pi-supervision-branch.md). Stale and heartbeat rows retain their existing
-# eligibility rules.
+# (docs/pi-supervision-branch.md), plus any file whose task has a settled
+# captain wait (bin/fm-captain-wait-lib.sh). Stale and heartbeat rows retain
+# their existing eligibility rules.
 signal_files_actionable() {  # <status-file> ...
   local f task record rest endpoint ident needs_decision rc found=1
   FM_SIGNAL_SURFACE_ENDPOINTS=''
@@ -3484,6 +3489,12 @@ signal_files_actionable() {  # <status-file> ...
     fi
     endpoint=${record%%$'\t'*}; rest=${record#*$'\t'}; ident=${rest%%$'\t'*}
     FM_SIGNAL_SURFACE_ENDPOINTS="${FM_SIGNAL_SURFACE_ENDPOINTS}${f}"$'\t'"${endpoint}"$'\t'"${ident}"$'\n'
+    # The line that ends a wait a captain outcome reported is routine progress
+    # to the span, but main was told the task waits, so the signal is
+    # decision-owned whoever handles it (bin/fm-captain-wait-lib.sh).
+    if fm_captain_wait_any_settled "$STATE" "$task"; then
+      needs_decision=1
+    fi
     if [ "$needs_decision" -eq 1 ]; then
       FM_SIGNAL_NEEDS_DECISION_FILES="${FM_SIGNAL_NEEDS_DECISION_FILES} ${f}"
     fi

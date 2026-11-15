@@ -417,6 +417,41 @@ _fm_status_declared_wait_scan() {  # <resolve-verb> <legacy-captain-re>
   return 1
 }
 
+# The status line that ended <wait-line>, a wait recorded when the log was
+# <start-offset> bytes long, read from the bytes appended since. Whatever the
+# wait's verb (paused, captain-held, or needs-decision), only a resolved line
+# for the wait's own phase key ends it - a keyless wait only a keyless resolved
+# line (the keyed activity fold's keyless phase) - and only when that key's
+# transition is allowed (_fm_decision_key_transition_allowed). A resolved line
+# for another key, routine progress, and every other event leave it in force.
+# Returns 0 and prints the line when the wait has ended, 1 while it is still in
+# force, and 2 when the log cannot be read.
+status_wait_ending_line() {  # <status-file> <start-offset> <wait-line>
+  local f=$1 start=$2 wait=$3 size chunk resolve legacy_re wait_key line verb key
+  resolve=${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}
+  legacy_re="^[[:space:]]*(${FM_CAPTAIN_RE:-$FM_CLASSIFY_CAPTAIN_RE_DEFAULT})"
+  wait_key=$(_fm_decision_key "$wait" "$_FM_CLASSIFY_KEYLESS_PHASE") || return 1
+  size=$(_fm_status_file_size "$f") || return 2
+  size=${size//[[:space:]]/}
+  case "$size:$start" in *[!0-9:]*|:*|*:) return 2 ;; esac
+  [ "$start" -lt "$size" ] || return 1
+  chunk=$(_fm_status_read_span "$f" "$start" "$((size - start))") || return 2
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in *[![:space:]]*) ;; *) continue ;; esac
+    _fm_status_line_is_event "$line" "$legacy_re" || continue
+    status_line_verb "$line" verb
+    [ "$verb" = "$resolve" ] || continue
+    key=$(_fm_decision_key "$line" "$_FM_CLASSIFY_KEYLESS_PHASE") || continue
+    [ "$key" = "$wait_key" ] || continue
+    _fm_decision_key_transition_allowed "$key" "$(status_line_note "$line")" || continue
+    printf '%s\n' "$line"
+    return 0
+  done <<EOF
+$chunk
+EOF
+  return 1
+}
+
 # A condition-aware declared wait: a `paused:` line may say WHEN it expects to
 # clear with `until <YYYY-MM-DDTHH:MM[:SS]Z>` anywhere in its text (UTC only, so
 # no local-zone guess is ever recorded). Prints that time as epoch seconds so a
