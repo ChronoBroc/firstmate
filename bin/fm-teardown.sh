@@ -4033,12 +4033,13 @@ fi
 # bin/fm-pr-lib.sh), so a worker's "landed" wording cannot retire a worker
 # whose PR is still open. A PR-delivery ship with no recorded PR is resolved
 # first: the "PR <url>" its newest done: status line names (the rule
-# bin/fm-pr-check.sh scan uses) and the forge's PR for its head branch. A found
+# bin/fm-pr-check.sh scan uses) and, unless that names a non-GitHub PR, GitHub's
+# PR for its head branch. A found
 # PR needs the same proof; two different PRs refuse as ambiguous; no PR at all
 # keeps the landed-work rule below; a lookup that cannot run refuses. MAIN's cleanup
 # keeps the landed-work rule.
 branch_unregistered_pr_merge_proof() {
-  local line token url='' head out branch_url
+  local line token url='' provider='' head out branch_url
   if [ -f "$STATE/$ID.status" ] && [ ! -L "$STATE/$ID.status" ]; then
     line=$(grep '^done' "$STATE/$ID.status" 2>/dev/null | tail -n 1 || true)
     while IFS= read -r token; do
@@ -4050,11 +4051,16 @@ branch_unregistered_pr_merge_proof() {
         return 3
       fi
       url=$FM_PR_URL
+      provider=$FM_PR_PROVIDER
     done <<TOKENS
 $(printf '%s\n' "$line" | grep -oE '(^|[^[:alnum:]_])PR https://[^[:space:]]+' || true)
 TOKENS
   fi
   BRANCH_MERGE_PR=$url
+  if [ -n "$url" ] && [ "$provider" != github ]; then
+    fm_pr_merge_proof "$STATE" "$ID" "$url"
+    return
+  fi
   head=$(fm_meta_get "$META" branch)
   [ -n "$head" ] || head=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || return 2
   [ -n "$head" ] || return 2

@@ -935,6 +935,44 @@ test_branch_teardown_refuses_an_unregistered_ship_whose_done_line_and_branch_dis
   pass "the supervision branch refuses an unregistered ship whose done line and branch name different PRs"
 }
 
+# An unregistered ship whose done line names a GitLab merge request is proven
+# on GitLab itself; GitHub is never asked for the branch's pull request.
+setup_unregistered_gitlab_ship() {  # <case-name> <glab-state: merged|opened>
+  local case_dir
+  case_dir=$(setup_pushed_unregistered_ship "$1" error OPEN \
+    'done [at=1794889112]: PR https://gitlab.com/example/repo/-/merge_requests/12 checks green')
+  cat > "$case_dir/fakebin/glab" <<SH
+#!/usr/bin/env bash
+case "\$* " in
+  "mr view 12 -R https://gitlab.com/example/repo -F json ") printf '%s\n' '{"state":"$2"}' ; exit 0 ;;
+esac
+echo "error: merge request not found" >&2
+exit 1
+SH
+  chmod +x "$case_dir/fakebin/glab"
+  printf '%s\n' "$case_dir"
+}
+
+test_branch_teardown_cleans_up_an_unregistered_ship_whose_gitlab_mr_merged() {
+  local case_dir rc
+  case_dir=$(setup_unregistered_gitlab_ship branch-unregistered-gitlab-merged merged)
+  rc=$(run_branch_teardown_case "$case_dir")
+  expect_code 0 "$rc" "branch-unregistered-gitlab-merged: a merged GitLab MR did not prove the ship merged: $(cat "$case_dir/stderr")"
+  assert_absent "$case_dir/state/task-x1.meta" "branch-unregistered-gitlab-merged: the task record survived cleanup"
+  pass "the supervision branch proves an unregistered ship's GitLab MR on GitLab, without asking GitHub"
+}
+
+test_branch_teardown_refuses_an_unregistered_ship_whose_gitlab_mr_is_open() {
+  local case_dir rc
+  case_dir=$(setup_unregistered_gitlab_ship branch-unregistered-gitlab-open opened)
+  rc=$(run_branch_teardown_case "$case_dir")
+  [ "$rc" -ne 0 ] || fail "branch-unregistered-gitlab-open: the supervision branch cleaned up a ship whose GitLab MR is open"
+  assert_grep 'merge_requests/12' "$case_dir/stderr" "branch-unregistered-gitlab-open: refusal did not name the open MR"
+  assert_grep 'opened' "$case_dir/stderr" "branch-unregistered-gitlab-open: refusal did not state GitLab's open state"
+  assert_present "$case_dir/state/task-x1.meta" "branch-unregistered-gitlab-open: the task record was removed"
+  pass "the supervision branch refuses an unregistered ship whose GitLab MR is open"
+}
+
 test_branch_teardown_cleans_up_an_unregistered_ship_whose_branch_pr_merged() {
   local case_dir rc
   case_dir=$(setup_pushed_unregistered_ship branch-unregistered-merged "Swipe to close" MERGED \
@@ -6796,6 +6834,8 @@ test_branch_teardown_refuses_an_unregistered_ship_whose_branch_pr_is_open
 test_branch_teardown_refuses_an_unregistered_ship_whose_done_line_names_an_open_pr
 test_branch_teardown_takes_an_unregistered_ships_pr_only_from_its_pr_token
 test_branch_teardown_refuses_an_unregistered_ship_whose_done_line_and_branch_disagree
+test_branch_teardown_cleans_up_an_unregistered_ship_whose_gitlab_mr_merged
+test_branch_teardown_refuses_an_unregistered_ship_whose_gitlab_mr_is_open
 test_branch_teardown_cleans_up_an_unregistered_ship_whose_branch_pr_merged
 test_branch_teardown_of_an_unregistered_ship_with_no_pr_at_the_forge_is_unchanged
 test_branch_teardown_refuses_an_unregistered_ship_when_the_forge_cannot_be_asked
