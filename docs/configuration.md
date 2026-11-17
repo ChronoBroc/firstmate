@@ -1543,6 +1543,8 @@ The environment prefix, session settings, model, effort flags, and the task-chan
 Every Firstmate-built Claude command line, in both modes, also passes `--add-dir` for exactly this task's Firstmate channel directories, resolved to real paths: a secondmate gets the parent home's `state/<id>.inbox` it reads its steers from; a ship or scout worker gets this home's `state/operational-inbox` (its launch record), `state/<id>.inbox` (its steers), `data/<id>` (its brief and report), and the code root's `.agents/skills`.
 The grant exists because Claude Code path-checks the Read/Glob/Grep file tools against cwd plus `--add-dir`, and since 2.1.257 the first outside read in `auto` mode parks the pane on a one-time interactive question, while a "Block" answer there writes `permissions.blockReadsOutsideWorkingDirectories` into user settings and then refuses the same reads under bypass too.
 It never covers the whole `state/` or anything wider.
+Since Claude Code 2.1.326 each granted directory that Claude does not already trust stops the launch on its own trust question, so every spawn and relaunch that passes them also records trust for exactly those directories first and refuses the launch when it cannot; `bin/fm-claude-trust.sh` owns that registration and its scope test.
+A raw launch command, which carries no Firstmate-built grant, and a T3 Code launch pass no `--add-dir` and register none.
 
 Any other value or an unreadable file refuses every spawn from that home, whichever harness it would launch.
 This happens before any endpoint, worktree, or task record exists.

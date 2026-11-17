@@ -1530,6 +1530,13 @@ test_spawn_leases_slot_creates_thread_and_starts_launch_turn() {
     FM_PROJECTS_OVERRIDE="$CASE_DIR/unused-projects" FM_SPAWN_NO_GUARD=1 \
     "$ROOT/bin/fm-spawn.sh" "$id" "$proj" claude --mode no-mistakes --yolo off --model claude-sonnet-5 --effort high --backend t3code 2>&1 )
   expect_code 0 $? "fm-spawn.sh --backend t3code should succeed against the fake T3 server"$'\n'"$out"
+  # The provider turn carries no --add-dir, so no added-directory trust is recorded.
+  local trusted
+  trusted=$(node -e 'const fs=require("node:fs");const f=process.argv[1];const j=fs.existsSync(f)?JSON.parse(fs.readFileSync(f,"utf8")):{};for(const [k,v] of Object.entries(j.projects||{}))if(v&&v.hasTrustDialogAccepted===true)console.log(k);' "$SPAWN_HOME/.claude.json")
+  case "$trusted" in
+    *"$(cd "$state" && pwd -P)/"* | *"$(cd "$data" && pwd -P)/"* | *"/.agents/skills"*)
+      fail "a T3 spawn passes no --add-dir but recorded added-directory trust: $trusted" ;;
+  esac
   assert_contains "$out" "spawned $id harness=claude kind=ship mode=no-mistakes yolo=off window=fm-$id worktree=$wt" \
     "spawn output missing the T3 window alias and worktree summary"
   assert_grep "backend=t3code" "$state/$id.meta" "meta missing backend=t3code"

@@ -11,13 +11,17 @@
 # Usage: fm-claude-trust.sh <worktree> <project>
 #        fm-claude-trust.sh --secondmate-home <home> <id>
 #        fm-claude-trust.sh --lab-home <home>
+#        fm-claude-trust.sh --add-dirs <state-dir> <data-dir> <code-root> <id> <dir>...
 #   <worktree>  the isolated task worktree this spawn launches into
 #   <project>   the primary checkout that worktree belongs to
 #   <home>      the seeded secondmate home this spawn launches into
 #   <id>        the secondmate id that home must already be marked for
 #   --lab-home  the disposable lab home bin/fm-live-lab.sh launches a lab
 #               primary in
-# Prints one line naming what it registered; refuses loudly on anything else.
+#   --add-dirs  the task-channel directories a claude launch passes as
+#               --add-dir, under the launching home's <state-dir> and
+#               <data-dir> and the code root, for task or secondmate <id>
+# Prints one line per path it registered; refuses loudly on anything else.
 #
 # WHY THIS EXISTS. Claude Code gates a folder it has never seen behind an
 # interactive workspace-trust dialog, and --dangerously-skip-permissions does
@@ -148,6 +152,28 @@
 # argument to gate external-imports consent against, so the two import flags
 # are never written there.
 #
+# ADD-DIRS MODE. Since Claude Code 2.1.326 every --add-dir passed at launch is
+# gated by its own interactive "Adding a new directory ... is this a directory
+# you trust?" dialog, one per directory in turn, with the cursor on "No, exit"
+# and an answer that lasts only for that session, so every spawn and relaunch
+# would meet it. It is skipped for a directory Claude Code's persisted trust
+# check already covers: a projects entry with hasTrustDialogAccepted on the
+# directory's canonical git root, or on the directory itself or an ancestor up
+# to its git root (or up to / outside any repository). A home that is itself
+# inside a trusted checkout is covered that way; a home outside any repository,
+# such as one under a separate home root, is not. Verified 2026-11-16 against
+# 2.1.326 by reading the installed binary and launching it in an isolated lab:
+# an entry on each exact directory clears that directory's dialog and 2.1.325
+# shows none. So this registers exactly the passed directories, each as its
+# own entry, and never a parent, a whole home, or the whole state directory.
+# The scope test is the shape bin/fm-spawn.sh's grant gives these directories:
+# each resolved path must be exactly <state-dir>/operational-inbox,
+# <state-dir>/<id>.inbox, <data-dir>/<id>, or <code-root>/.agents/skills, a
+# directory this user owns, where <code-root> holds AGENTS.md and bin/ and
+# <id> is a plain task id. A path that resolves anywhere else, through a
+# symlink included, is refused, and so is the whole registration with it. It is
+# trust-only, like the home modes.
+#
 # LAB-HOME MODE. A disposable lab primary (bin/fm-live-lab.sh) launches in a lab
 # home that is neither a task worktree nor a seeded secondmate home.
 # The evidence is structural: the home must carry bin/fm-lab-home.sh's marker
@@ -164,7 +190,8 @@
 # file this uid owns; every unrelated key and project entry is preserved, and
 # both entries land in one atomic replacement. In secondmate-home and lab-home
 # mode: the single projects entry for the registered home path, same store,
-# same atomic replacement. Concurrent registrations against one store are
+# same atomic replacement. In add-dirs mode: one entry per passed directory,
+# all in that same single replacement. Concurrent registrations against one store are
 # serialized by a lock beside it (see the block above the read-modify-write),
 # so none loses another's entries; a Claude Code session's own writes are only
 # detected, not excluded. fm-spawn.sh forwards CLAUDE_CONFIG_DIR onto the
@@ -192,6 +219,7 @@ usage() {
   echo "usage: fm-claude-trust.sh <worktree> <project>" >&2
   echo "       fm-claude-trust.sh --secondmate-home <home> <id>" >&2
   echo "       fm-claude-trust.sh --lab-home <home>" >&2
+  echo "       fm-claude-trust.sh --add-dirs <state-dir> <data-dir> <code-root> <id> <dir>..." >&2
   exit 2
 }
 
@@ -214,6 +242,19 @@ case "${1:-}" in
     SUB_ID=
     PROJ_ARG=
     SCOPE_NOUN="lab home"
+    ;;
+  --add-dirs)
+    [ "$#" -ge 6 ] || usage
+    MODE=add-dirs
+    ADD_STATE_ARG=$2
+    ADD_DATA_ARG=$3
+    ADD_ROOT_ARG=$4
+    SUB_ID=$5
+    shift 5
+    ADD_DIR_ARGS=("$@")
+    TARGET_ARG=
+    PROJ_ARG=
+    SCOPE_NOUN="task-channel directory"
     ;;
   '' | -h | --help)
     usage
@@ -248,8 +289,10 @@ common_dir_of() {
   (cd -P -- "$dir" && real_dir "$common")
 }
 
-TARGET_REAL=$(real_dir "$TARGET_ARG") || true
-[ -n "$TARGET_REAL" ] || refuse "$SCOPE_NOUN '$TARGET_ARG' is not an accessible directory"
+if [ "$MODE" != add-dirs ]; then
+  TARGET_REAL=$(real_dir "$TARGET_ARG") || true
+  [ -n "$TARGET_REAL" ] || refuse "$SCOPE_NOUN '$TARGET_ARG' is not an accessible directory"
+fi
 if [ "$MODE" = worktree ]; then
   PROJ_REAL=$(real_dir "$PROJ_ARG") || true
   [ -n "$PROJ_REAL" ] || refuse "project '$PROJ_ARG' is not an accessible directory"
@@ -279,12 +322,14 @@ fi
 # The filesystem root, a home directory, and the config directory are never
 # something this registers, in either mode. Checked explicitly so the refusal
 # names the real reason instead of the scope verdict behind it.
-[ "$TARGET_REAL" != / ] || refuse "'/' is the filesystem root, not a $SCOPE_NOUN"
-[ "$TARGET_REAL" != "$CONFIG_DIR_REAL" ] || refuse "'$TARGET_REAL' is the Claude config directory, not a $SCOPE_NOUN"
-if [ -n "${HOME:-}" ]; then
-  HOME_REAL=$(real_dir "$HOME") || true
-  [ "$TARGET_REAL" != "${HOME_REAL:-}" ] || refuse "'$TARGET_REAL' is the home directory, not a $SCOPE_NOUN"
-fi
+HOME_REAL=
+[ -z "${HOME:-}" ] || HOME_REAL=$(real_dir "$HOME") || true
+refuse_reserved() {
+  [ "$1" != / ] || refuse "'/' is the filesystem root, not a $SCOPE_NOUN"
+  [ "$1" != "$CONFIG_DIR_REAL" ] || refuse "'$1' is the Claude config directory, not a $SCOPE_NOUN"
+  [ -z "$HOME_REAL" ] || [ "$1" != "$HOME_REAL" ] || refuse "'$1' is the home directory, not a $SCOPE_NOUN"
+}
+[ "$MODE" = add-dirs ] || refuse_reserved "$TARGET_REAL"
 
 if [ "$MODE" = worktree ]; then
   WT_TOP=$(git -C "$TARGET_REAL" rev-parse --show-toplevel 2>/dev/null) || true
@@ -332,6 +377,30 @@ if [ "$MODE" = worktree ]; then
     [ -n "$CANON_GIT_DIR" ] && [ "$CANON_GIT_DIR" = "$PROJ_COMMON" ] \
       || refuse "project '$PROJ_REAL' is a linked worktree whose primary checkout could not be resolved"
   fi
+elif [ "$MODE" = add-dirs ]; then
+  case "$SUB_ID" in
+    '' | . | .. | */* | *[!A-Za-z0-9._-]*) refuse "'$SUB_ID' is not a plain task id" ;;
+  esac
+  ADD_STATE=$(real_dir "$ADD_STATE_ARG") || true
+  [ -n "$ADD_STATE" ] || refuse "state directory '$ADD_STATE_ARG' is not an accessible directory"
+  ADD_DATA=$(real_dir "$ADD_DATA_ARG") || true
+  [ -n "$ADD_DATA" ] || refuse "data directory '$ADD_DATA_ARG' is not an accessible directory"
+  ADD_ROOT=$(real_dir "$ADD_ROOT_ARG") || true
+  [ -n "$ADD_ROOT" ] || refuse "code root '$ADD_ROOT_ARG' is not an accessible directory"
+  [ -f "$ADD_ROOT/AGENTS.md" ] && [ -d "$ADD_ROOT/bin" ] \
+    || refuse "'$ADD_ROOT' has no AGENTS.md and bin/, so it is not a firstmate code root"
+  ADD_TARGETS=()
+  for add_arg in "${ADD_DIR_ARGS[@]}"; do
+    add_real=$(real_dir "$add_arg") || true
+    [ -n "$add_real" ] || refuse "$SCOPE_NOUN '$add_arg' is not an accessible directory"
+    refuse_reserved "$add_real"
+    case "$add_real" in
+      "$ADD_STATE/operational-inbox" | "$ADD_STATE/$SUB_ID.inbox" | "$ADD_DATA/$SUB_ID" | "$ADD_ROOT/.agents/skills") ;;
+      *) refuse "'$add_real' is not one of task '$SUB_ID''s channel directories under '$ADD_STATE', '$ADD_DATA' or '$ADD_ROOT'" ;;
+    esac
+    [ -O "$add_real" ] || refuse "'$add_real' is not owned by this user"
+    ADD_TARGETS+=("$add_real")
+  done
 elif [ "$MODE" = lab-home ]; then
   LAB_MARKER="$TARGET_REAL/$FM_GATE_LAB_MARKER"
   [ ! -L "$LAB_MARKER" ] || refuse "'$LAB_MARKER' is a symlink; a lab home carries the marker as a regular file"
@@ -463,7 +532,8 @@ fm_lock_acquire_wait_max "$LOCK" "$LOCK_WAIT" \
 # entry in the same read-modify-write attempt, so a single rename either
 # records all of it or none of it - there is no state where the worktree entry
 # is fresh and the project entry stale, or the other way round. In
-# secondmate-home mode only the single home entry is written.
+# secondmate-home and lab-home mode only the single home entry is written, and
+# in add-dirs mode every passed directory's entry lands in that one rename.
 #
 # The two external-imports flags (worktree mode only) are gated separately
 # from the trust flag, because they are a CONSENT grant, not a pre-approval
@@ -486,15 +556,18 @@ fm_lock_acquire_wait_max "$LOCK" "$LOCK_WAIT" \
 TRUST_FLAG='hasTrustDialogAccepted'
 IMPORT_FLAGS='["hasClaudeMdExternalIncludesApproved","hasClaudeMdExternalIncludesWarningShown"]'
 if [ "$MODE" = worktree ]; then
-  WRITE_ARGS=("$STORE" "$MODE" "$TARGET_REAL" "$PROJ_CANON" "$TRUST_FLAG" "$IMPORT_FLAGS")
+  WRITE_ARGS=("$STORE" "$MODE" "$PROJ_CANON" "$TRUST_FLAG" "$IMPORT_FLAGS" "$LOCK" "$TARGET_REAL")
+elif [ "$MODE" = add-dirs ]; then
+  WRITE_ARGS=("$STORE" "$MODE" "" "$TRUST_FLAG" "$IMPORT_FLAGS" "$LOCK" "${ADD_TARGETS[@]}")
 else
-  WRITE_ARGS=("$STORE" "$MODE" "$TARGET_REAL" "" "$TRUST_FLAG" "$IMPORT_FLAGS")
+  WRITE_ARGS=("$STORE" "$MODE" "" "$TRUST_FLAG" "$IMPORT_FLAGS" "$LOCK" "$TARGET_REAL")
 fi
-exec node - "${WRITE_ARGS[@]}" "$LOCK" <<'NODE'
+exec node - "${WRITE_ARGS[@]}" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const [store, mode, target, project, trustFlag, importFlagsJson, lock] = process.argv.slice(2);
+const [store, mode, project, trustFlag, importFlagsJson, lock, ...targets] = process.argv.slice(2);
+const target = targets.join("', '");
 const importFlags = JSON.parse(importFlagsJson);
 const releaseLock = () => {
   try {
@@ -584,8 +657,8 @@ const attempt = () => {
     setFlags(projects, project, projectFlags);
     keys = [[target, targetFlags], [project, projectFlags]];
   } else {
-    setFlags(projects, target, [trustFlag]);
-    keys = [[target, [trustFlag]]];
+    for (const key of targets) setFlags(projects, key, [trustFlag]);
+    keys = targets.map((key) => [key, [trustFlag]]);
   }
   // Unpredictable name plus an exclusive create: the config directory may be
   // writable by another local account, and a predictable path could be
@@ -615,7 +688,7 @@ try {
   for (let i = 0; i < 3; i += 1) {
     const result = attempt();
     if (result === "recorded") {
-      finish(0, mode === "worktree" ? [`trusted: ${target}`, `trusted (project root): ${project}`] : [`trusted: ${target}`]);
+      finish(0, mode === "worktree" ? [`trusted: ${target}`, `trusted (project root): ${project}`] : targets.map((key) => `trusted: ${key}`));
     }
     if (result === "moved" && i >= 1) {
       finish(1, [`error: ${store} was modified while trust was being recorded; refusing to overwrite it`, refusal]);
