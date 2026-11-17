@@ -264,11 +264,18 @@ test_claude_spawn_refuses_when_the_brief_record_cannot_publish() {
   id="brief-doorbell-refused-z3"
   rec=$(make_spawn_case brief-doorbell-refused claude "$id")
   read_case_record "$rec"
-  mkdir -p "$HOME_DIR/state"
-  : > "$HOME_DIR/state/operational-inbox"
+  if [ "$(id -u)" = 0 ]; then
+    pass "a claude spawn whose launch-brief record cannot publish stops with a clear error and sends no launch (skipped as root)"
+    return 0
+  fi
+  # An unwritable directory rather than a file: the --add-dir grant and its
+  # trust registration need the directory to exist, so only publication fails.
+  mkdir -p "$HOME_DIR/state/operational-inbox"
+  chmod 0555 "$HOME_DIR/state/operational-inbox"
 
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" 2>&1)
   status=$?
+  chmod 0755 "$HOME_DIR/state/operational-inbox"
   [ "$status" -ne 0 ] || fail "a claude spawn whose launch-brief record cannot publish succeeded"$'\n'"$out"
   assert_contains "$out" "could not publish the launch brief for $id" \
     "the refused spawn did not name the record publication failure"
