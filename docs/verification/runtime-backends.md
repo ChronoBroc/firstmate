@@ -608,6 +608,21 @@ The treatment arm ran the same spawn and launch with `bin/fm-claude-trust.sh --a
 No dialog appeared and the brief doorbell was submitted; the login notice is the throwaway config's, which holds no account.
 `tests/fm-claude-trust.test.sh` pins that a claude spawn trusts exactly its `--add-dir` directories and nothing wider, and that the mode refuses any other path.
 
+### Added directories under concurrent Claude Code saves
+
+Verified 2026-11-16 on Claude Code 2.1.326, against isolated `CLAUDE_CONFIG_DIR` stores with `skipDangerousModePermissionPrompt` set, lab homes outside any git repository, and a private tmux server.
+A running Claude Code session saves its config under a `<store>.lock` directory it makes with `mkdir`, re-reads the store under it, and renames its own copy over the file, holding the lock for up to about 200 ms in a first-run `claude -p hi`.
+A registration renamed over the store while such a save held that lock passed its own readback and was then gone once the save renamed.
+The arms forced that overlap: a Node preload in the spawn started a real first-run `claude -p hi` against the store and released the `--add-dirs` registration only once that save held its lock, then the captured launch ran in a real pane.
+
+| Code | Spawns | Entries gone after spawn | Pane |
+| --- | --- | --- | --- |
+| dc2155d9 (before) | 6 | all four, in 4 | 4 stopped at "Adding a new directory: <lab>/home/state/operational-inbox" |
+| this fix | 10 | none | 10 reached the composer with the brief doorbell |
+
+The same overlap driven against `bin/fm-claude-trust.sh --add-dirs` alone lost all four entries after a successful exit in 2 of 8 runs before the fix and none in 16 after it.
+`tests/fm-claude-trust.test.sh` pins the lock with a simulated save that follows the same protocol, the stale-lock takeover, and a spawn whose entries are dropped between registration and launch.
+
 `bin/fm-spawn.sh` therefore pre-registers the directory every claude launch starts in, and each directory it passes as `--add-dir`, through `bin/fm-claude-trust.sh` before launch, and `tests/fm-claude-trust.test.sh` pins both halves of the scope contract for both shapes: a fresh worktree and a seeded secondmate home are trusted, and an out-of-scope path is refused.
 That automated spawn case runs against a fake claude, so it asserts the store entry and the launch command and nothing more; the live arms above are what establish that the entry actually suppresses the dialog.
 The composer-classification record below observes the same gate from the other side, where an untrusted worktree left Claude, Grok, and Muse unverified because the guard reads a first-launch trust dialog as an unreadable composer.
