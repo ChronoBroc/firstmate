@@ -9,22 +9,22 @@
 # an outcome that turns that into "is merged" or "is on main" tells the captain
 # a merge happened that did not.
 #
-# A claim is affirmative merge wording in the summary: the word "merged", or
-# "is/now/landed/already on|in main|master". The word is not a claim when one
-# of the three words before it in its own clause negates or defers it ("not",
-# "n't", "once", "to be", "awaiting", "ready", ...), or when it describes
-# merging main into a branch ("merged main into", "main <sha> merged",
-# "auto-merged <file>"), or reads "un-merged". Any other hyphenated form
-# ("squash-merged", "rebase-merged") is a claim. A bare "landed" is not a
-# claim: "the worker landed main into the PR; it remains open" is the truthful
-# report of that state.
-# A clause ends at sentence punctuation, a semicolon, or a line break. Each
-# claim names the PR closest before it in its clause (a PR URL, or a bare
-# "PR 123" / "#123"), else the first one after it in its clause, else the PR URL
-# closest before it in the summary, else the first one after it, else the
-# task's recorded pr=. A bare number is the recorded pr= when that ends in it,
-# else that number in the GitHub repository the task's project= clone has as
-# origin. A claim whose PR cannot be resolved is refused as unconfirmed.
+# The summary is read clause by clause: a clause ends at sentence punctuation,
+# a semicolon, a line break, or "but"/"while". A clause is a merge claim when
+# it holds affirmative merge wording: "merged" in any hyphenated form
+# ("squash-merged", "auto-merged"), or "is/now/landed/already on|in
+# main|master". Such wording is not a claim when one of the three words before
+# it in the clause negates or defers it ("not", "n't", "once", "to be",
+# "awaiting", "ready", ..., or "un-merged"), when it describes merging main
+# into a branch ("merged main into", "main <sha> merged"), or when "merged" is
+# directly followed by a file path and the clause names no PR ("auto-merged
+# src/a.ts"). A bare "landed" is not a claim: "the worker landed main into the
+# PR; it remains open" is the truthful report of that state.
+# Every PR a claim clause names (a PR URL, or a bare "PR 123" / "#123") must be
+# proven merged; a claim clause naming none stands for the task's recorded pr=.
+# A bare number is the recorded pr= when that ends in it, else that number in
+# the GitHub repository the task's project= clone has as origin. A claim whose
+# PR cannot be resolved is refused as unconfirmed.
 # Proof is fm_pr_merge_proof (bin/fm-pr-lib.sh): this home's merge record or the
 # forge's live state, read within FM_MERGE_CLAIM_TIMEOUT seconds (default 10).
 #
@@ -40,61 +40,60 @@ _FM_MERGE_CLAIM_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC2034
 FM_MERGE_CLAIM_REFUSAL=
 
-# _fm_merge_claim_urls: read a summary on stdin and print, once per merge
-# claim, the PR URL that claim names ("" when the summary names none).
+# _fm_merge_claim_urls: read a summary on stdin and print, once per PR a merge
+# claim clause names, that PR's URL or "#<number>" ("" for a claim clause that
+# names none).
 _fm_merge_claim_urls() {
   perl -e '
     use strict; use warnings;
     local $/; my $s = <STDIN>; $s = "" unless defined $s;
     my $l = lc $s;
-    my (@urls, @spans, @ids);
+    my (@spans, @ids);
     while ($s =~ m{https://[^\s<>()\[\]"\x27`,;]+}g) {
       my ($u, $p) = ($&, $-[0]);
       push @spans, [$p, $+[0]];
       $u =~ s/[.:!?]+$//;
-      push @urls, [$p, $u] if $u =~ m{/(?:pull|pulls|merge_requests)/[0-9]+$|/\+/[0-9]+$};
+      push @ids, [$p, $u] if $u =~ m{/(?:pull|pulls|merge_requests)/[0-9]+$|/\+/[0-9]+$};
     }
-    push @ids, @urls;
     while ($l =~ /\b(?:pr|pull request)\s*#?\s*([0-9]+)\b|(?<![\w\/])#([0-9]+)\b/g) {
       my ($p, $n) = ($-[0], defined $1 ? $1 : $2);
       next if grep { $p >= $_->[0] && $p < $_->[1] } @spans;
       push @ids, [$p, "#$n"];
     }
     @ids = sort { $a->[0] <=> $b->[0] } @ids;
-    my @cut = (0);
-    while ($l =~ /[.!?]+(?=\s|$)|[;\n]/g) { push @cut, $+[0]; }
-    my $clause = sub { my $p = shift; my ($cs, $ce) = (0, length $l); for my $c (@cut) { $cs = $c if $c <= $p; } for my $c (@cut) { if ($c > $p) { $ce = $c; last; } } return ($cs, $ce); };
+    my @cut = (0, length $l);
+    while ($l =~ /[.!?]+(?=\s|$)|[;\n]|\b(?:but|while)\b/g) { push @cut, $+[0]; }
+    my %seen; @cut = sort { $a <=> $b } grep { !$seen{$_}++ } @cut;
     my $defer = qr/^(?:not|never|no|yet|until|unless|before|once|when|whenever|after|if|whether|await|awaits|awaiting|wait|waits|waiting|ready|pending|can|cannot|will|would|should|could|may|might|must|need|needs|ask|asks|asking|asked|to|be|for|get|gets)$/;
-    my @claims;
-    while ($l =~ /\bmerged\b/g) {
-      my $p = $-[0];
-      my $before = substr($l, 0, $p);
-      my $after = substr($l, $+[0]);
-      next if $before =~ /\b(?:auto|un)-$/;
-      next if $after =~ /^\s+(?:main|master|origin\/|upstream|the default branch|the latest main|in main|in the latest)\b/;
-      my ($cs) = $clause->($p);
+    my $negated = sub {
+      my ($cs, $p) = @_;
       my @w = (substr($l, $cs, $p - $cs) =~ /([a-z0-9\x27\/]+)/g);
       @w = @w[-3 .. -1] if @w > 3;
-      next if grep { $_ =~ $defer || $_ =~ /n\x27t$/ } @w;
-      next if @w && ($w[-1] =~ /^[0-9a-f]{7,40}$/ || $w[-1] eq "main" || $w[-1] eq "master");
-      push @claims, $p;
-    }
-    while ($l =~ /\b(?:is|are|now|landed|lands|went|already|sits)\s+(?:now\s+)?(?:on|in)\s+(?:main|master)\b/g) {
-      my $p = $-[0];
-      my ($cs) = $clause->($p);
-      my @w = (substr($l, $cs, $p - $cs) =~ /([a-z0-9\x27\/]+)/g);
-      @w = @w[-3 .. -1] if @w > 3;
-      next if grep { $_ =~ $defer || $_ =~ /n\x27t$/ } @w;
-      push @claims, $p;
-    }
-    for my $c (@claims) {
-      my ($cs, $ce) = $clause->($c);
-      my $u = "";
-      for my $e (@ids) { $u = $e->[1] if $e->[0] >= $cs && $e->[0] < $c; }
-      if ($u eq "") { for my $e (@ids) { if ($e->[0] > $c && $e->[0] < $ce) { $u = $e->[1]; last; } } }
-      if ($u eq "") { for my $e (@urls) { $u = $e->[1] if $e->[0] < $c; } }
-      if ($u eq "") { for my $e (@urls) { if ($e->[0] > $c) { $u = $e->[1]; last; } } }
-      print "$u\n";
+      return scalar grep { $_ =~ $defer || $_ =~ /n\x27t$/ } @w;
+    };
+    for my $i (0 .. $#cut - 1) {
+      my ($cs, $ce) = ($cut[$i], $cut[$i + 1]);
+      my $c = substr($l, $cs, $ce - $cs);
+      my @in = map { $_->[1] } grep { $_->[0] >= $cs && $_->[0] < $ce } @ids;
+      my $claim = 0;
+      while ($c =~ /\b(?:([a-z]+)-)?merged\b/g) {
+        my ($p, $prefix, $after) = ($cs + $-[0], defined $1 ? $1 : "", substr($c, $+[0]));
+        next if $prefix eq "un";
+        next if $negated->($cs, $p);
+        next if $after =~ /^\s+(?:main|master|origin\/|upstream|the default branch|the latest main|the base)\b/;
+        my @w = (substr($l, $cs, $p - $cs) =~ /([a-z0-9\x27\/]+)/g);
+        next if @w && ($w[-1] =~ /^[0-9a-f]{7,40}$/ || $w[-1] eq "main" || $w[-1] eq "master");
+        if (!@in && $after =~ /^\s+(\S+)/) {
+          my $t = $1; $t =~ s/[.,:!?]+$//;
+          next if $t !~ /^https?:/ && ($t =~ m{/} || $t =~ /\.[a-z0-9]{1,6}$/);
+        }
+        $claim = 1;
+      }
+      while ($c =~ /\b(?:is|are|now|landed|lands|went|already|sits)\s+(?:now\s+)?(?:on|in)\s+(?:main|master)\b/g) {
+        $claim = 1 unless $negated->($cs, $cs + $-[0]);
+      }
+      next unless $claim;
+      print "$_\n" for (@in ? @in : (""));
     }
   '
 }

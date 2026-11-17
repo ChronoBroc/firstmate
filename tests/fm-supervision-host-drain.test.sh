@@ -106,6 +106,18 @@ SH
   assert_contains "$out" "the forge reports it OPEN" "a squash-merged claim must be checked against the forge"
   out=$(report "Rebase-merged $pr."); rc=$?
   expect_code 3 "$rc" "a rebase-merged claim for an open PR must be refused"
+  out=$(report "PR 3228 was auto-merged."); rc=$?
+  expect_code 3 "$rc" "an auto-merged claim about a PR must be refused while the PR is open"
+  out=$(report "PR 3228 is merged in main."); rc=$?
+  expect_code 3 "$rc" "a merged-in-main claim for an open PR must be refused"
+  out=$(FAKE_MERGED_PR=https://github.com/example/repo/pull/3189 \
+    report "Merged https://github.com/example/repo/pull/3189 and $pr."); rc=$?
+  expect_code 3 "$rc" "a merged claim naming two PRs must check the open one too"
+  assert_contains "$out" "$pr" "the refusal must name the open PR of a joint merged claim"
+  out=$(FAKE_MERGED_PR=https://github.com/example/repo/pull/3189 \
+    report "https://github.com/example/repo/pull/3189 and $pr are merged."); rc=$?
+  expect_code 3 "$rc" "a joint merged claim must check every PR it names"
+  assert_contains "$out" "$pr" "the refusal must name the open PR of a joint merged claim"
   out=$(report "No conflicts. Merged $pr."); rc=$?
   expect_code 3 "$rc" "a negation in an earlier sentence must not hide a merged claim for an open PR"
   out=$(report "No conflicts; $pr is on main."); rc=$?
