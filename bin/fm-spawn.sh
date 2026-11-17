@@ -6327,7 +6327,8 @@ spawn_assert_agent_worktree
 # so the refusal names the endpoint the same way they do and leaves nothing else
 # behind. The directories the launch will pass as --add-dir are registered here
 # too, through the same helper's --add-dirs mode, because Claude asks about each
-# one it does not already trust before the brief is read.
+# one it does not already trust before the brief is read; a T3 Code launch passes
+# none, so it registers none.
 # agy gates a fresh worktree or secondmate home behind its own folder-trust
 # dialog and honours a trustedWorkspaces entry written ahead of launch
 # (bin/fm-agy-trust.sh), so the same pre-registration removes the dialog for it.
@@ -6351,7 +6352,10 @@ claude*)
     echo "error: could not resolve the task-channel directories for $ID's claude --add-dir grant; $(spawn_endpoint_hint)" >&2
     exit 1
   fi
-  if ! "$FM_ROOT/bin/fm-claude-trust.sh" --add-dirs "$STATE" "$DATA" "$FM_ROOT" "$ID" "${CLAUDE_ADD_DIR_LIST[@]}" >/dev/null; then
+  # T3 Code starts its provider turn without this launch command, so it passes
+  # no --add-dir and nothing is registered for one.
+  if [ "$BACKEND" != t3code ] &&
+    ! "$FM_ROOT/bin/fm-claude-trust.sh" --add-dirs "$STATE" "$DATA" "$FM_ROOT" "$ID" "${CLAUDE_ADD_DIR_LIST[@]}" >/dev/null; then
     echo "error: could not pre-register Claude workspace trust for $ID's --add-dir directories; refusing to launch a claude worker that would wedge on the added-directory trust dialog; $(spawn_endpoint_hint)" >&2
     exit 1
   fi
