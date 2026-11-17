@@ -10,17 +10,18 @@
 # a merge happened that did not.
 #
 # The summary is read clause by clause: a clause ends at sentence punctuation,
-# a semicolon, a line break, or "but"/"while". A clause is a merge claim when
-# it holds affirmative merge wording: "merged" in any hyphenated form
-# ("squash-merged", "auto-merged"), or "is/now/landed/already on|in
-# main|master". Such wording is not a claim when one of the three words before
-# it in the clause negates or defers it ("not", "n't", "once", "to be",
-# "awaiting", "ready", ..., or "un-merged"), when it describes merging main
-# into a branch ("merged main into", "main merged into"), or when "merged" is
-# directly followed by a file path and the clause names no PR ("auto-merged
-# src/a.ts"). A bare "landed" is not a claim: "the worker landed main into the
-# PR; it remains open" is the truthful report of that state. PR URLs and PR
-# references are read as opaque tokens, so no word inside them exempts a claim.
+# a semicolon, a line break, or "but"/"while". The check fails closed: every
+# "merged" (in any hyphenated form, such as "squash-merged") and every "on|in
+# main|master" in a clause is a merge claim, unless it is part of one of a few
+# explicit honest phrasings: "not (yet) (been) merged", "n't (been) merged",
+# "never (been) merged", "be merged", "unmerged", "until (it is) merged",
+# "merged main|master|origin/<ref>|the base|the default branch|the latest main
+# into", and "not|n't (yet) on|in main". "merged" directly followed by a file
+# path in a clause naming no PR ("auto-merged src/a.ts") is not a claim either.
+# A bare "landed" is not a claim: "the worker landed main into the PR; it
+# remains open" is the truthful report of that state. Other truthful wording
+# that trips the check is reworded. PR URLs and PR references are read as
+# opaque tokens, so no word inside them exempts a claim.
 # Every PR a claim clause names (a PR URL, or a bare "PR 123" / "#123") must be
 # proven merged; a claim clause naming none stands for the task's recorded pr=.
 # A bare number is the recorded pr= when that ends in it, else that number in
@@ -68,32 +69,20 @@ _fm_merge_claim_urls() {
     my @cut = (0, length $m);
     while ($m =~ /[.!?]+(?=\s|$)|[;\n]|\b(?:but|while)\b/g) { push @cut, $+[0]; }
     my %seen; @cut = sort { $a <=> $b } grep { !$seen{$_}++ } @cut;
-    my $defer = qr/^(?:not|never|no|yet|until|unless|before|once|when|whenever|after|if|whether|await|awaits|awaiting|wait|waits|waiting|ready|pending|can|cannot|will|would|should|could|may|might|must|need|needs|ask|asks|asking|asked|to|be|for|get|gets)$/;
-    my $negated = sub {
-      my ($cs, $p) = @_;
-      my @w = (substr($m, $cs, $p - $cs) =~ /([a-z0-9\x27\/]+)/g);
-      @w = @w[-3 .. -1] if @w > 3;
-      return scalar grep { $_ =~ $defer || $_ =~ /n\x27t$/ } @w;
-    };
+    my $honest = qr/\bnot\s+(?:yet\s+)?(?:been\s+)?merged\b|n\x27t\s+(?:yet\s+)?(?:been\s+)?merged\b|\bnever\s+(?:been\s+)?merged\b|\bbe\s+merged\b|\bun-?merged\b|\buntil\s+(?:it\s+is\s+|it\x27s\s+)?merged\b|\bmerged\s+(?:main|master|origin\/\S+|the\s+base(?:\s+branch)?|the\s+default\s+branch|the\s+latest\s+main)\s+into\b|(?:\bnot|n\x27t)\s+(?:yet\s+)?(?:on|in)\s+(?:main|master)\b/;
     for my $i (0 .. $#cut - 1) {
       my ($cs, $ce) = ($cut[$i], $cut[$i + 1]);
       my $c = substr($m, $cs, $ce - $cs);
       my @in = map { $_->[1] } grep { $_->[0] >= $cs && $_->[0] < $ce } @ids;
-      my $claim = 0;
-      while ($c =~ /\b(?:([a-z]+)-)?merged\b/g) {
-        my ($p, $prefix, $after) = ($cs + $-[0], defined $1 ? $1 : "", substr($c, $+[0]));
-        next if $prefix eq "un";
-        next if $negated->($cs, $p);
-        next if $after =~ /^\s+(?:main|master|origin\/|upstream|the default branch|the latest main|the base)\b/;
-        next if substr($m, $cs, $p - $cs) =~ /\b(?:main|master|origin\/\S+|the base)\s+(?:was\s+|is\s+)?$/ && $after =~ /^\s+into\b/;
+      $c =~ s/$honest/"_" x length($&)/ge;
+      my $claim = $c =~ /\b(?:on|in)\s+(?:main|master)\b/ ? 1 : 0;
+      while ($c =~ /\b(?:[a-z]+-)?merged\b/g) {
+        my $after = substr($c, $+[0]);
         if (!@in && $after =~ /^\s+(\S+)/) {
           my $t = $1; $t =~ s/[.,:!?]+$//;
           next if $t =~ m{/} || $t =~ /\.[a-z0-9]{1,6}$/;
         }
         $claim = 1;
-      }
-      while ($c =~ /\b(?:is|are|now|landed|lands|went|already|sits)\s+(?:now\s+)?(?:on|in)\s+(?:main|master)\b/g) {
-        $claim = 1 unless $negated->($cs, $cs + $-[0]);
       }
       next unless $claim;
       print "$_\n" for (@in ? @in : (""));
