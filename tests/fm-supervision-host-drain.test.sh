@@ -112,6 +112,9 @@ SH
   expect_code 3 "$rc" "a word inside a PR URL must not exempt an on-main claim"
   out=$(report "PR 3228 at e5025a546 merged."); rc=$?
   expect_code 3 "$rc" "a commit id before merged must not exempt a merged claim"
+  out=$(report "Not merged https://github.com/example/repo/pull/3189. Merged $pr."); rc=$?
+  expect_code 3 "$rc" "a negation in the previous sentence must not exempt a merged claim after a URL ending that sentence"
+  assert_contains "$out" "$pr" "the refusal must name the open PR the second sentence claims merged"
   out=$(report "PR 3228 was auto-merged."); rc=$?
   expect_code 3 "$rc" "an auto-merged claim about a PR must be refused while the PR is open"
   out=$(report "PR 3228 is merged in main."); rc=$?

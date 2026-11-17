@@ -52,8 +52,8 @@ _fm_merge_claim_urls() {
     my (@spans, @ids);
     while ($s =~ m{https://[^\s<>()\[\]"\x27`,;]+}g) {
       my ($u, $p) = ($&, $-[0]);
-      push @spans, [$p, $+[0]];
       $u =~ s/[.:!?]+$//;
+      push @spans, [$p, $p + length $u];
       push @ids, [$p, $u] if $u =~ m{/(?:pull|pulls|merge_requests)/[0-9]+$|/\+/[0-9]+$};
     }
     while ($l =~ /\b(?:pr|pull request)\s*#?\s*([0-9]+)\b|(?<![\w\/])#([0-9]+)\b/g) {
