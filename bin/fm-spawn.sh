@@ -701,7 +701,9 @@
 # because Claude's interactive workspace-trust dialog gates a folder it has never
 # seen and firstmate cannot answer it. That helper's header owns the structural
 # scope test for every shape and every refusal; a failed registration stops this
-# spawn rather than launching a worker that would wedge on the dialog.
+# spawn rather than launching a worker that would wedge on the dialog. The same
+# registrations are confirmed again immediately before the launch is sent, and
+# repaired or refused there, so an entry dropped in between never reaches it.
 # polytoken (the captain-approved TUI-pane-plus-REST hybrid) is the one harness
 # whose worker's unattended permission posture cannot ride a launch flag: a
 # per-task config dir is generated under state/ mirroring the operator's global
@@ -6329,7 +6331,9 @@ spawn_assert_agent_worktree
 # too, through the same helper's --add-dirs mode, because Claude asks about each
 # one it does not already trust before the brief is read; a raw launch command
 # without the generated grant, or a T3 Code launch, passes none, so it
-# registers none.
+# registers none. Both registrations are repeated immediately before the launch
+# is sent (beside SPAWN_LAUNCH_SENT below), because seconds pass between here and
+# there and an entry can still be dropped by a writer outside the helper's locks.
 # agy gates a fresh worktree or secondmate home behind its own folder-trust
 # dialog and honours a trustedWorkspaces entry written ahead of launch
 # (bin/fm-agy-trust.sh), so the same pre-registration removes the dialog for it.
@@ -6338,6 +6342,8 @@ spawn_assert_agent_worktree
 # answers the dialog itself and, on a path that was not pre-registered, refuses
 # to count a busy turn as ready until it has done so.
 AGY_TRUST_PREREGISTERED=0
+CLAUDE_TRUST_REGISTERED=0
+CLAUDE_ADD_DIRS_REGISTERED=0
 case "$HARNESS" in
 claude*)
   if [ "$KIND" = secondmate ]; then
@@ -6349,6 +6355,7 @@ claude*)
     echo "error: could not pre-register Claude workspace trust for $WT; refusing to launch a claude worker that would wedge on the trust dialog; $(spawn_endpoint_hint)" >&2
     exit 1
   fi
+  CLAUDE_TRUST_REGISTERED=1
   case "$LAUNCH" in
   *__CLAUDEADDDIRS__*)
     if ! claude_add_dirs "$KIND" "$STATE" "$DATA" "$FM_ROOT" "$ID"; then
@@ -6362,6 +6369,7 @@ claude*)
       echo "error: could not pre-register Claude workspace trust for $ID's --add-dir directories; refusing to launch a claude worker that would wedge on the added-directory trust dialog; $(spawn_endpoint_hint)" >&2
       exit 1
     fi
+    [ "$BACKEND" = t3code ] || CLAUDE_ADD_DIRS_REGISTERED=1
     ;;
   esac
   ;;
@@ -8232,6 +8240,19 @@ else
       sleep 0.2
     done
   }
+  # Claude reads its trust store as the launch starts, so the registrations made
+  # before any per-task state existed are confirmed again here, at the last
+  # moment before the pane receives the launch. An entry dropped in between is
+  # written again; one that cannot be confirmed refuses the launch while the
+  # abort cleanup still owns everything this spawn created.
+  if [ "$CLAUDE_TRUST_REGISTERED" = 1 ]; then
+    if ! "$FM_ROOT/bin/fm-claude-trust.sh" "${spawn_trust_args[@]}" >/dev/null ||
+      { [ "$CLAUDE_ADD_DIRS_REGISTERED" = 1 ] &&
+        ! "$FM_ROOT/bin/fm-claude-trust.sh" --add-dirs "$STATE" "$DATA" "$FM_ROOT" "$ID" "${CLAUDE_ADD_DIR_LIST[@]}" >/dev/null; }; then
+      echo "error: could not confirm Claude workspace trust for $ID's launch and --add-dir directories immediately before launch; refusing to launch a claude worker that would stop at the trust question; $(spawn_endpoint_hint)" >&2
+      exit 1
+    fi
+  fi
   SPAWN_LAUNCH_SENT=1
   # errexit is on here: a failed send still exits, and Orca source mode first
   # removes the credential-bearing file the pane never received.

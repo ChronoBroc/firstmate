@@ -191,10 +191,12 @@
 # both entries land in one atomic replacement. In secondmate-home and lab-home
 # mode: the single projects entry for the registered home path, same store,
 # same atomic replacement. In add-dirs mode: one entry per passed directory,
-# all in that same single replacement. Concurrent registrations against one store are
-# serialized by a lock beside it (see the block above the read-modify-write),
-# so none loses another's entries; a Claude Code session's own writes are only
-# detected, not excluded. fm-spawn.sh forwards CLAUDE_CONFIG_DIR onto the
+# all in that same single replacement. A store whose every entry already
+# carries its flags is left unwritten, so a repeat registration is a pure
+# check. Concurrent registrations against one store are serialized by a lock
+# beside it, and Claude Code's own writes by Claude Code's lock (see the block
+# above the read-modify-write), so neither loses the other's entries.
+# fm-spawn.sh forwards CLAUDE_CONFIG_DIR onto the
 # claude launch verbatim rather than resolving it, and the pane starts in the
 # registered directory, so only an absolute value names the same store on both sides; a
 # relative one is refused below rather than guessed at.
@@ -461,6 +463,9 @@ fi
 command -v node >/dev/null 2>&1 || refuse "node is required to record workspace trust and was not found on PATH"
 
 STORE="$CONFIG_DIR_REAL/.claude.json"
+# Claude Code names its lock after the store path it opens, the link itself when
+# the store is a symlink, so this is fixed before the link is followed below.
+VENDOR_LOCK="$STORE.lock"
 # A dotfile manager or a synced folder legitimately symlinks this store, so the
 # link is followed to its final target and every check below judges that target.
 # Ownership is the property that matters: another user's file is refused however
@@ -504,29 +509,39 @@ fm_lock_acquire_wait_max "$LOCK" "$LOCK_WAIT" \
   || refuse "another registration has held '$LOCK' for over ${LOCK_WAIT}s; if no registration is running, remove that lock"
 
 # Read-modify-write, then read back and confirm. The lock above orders this
-# against every other registration, but fm-spawn runs from a live firstmate
-# Claude Code session that writes this same file and takes no lock of ours, so
-# the store can still move under us in both directions and each needs its own
-# answer.
+# against every other registration, but every Claude Code session on the host
+# writes this same file too, so each attempt also holds CLAUDE CODE'S OWN LOCK
+# on the store from the read through the readback.
 #
-# Losing the VENDOR's write is the serious one: this renames a whole
-# re-serialisation over the file, so anything Claude changed since the read -
-# oauthAccount, user-scope mcpServers, another project's history - would be gone,
-# in a format this does not own. So the bytes read are fingerprinted and
-# re-checked immediately before the rename, and a store that moved is not
+# Claude Code (2.1.326, read from the installed binary and watched live) takes
+# that lock around every config save: proper-lockfile's protocol, a directory
+# named <store>.lock made with mkdir, and judged stale once its mtime is over
+# 10s old, which a live holder refreshes every 5s. Under it Claude re-reads the
+# store, merges the projects it read with its own, and renames its result over
+# the file. A registration that ignored that lock lost its entries
+# whenever its rename landed between a session's re-read and that session's
+# rename: the session renamed a copy read before the registration, the
+# registration's readback had already passed, and the worker launched into the
+# "Adding a new directory" question with every one of its entries gone. Holding
+# the same lock puts each registration wholly before or wholly after each
+# session's save, and Claude's merge keeps entries it did not write. The lock is
+# taken the way proper-lockfile takes it, a stale one included, waited on for
+# LOCK_WAIT seconds when live, and refused after that rather than written past.
+#
+# Two outcomes remain for writers that do not take Claude's lock, and each has
+# its own answer. Losing THEIR write is the serious one: this renames a whole
+# re-serialisation over the file, so anything they changed since the read would
+# be gone, in a format this does not own. So the bytes read are fingerprinted
+# and re-checked immediately before the rename, and a store that moved is not
 # overwritten: the whole read-modify-write is retried once, and a second move
-# refuses rather than clobbering.
+# refuses rather than clobbering. Rename cannot be conditioned on content, so a
+# write landing between the final check and the rename is still lost.
 #
-# That narrows the window; it does not close it. Rename cannot be conditioned on
-# content, so a write landing between the final check and the rename is still
-# lost, and this claims no more than that.
-#
-# Losing OUR entry is the mild one: a vendor rewrite that drops it only resurrects
-# the dialog this registration removes, which reaches firstmate as an ordinary
-# stale wake and a relaunch registers again. The readback catches it within these
-# attempts, and it must fail loudly rather than report a trust it did not leave.
-# Against the vendor this is fingerprint-and-refuse, not a lock: no lock of ours
-# can stop a Claude Code session's own rewrite.
+# Losing OUR entry is the other: it resurrects the dialog this registration
+# removes. The readback catches it within these attempts and fails loudly rather
+# than report a trust it did not leave, and fm-spawn.sh repeats the whole
+# registration immediately before it sends the launch, so a drop in between is
+# repaired or refuses that launch.
 #
 # In worktree mode every flag lands on both the worktree entry and the project
 # entry in the same read-modify-write attempt, so a single rename either
@@ -556,19 +571,76 @@ fm_lock_acquire_wait_max "$LOCK" "$LOCK_WAIT" \
 TRUST_FLAG='hasTrustDialogAccepted'
 IMPORT_FLAGS='["hasClaudeMdExternalIncludesApproved","hasClaudeMdExternalIncludesWarningShown"]'
 if [ "$MODE" = worktree ]; then
-  WRITE_ARGS=("$STORE" "$MODE" "$PROJ_CANON" "$TRUST_FLAG" "$IMPORT_FLAGS" "$LOCK" "$TARGET_REAL")
+  WRITE_TARGETS=("$TARGET_REAL")
 elif [ "$MODE" = add-dirs ]; then
-  WRITE_ARGS=("$STORE" "$MODE" "" "$TRUST_FLAG" "$IMPORT_FLAGS" "$LOCK" "${ADD_TARGETS[@]}")
+  WRITE_TARGETS=("${ADD_TARGETS[@]}")
 else
-  WRITE_ARGS=("$STORE" "$MODE" "" "$TRUST_FLAG" "$IMPORT_FLAGS" "$LOCK" "$TARGET_REAL")
+  WRITE_TARGETS=("$TARGET_REAL")
 fi
+WRITE_ARGS=("$STORE" "$MODE" "${PROJ_CANON:-}" "$TRUST_FLAG" "$IMPORT_FLAGS" "$LOCK" "$VENDOR_LOCK" "$LOCK_WAIT" "${WRITE_TARGETS[@]}")
 exec node - "${WRITE_ARGS[@]}" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const [store, mode, project, trustFlag, importFlagsJson, lock, ...targets] = process.argv.slice(2);
+const [store, mode, project, trustFlag, importFlagsJson, lock, vendorLock, lockWaitArg, ...targets] = process.argv.slice(2);
 const target = targets.join("', '");
 const importFlags = JSON.parse(importFlagsJson);
+// Claude Code's own lock on the store (see the block above this call): a
+// directory made with mkdir, stale once its mtime is VENDOR_STALE_MS old.
+const VENDOR_STALE_MS = 10000;
+const vendorLockWaitMs = Number(lockWaitArg) * 1000;
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+let vendorLockHeld = null;
+const acquireVendorLock = () => {
+  const deadline = Date.now() + vendorLockWaitMs;
+  for (;;) {
+    try {
+      fs.mkdirSync(vendorLock);
+      vendorLockHeld = fs.statSync(vendorLock).ino;
+      return;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+    }
+    let held;
+    try {
+      held = fs.statSync(vendorLock);
+    } catch (err) {
+      if (err.code === "ENOENT") continue;
+      throw err;
+    }
+    if (held.mtimeMs < Date.now() - VENDOR_STALE_MS) {
+      try {
+        fs.rmdirSync(vendorLock);
+      } catch (err) {
+        if (err.code !== "ENOENT") throw err;
+      }
+      continue;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Claude Code has held its config lock '${vendorLock}' for over ${lockWaitArg}s; if no Claude Code session is saving its config, remove that directory`,
+      );
+    }
+    pause(20 + Math.floor(Math.random() * 30));
+  }
+};
+// Still ours: a holder that outlived the stale age may have been reclaimed by a
+// Claude Code session, which then owns the store again.
+const vendorLockIsOurs = () => {
+  try {
+    return vendorLockHeld !== null && fs.statSync(vendorLock).ino === vendorLockHeld;
+  } catch {
+    return false;
+  }
+};
+const releaseVendorLock = () => {
+  if (vendorLockIsOurs()) {
+    try {
+      fs.rmdirSync(vendorLock);
+    } catch {}
+  }
+  vendorLockHeld = null;
+};
 const releaseLock = () => {
   try {
     const lockOwner = path.resolve(path.dirname(lock), fs.readlinkSync(lock));
@@ -579,6 +651,7 @@ const releaseLock = () => {
   } catch {}
 };
 const finish = (code, messages) => {
+  releaseVendorLock();
   releaseLock();
   for (const message of messages) fs.writeSync(code === 0 ? 1 : 2, `${message}\n`);
   process.exit(code);
@@ -653,13 +726,13 @@ const attempt = () => {
     const carryImportConsent = approvedExternalImports(projects, project);
     const targetFlags = carryImportConsent ? [trustFlag, ...importFlags] : [trustFlag];
     const projectFlags = carryImportConsent ? [trustFlag, ...importFlags] : [trustFlag];
-    setFlags(projects, target, targetFlags);
-    setFlags(projects, project, projectFlags);
     keys = [[target, targetFlags], [project, projectFlags]];
   } else {
-    for (const key of targets) setFlags(projects, key, [trustFlag]);
     keys = targets.map((key) => [key, [trustFlag]]);
   }
+  // Already recorded: nothing to write, so a repeat registration only checks.
+  if (keys.every(([key, flags]) => flagsLanded(projects, key, flags))) return "recorded";
+  for (const [key, flags] of keys) setFlags(projects, key, flags);
   // Unpredictable name plus an exclusive create: the config directory may be
   // writable by another local account, and a predictable path could be
   // pre-created there as a symlink that a plain write would follow into some
@@ -674,7 +747,7 @@ const attempt = () => {
   fs.writeFileSync(tmp, `${JSON.stringify(root, null, 2)}\n`, { mode: 0o600, flag: "wx" });
   let renamed = false;
   try {
-    if (fingerprint(readStore()) !== before) return "moved";
+    if (fingerprint(readStore()) !== before || !vendorLockIsOurs()) return "moved";
     fs.renameSync(tmp, store);
     renamed = true;
   } finally {
@@ -684,9 +757,19 @@ const attempt = () => {
   const landed = keys.every(([key, flags]) => flagsLanded(back.projects, key, flags));
   return landed ? "recorded" : "dropped";
 };
+// Claude Code's lock is held for one attempt at a time, so a session waiting to
+// save is never held back across the retries.
+const lockedAttempt = () => {
+  acquireVendorLock();
+  try {
+    return attempt();
+  } finally {
+    releaseVendorLock();
+  }
+};
 try {
   for (let i = 0; i < 3; i += 1) {
-    const result = attempt();
+    const result = lockedAttempt();
     if (result === "recorded") {
       finish(0, mode === "worktree" ? [`trusted: ${target}`, `trusted (project root): ${project}`] : targets.map((key) => `trusted: ${key}`));
     }

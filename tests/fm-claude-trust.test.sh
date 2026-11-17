@@ -1124,6 +1124,172 @@ JS
   pass "fm-claude-trust.sh: a killed registration's writer cannot overwrite a later registration"
 }
 
+# --- Claude Code's own writes ------------------------------------------------
+
+# vendor_save <store> <ready-file> <go-file>: one Claude Code config save, the
+# way 2.1.326 makes it: take <store>.lock with mkdir, re-read the store, then
+# rename its own updated copy over the file and release the lock. It signals
+# <ready-file> once it holds the lock and has read, and saves only when
+# <go-file> appears, so a test decides what lands inside that window.
+vendor_save() {
+  # shellcheck disable=SC2016 # JavaScript template literals, not shell expansions
+  node -e '
+    const fs = require("node:fs");
+    const [store, ready, go] = process.argv.slice(1);
+    const lock = `${store}.lock`;
+    const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    fs.mkdirSync(lock);
+    const read = JSON.parse(fs.readFileSync(store, "utf8"));
+    fs.writeFileSync(ready, "");
+    const until = Date.now() + 6000;
+    while (Date.now() < until && !fs.existsSync(go)) pause(10);
+    read.numStartups = (read.numStartups ?? 0) + 1;
+    fs.writeFileSync(`${store}.tmp.vendor`, `${JSON.stringify(read, null, 2)}\n`);
+    fs.renameSync(`${store}.tmp.vendor`, store);
+    fs.rmdirSync(lock);
+  ' "$@"
+}
+
+wait_for_file() {  # <path>
+  local i=0
+  while [ ! -e "$1" ] && [ "$i" -lt 500 ]; do
+    sleep 0.01
+    i=$((i + 1))
+  done
+  [ -e "$1" ]
+}
+
+# A Claude Code session saving its config re-reads the store under its own lock
+# and renames its copy over the file. A registration that ignored that lock and
+# landed inside the window passed its own readback and then lost every entry to
+# the session's rename, so the worker launched into the trust question. The
+# registration must wait for the session's save and land after it, keeping the
+# session's own change too.
+test_registration_waits_for_claude_codes_config_lock() {
+  local rec store saver out rc start
+  rec=$(make_case vendor-lock)
+  read_case "$rec"
+  store="$CONFIG/.claude.json"
+  printf '{\n  "numStartups": 7,\n  "projects": {}\n}\n' > "$store"
+  vendor_save "$store" "$CASE_DIR/ready" "$CASE_DIR/go" &
+  saver=$!
+  wait_for_file "$CASE_DIR/ready" || fail "the simulated Claude Code save never took its lock"
+  (
+    run_trust "$CONFIG" "$WT" "$PROJ" > "$CASE_DIR/out"
+    echo $? > "$CASE_DIR/rc"
+  ) &
+  # The save renames only once the registration has finished, or after a bound
+  # long enough for any registration that does not wait to have finished; one
+  # that waits is still waiting then, and lands after the save. The bound stays
+  # well under the 10s after which Claude Code takes an unrefreshed lock as stale.
+  start=$SECONDS
+  while [ ! -e "$CASE_DIR/rc" ] && [ $((SECONDS - start)) -lt 3 ]; do
+    sleep 0.05
+  done
+  touch "$CASE_DIR/go"
+  wait
+  out=$(cat "$CASE_DIR/out")
+  rc=$(cat "$CASE_DIR/rc")
+  expect_code 0 "$rc" "a registration racing a Claude Code save must still succeed: $out"
+  assert_trusted "$store" "$WT" \
+    "a Claude Code save that held its config lock renamed over the registration and dropped the worktree entry"
+  assert_trusted "$store" "$(cd -P "$PROJ" && pwd -P)" \
+    "a Claude Code save that held its config lock dropped the project-root entry"
+  assert_store_value "$store" 8 "the registration overwrote the Claude Code save it waited for" numStartups
+  [ ! -e "$store.lock" ] || fail "the registration left Claude Code's config lock behind"
+  wait "$saver" 2>/dev/null
+  pass "fm-claude-trust.sh: a registration waits for a Claude Code save holding its config lock"
+}
+
+# A Claude Code session killed mid-save leaves its lock behind, and Claude Code
+# itself takes a lock untouched for over 10 seconds as stale. A registration
+# must reclaim it the same way rather than wait out its bound and refuse.
+test_stale_claude_code_config_lock_is_reclaimed() {
+  local rec out
+  rec=$(make_case vendor-stale-lock)
+  read_case "$rec"
+  mkdir "$CONFIG/.claude.json.lock"
+  touch -t "$(date -v-1M +%Y%m%d%H%M.%S 2>/dev/null || date -d '1 minute ago' +%Y%m%d%H%M.%S)" "$CONFIG/.claude.json.lock"
+  out=$(run_trust "$CONFIG" "$WT" "$PROJ")
+  expect_code 0 $? "a stale Claude Code config lock wedged the registration: $out"
+  assert_trusted "$CONFIG/.claude.json" "$WT" "the worktree was not trusted after reclaiming a stale Claude Code lock"
+  [ ! -e "$CONFIG/.claude.json.lock" ] || fail "the registration left the reclaimed Claude Code lock behind"
+  pass "fm-claude-trust.sh: a stale Claude Code config lock is reclaimed"
+}
+
+store_inode() {  # <store>: the file's inode, which a rename over it changes
+  node -e 'console.log(require("node:fs").statSync(process.argv[1]).ino)' "$1"
+}
+
+# A repeat registration whose entries are all still present is a check, not a
+# write: it must not replace the operator's store at all.
+test_repeat_registration_leaves_the_store_unwritten() {
+  local rec out before after
+  rec=$(make_case repeat-unwritten)
+  read_case "$rec"
+  out=$(run_trust "$CONFIG" "$WT" "$PROJ")
+  expect_code 0 $? "the first registration must succeed: $out"
+  before=$(store_inode "$CONFIG/.claude.json")
+  out=$(run_trust "$CONFIG" "$WT" "$PROJ")
+  expect_code 0 $? "a repeat registration must succeed: $out"
+  after=$(store_inode "$CONFIG/.claude.json")
+  [ "$before" = "$after" ] || fail "a repeat registration with nothing to add replaced the store"
+  pass "fm-claude-trust.sh: a repeat registration with nothing to add leaves the store unwritten"
+}
+
+# Seconds pass between a claude spawn's trust registration and its launch, and a
+# writer outside the helper's locks can drop the entries in between: the
+# production case renamed a store copy read before the registration. The spawn
+# must confirm, and here restore, every entry at the moment it sends the launch.
+test_claude_spawn_reconfirms_trust_at_launch() {
+  local case_dir home proj wt config fakebin launch_log at_launch dirs d out
+  case_dir="$TMP_ROOT/spawn-reconfirm"
+  home="$case_dir/home"
+  proj="$case_dir/project"
+  wt="$case_dir/wt"
+  config="$case_dir/claude-config"
+  launch_log="$case_dir/launch.log"
+  at_launch="$case_dir/trusted-at-launch"
+  mkdir -p "$config"
+  printf '{\n  "numStartups": 3,\n  "projects": {}\n}\n' > "$config/.claude.json"
+  cp "$config/.claude.json" "$case_dir/stale-copy.json"
+  fakebin=$(make_spawn_fakebin "$case_dir/fake" claude)
+  mv "$fakebin/tmux" "$fakebin/tmux.spawn"
+  # The pane's first pre-launch export stands in for a writer renaming its
+  # stale copy over the store after registration; the launch line records which
+  # directories the store trusted at the moment the pane received it.
+  cat > "$fakebin/tmux" <<SH
+#!/usr/bin/env bash
+case " \$* " in
+  *" send-keys "*"export GOTMPDIR="*)
+    [ -e '$case_dir/dropped' ] || { cp '$case_dir/stale-copy.json' '$config/.claude.json'; touch '$case_dir/dropped'; } ;;
+  *" send-keys "*" -l . '"*)
+    node -e 'const j=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));for(const [k,v] of Object.entries(j.projects||{}))if(v&&v.hasTrustDialogAccepted===true)console.log(k);' '$config/.claude.json' > '$at_launch' ;;
+esac
+exec "$fakebin/tmux.spawn" "\$@"
+SH
+  chmod +x "$fakebin/tmux"
+  fm_test_spawn_home "$home" claude
+  fm_git_worktree "$proj" "$wt" wt-reconfirm
+  fm_test_spawn_brief "$home" reconfirmspawn
+  out=$(FM_TEST_CLAUDE_CONFIG_DIR="$config" FM_FAKE_LAUNCH_LOG="$launch_log" \
+    fm_test_run_spawn "$home" "$wt" "$fakebin" reconfirmspawn "$proj" claude \
+    --mode no-mistakes --yolo off)
+  expect_code 0 $? "the claude spawn must succeed: $out"
+  assert_present "$case_dir/dropped" "the simulated writer never dropped the registered entries"
+  assert_present "$at_launch" "the claude spawn sent no launch line"
+  dirs=$(claude_launch_add_dirs "$(cat "$launch_log")")
+  [ -n "$dirs" ] || fail "the claude launch passed no --add-dir"
+  while IFS= read -r d; do
+    grep -Fqx "$d" "$at_launch" \
+      || fail "the claude launch went out with --add-dir $d untrusted after its entry was dropped"
+  done <<EOF_DIRS
+$dirs
+$(cd -P "$wt" && pwd -P)
+EOF_DIRS
+  pass "fm-spawn.sh: a claude spawn confirms trust for every launch directory as it sends the launch"
+}
+
 test_fresh_worktree_is_trusted
 test_fresh_worktree_also_trusts_the_project_root_without_import_consent
 test_registration_carries_forward_existing_import_consent
@@ -1162,3 +1328,7 @@ test_secondmate_spawn_fails_closed_when_home_trust_cannot_be_recorded
 test_concurrent_registrations_all_land
 test_lock_left_by_a_killed_registration_is_reclaimed
 test_killed_registration_writer_cannot_overwrite_a_later_one
+test_registration_waits_for_claude_codes_config_lock
+test_stale_claude_code_config_lock_is_reclaimed
+test_repeat_registration_leaves_the_store_unwritten
+test_claude_spawn_reconfirms_trust_at_launch
