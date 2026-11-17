@@ -25,7 +25,7 @@ Every Claude spawn therefore pre-registers its launch directory before launch, a
 Since Claude Code 2.1.326 each `--add-dir` passed at launch gets its own dialog ("Adding a new directory: ... Is this a directory you created or one you trust?"), one directory after another, with the cursor on "No, exit" and an answer that lasts only for that session.
 It is skipped only for a directory already covered by a trust entry on the directory, an ancestor within its repository, or its repository root, so a home inside a trusted checkout never showed it while a home outside any repository stopped on its first task-channel directory.
 Every Claude spawn and relaunch therefore also registers exactly the directories it passes as `--add-dir` (`../../../bin/fm-claude-trust.sh --add-dirs`), each as its own entry and never a parent, the home, or the whole state directory, and refuses the launch when that registration fails.
-A T3 Code launch passes no `--add-dir`, so it registers none.
+A raw launch command, which carries no Firstmate-built grant, and a T3 Code launch pass no `--add-dir`, so they register none.
 Escape on this dialog cancels, which also exits the session.
 
 A second, separate dialog - "Allow external CLAUDE.md file imports?" - renders whenever a loaded CLAUDE.md chain reaches outside the project tree, which every crewmate's does through the captain's own `~/.claude/CLAUDE.md` importing `~/.claude/RTK.md`.

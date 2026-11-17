@@ -731,6 +731,36 @@ EOF_DIRS
   pass "fm-spawn.sh: a claude spawn pre-trusts exactly the directories it passes as --add-dir"
 }
 
+# A raw launch command is run as given, so it passes no --add-dir; the spawn must
+# trust its launch directory only, not the task-channel directories a
+# Firstmate-built command would have granted.
+test_raw_claude_spawn_trusts_no_add_dirs() {
+  local case_dir home proj wt config fakebin launch_log out expected actual
+  case_dir="$TMP_ROOT/spawn-raw-add-dirs"
+  home="$case_dir/home"
+  proj="$case_dir/project"
+  wt="$case_dir/wt"
+  config="$case_dir/claude-config"
+  launch_log="$case_dir/launch.log"
+  mkdir -p "$config"
+  fakebin=$(make_spawn_fakebin "$case_dir/fake" claude)
+  fm_test_spawn_home "$home" claude
+  fm_git_worktree "$proj" "$wt" wt-raw-add-dirs
+  fm_test_spawn_brief "$home" rawadddirspawn
+  out=$(FM_TEST_CLAUDE_CONFIG_DIR="$config" FM_FAKE_LAUNCH_LOG="$launch_log" \
+    fm_test_run_spawn "$home" "$wt" "$fakebin" rawadddirspawn "$proj" "claude --print raw" \
+    --mode no-mistakes --yolo off)
+  expect_code 0 $? "the raw claude spawn must succeed: $out"
+  assert_present "$launch_log" "the raw claude spawn sent no launch command"
+  [ -z "$(claude_launch_add_dirs "$(cat "$launch_log")")" ] \
+    || fail "the raw claude launch passed an --add-dir it was not given: $(cat "$launch_log")"
+  expected=$(printf '%s\n%s\n' "$(cd "$wt" && pwd -P)" "$(cd "$proj" && pwd -P)" | sort -u)
+  actual=$(trusted_paths "$config/.claude.json" | sort -u)
+  [ "$actual" = "$expected" ] \
+    || fail "the raw claude spawn trusted directories its launch never passes: $actual"
+  pass "fm-spawn.sh: a raw claude spawn trusts no --add-dir directory"
+}
+
 # A secondmate launch grants one --add-dir, its steering inbox in the launching
 # home's state directory, and must trust exactly that one too.
 test_secondmate_spawn_pretrusts_its_inbox_add_dir() {
@@ -1120,6 +1150,7 @@ test_missing_node_is_refused
 test_scope_refusal_stays_fail_closed_without_node
 test_claude_spawn_pretrusts_its_worktree_and_reaches_the_brief
 test_claude_spawn_pretrusts_exactly_its_add_dirs
+test_raw_claude_spawn_trusts_no_add_dirs
 test_secondmate_spawn_pretrusts_its_inbox_add_dir
 test_add_dirs_mode_refuses_everything_outside_the_task_channels
 test_refused_spawn_leaves_no_task_state
