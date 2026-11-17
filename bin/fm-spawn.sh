@@ -6680,7 +6680,10 @@ BUSY_GEN=
     # PreToolUse refreshes the native progress marker (fm-busy-event.sh
     # progress) on every tool call without changing busy state, so one long
     # healthy turn is not aged from its start by the watcher's busy-turn bound
-    # while a turn with no tool call for that long still reaches it. Every
+    # while a turn with no tool call for that long still reaches it.
+    # PostToolUse hands the worker a review-board answer that reached its
+    # steering inbox mid-turn, at its next step boundary, without the typed
+    # doorbell (bin/fm-board-receipt-lib.sh "Mid-turn handoff"). Every
     # hook command tolerates a refused event (|| true) so a stale-gen writer
     # can never break Claude's own lifecycle.
     # A crewmate writes those hooks into the disposable worktree's
@@ -6698,6 +6701,7 @@ BUSY_GEN=
     j_stopfail=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event stop-failure 2>/dev/null || true")
     j_sessionend=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end 2>/dev/null || true")
     j_progress=$(json_escape "$(shell_quote "$FM_ROOT/bin/fm-busy-event.sh") progress $(shell_quote "$STATE_REAL") $(shell_quote "$ID") --gen $(shell_quote "$BUSY_GEN") 2>/dev/null || true")
+    j_board_answer=$(json_escape "$(shell_quote "$FM_ROOT/bin/fm-board-receipt-hook.sh") claude $(shell_quote "$STATE_REAL") $(shell_quote "$ID")")
     stop_entry=
     if [ "$KIND" = secondmate ] && grep -qF '.fm-busy-stop' "$WT/bin/fm-turnend-guard.sh" 2>/dev/null; then
       {
@@ -6715,7 +6719,7 @@ BUSY_GEN=
       j_stop=$(json_escape "${stop_turnend}$busy_cmd_prefix idle $busy_suffix --event stop 2>/dev/null || true")
       stop_entry="\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$j_stop\"}]}],"
     fi
-    hooks_json="\"hooks\":{\"UserPromptSubmit\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$j_submit\"}]}],${stop_entry}\"StopFailure\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$j_stopfail\"}]}],\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$j_sessionend\"}]}],\"PreToolUse\":[{\"matcher\":\"*\",\"hooks\":[{\"type\":\"command\",\"command\":\"$j_progress\"}]}]}"
+    hooks_json="\"hooks\":{\"UserPromptSubmit\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$j_submit\"}]}],${stop_entry}\"StopFailure\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$j_stopfail\"}]}],\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$j_sessionend\"}]}],\"PreToolUse\":[{\"matcher\":\"*\",\"hooks\":[{\"type\":\"command\",\"command\":\"$j_progress\"}]}],\"PostToolUse\":[{\"matcher\":\"*\",\"hooks\":[{\"type\":\"command\",\"command\":\"$j_board_answer\"}]}]}"
     if [ "$KIND" = secondmate ]; then
       session_keys='"feedbackDrafts":"off",'
       if [ "$KEEP_AI_TRAILERS" != 1 ]; then

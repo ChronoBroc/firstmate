@@ -1,28 +1,35 @@
 #!/usr/bin/env python3
 """Token-free stand-in for the Claude API that drives one tool call, then ends the turn.
 
-usage: fm-claude-tool-call-stub.py <port-file> <command>
+usage: fm-claude-tool-call-stub.py <port-file> <command> [<capture-file>]
 
 Binds an ephemeral loopback port and writes it to <port-file>. A /v1/messages request whose
 latest message carries no tool_result is answered with one Bash tool_use running <command>;
 every other request is answered with a short text reply that ends the turn. Replies stream
 when the request asks for a stream. No model is contacted, so a run costs no tokens.
+With <capture-file>, every request body that carries a tool_result is appended to it, one JSON
+document per line, so a test can read what Claude Code sent the model after the tool call.
 """
 import http.server
 import json
 import sys
 
 port_file, command = sys.argv[1], sys.argv[2]
+capture_file = sys.argv[3] if len(sys.argv) > 3 else None
 
 
 def has_tool_result(body):
-    messages = body.get("messages") or []
-    if not messages:
-        return False
-    content = messages[-1].get("content")
-    return isinstance(content, list) and any(
-        isinstance(part, dict) and part.get("type") == "tool_result" for part in content
-    )
+    # The user turn after the last assistant message may span several messages
+    # (a hook's added context can follow the tool result), so read all of it.
+    for message in reversed(body.get("messages") or []):
+        if message.get("role") == "assistant":
+            return False
+        content = message.get("content")
+        if isinstance(content, list) and any(
+            isinstance(part, dict) and part.get("type") == "tool_result" for part in content
+        ):
+            return True
+    return False
 
 
 def wants_tool(body):
@@ -95,6 +102,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = json.loads(raw or b"{}")
         except ValueError:
             body = {}
+        if capture_file and has_tool_result(body):
+            with open(capture_file, "a") as out:
+                out.write(json.dumps(body) + "\n")
         if body.get("stream"):
             data = b"".join(
                 b"event: " + name.encode() + b"\ndata: " + json.dumps(event).encode() + b"\n\n"

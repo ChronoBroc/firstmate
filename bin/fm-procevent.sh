@@ -259,6 +259,9 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# The receipt alarm reads the worker's turn state (bin/fm-busy-lib.sh).
+# shellcheck source=bin/fm-busy-lib.sh
+. "$SCRIPT_DIR/fm-busy-lib.sh"
 # shellcheck source=bin/fm-board-receipt-lib.sh
 . "$SCRIPT_DIR/fm-board-receipt-lib.sh"
 
