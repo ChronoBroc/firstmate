@@ -2244,7 +2244,7 @@ if (awayPrompt.includes("does not execute them")) throw new Error(`the away tail
 if (!awayPrompt.endsWith(`The record, verbatim:\n${readback}`)) throw new Error(`the tail does not end with the record's read-back verbatim, trailing whitespace included: ${JSON.stringify(awayPrompt)}`);
 const snapshot = readFileSync(`${home}/state/.branch-eligible-rows`, "utf8").trim().split("\n").join(",");
 if (snapshot !== "1,2,3") throw new Error(`the away wake claimed rows ${snapshot}, not every row`);
-const fleet = await report.execute("c2", { task: "fleet", verdict: "captain", summary: "per your away instructions: merged task-d's PR once green" }, undefined, undefined, {});
+const fleet = await report.execute("c2", { task: "fleet", verdict: "captain", summary: "per your away instructions: armed task-d's PR merge for when it is green" }, undefined, undefined, {});
 if (fleet.isError) throw new Error(`a fleet report under a claimed check row was refused: ${JSON.stringify(fleet)}`);
 finishPrompt();
 await awayOffer.settlement;
@@ -2638,7 +2638,7 @@ const heartbeatSession = globalThis.__fmSessions[globalThis.__fmSessions.length 
 const heartbeatReport = heartbeatSession.options.customTools.find((tool) => tool.name === "fm_branch_report");
 const live = await heartbeatReport.execute("live", { task: "other-task", verdict: "routine", summary: "worker healthy" }, undefined, undefined, {});
 if (live.isError) throw new Error(`a heartbeat report for a live task was refused: ${JSON.stringify(live)}`);
-const goneInReview = await heartbeatReport.execute("gone-in-review", { task: "retired-task", verdict: "captain", summary: "PR merged and cleaned up" }, undefined, undefined, {});
+const goneInReview = await heartbeatReport.execute("gone-in-review", { task: "retired-task", verdict: "captain", summary: "cleaned up the retired task" }, undefined, undefined, {});
 if (goneInReview.isError) throw new Error(`a heartbeat report for a task with no record was refused: ${JSON.stringify(goneInReview)}`);
 const fleetInReview = await heartbeatReport.execute("fleet-in-review", { task: "fleet", verdict: "routine", summary: "fleet-wide note" }, undefined, undefined, {});
 if (fleetInReview.isError) throw new Error(`a fleet-wide report was refused during a heartbeat review: ${JSON.stringify(fleetInReview)}`);

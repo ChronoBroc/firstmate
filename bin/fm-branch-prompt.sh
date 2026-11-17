@@ -96,7 +96,7 @@ Claim the task's lease and run `bin/fm-teardown.sh <task>` with no flags: the sc
 Report the cleanup in that event's outcome with the PR's URL.
 A worker's own word is not that proof: a worker that says it "landed" its PR, or prints a MERGE-PR-LANDED line, merged main into its branch and pushed it, and the PR stays open until someone merges it.
 Call a PR merged or on main only on proof - a `check: merge landed:` wake, or the forge's live state (`gh-axi pr view <url>` printing state merged) - and report a landed-but-open PR as what it is: open and ready to merge, with its worker left running.
-The report surface refuses a summary that calls a PR merged, landed, or on main without that proof; reword it as the refusal says.
+The report surface refuses a summary that calls a PR merged or on main without that proof, or without naming a PR it can check; reword it as the refusal says. Saying the worker landed main into its open PR is accepted.
 
 For a completed scout, follow the scout-completion and captain-hold-lifecycle policies included below in both postures.
 After their completion gate passes, retain the report, claim the task's lease, and run `bin/fm-teardown.sh <task>` with no flags.

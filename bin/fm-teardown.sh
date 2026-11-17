@@ -4037,7 +4037,7 @@ fi
 # landed-work rule below; a lookup that cannot run refuses. MAIN's cleanup
 # keeps the landed-work rule.
 branch_unregistered_pr_merge_proof() {
-  local line url head out row number state
+  local line url head out
   if [ -f "$STATE/$ID.status" ] && [ ! -L "$STATE/$ID.status" ]; then
     line=$(grep '^done' "$STATE/$ID.status" 2>/dev/null | tail -n 1 || true)
     while IFS= read -r url; do
@@ -4053,18 +4053,12 @@ URLS
   head=$(fm_meta_get "$META" branch)
   [ -n "$head" ] || head=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || return 2
   [ -n "$head" ] || return 2
-  out=$(cd "$WT" 2>/dev/null && gh-axi pr list --state all --head "$head" --limit 1 2>/dev/null) || return 2
-  case "$out" in "count: 0"*) return 0 ;; esac
-  row=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*\([0-9][0-9]*\),\([A-Za-z_]*\).*/\1 \2/p' | head -n 1)
-  number=${row%% *}
-  state=${row#* }
-  [ -n "$number" ] && [ -n "$state" ] && [ "$state" != "$row" ] || return 2
-  BRANCH_MERGE_PR="#$number on branch $head"
-  FM_PR_RECORD_STATE=$state
-  case "$state" in
-    merged|MERGED) return 0 ;;
-    *) return 1 ;;
-  esac
+  out=$(cd "$WT" 2>/dev/null && gh-axi pr list --state all --head "$head" --limit 1 --fields url 2>/dev/null) || return 2
+  case "$out" in "count: 0"|"count: 0 "*|"count: 0"$'\n'*) return 0 ;; esac
+  url=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*[0-9][0-9]*,.*,"\(https:[^"]*\)"$/\1/p' | head -n 1)
+  fm_pr_url_parse "$url" || return 2
+  BRANCH_MERGE_PR=$url
+  fm_pr_merge_proof "$STATE" "$ID" "$url"
 }
 if [ "$KIND" = ship ] && [ "$(fm_lease_actor)" = branch ]; then
   BRANCH_MERGE_PR=$PR_URL
