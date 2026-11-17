@@ -101,6 +101,11 @@ SH
   expect_code 3 "$rc" "an on-main claim for an open PR must be refused"
   out=$(report "Swipe to close part one landed and is merged."); rc=$?
   expect_code 3 "$rc" "a merged claim naming no URL must be checked against the task's recorded PR"
+  out=$(report "Swipe to close part one, PR 3228, was squash-merged."); rc=$?
+  expect_code 3 "$rc" "a squash-merged claim for an open PR must be refused"
+  assert_contains "$out" "the forge reports it OPEN" "a squash-merged claim must be checked against the forge"
+  out=$(report "Rebase-merged $pr."); rc=$?
+  expect_code 3 "$rc" "a rebase-merged claim for an open PR must be refused"
   out=$(report "No conflicts. Merged $pr."); rc=$?
   expect_code 3 "$rc" "a negation in an earlier sentence must not hide a merged claim for an open PR"
   out=$(report "No conflicts; $pr is on main."); rc=$?
@@ -114,6 +119,8 @@ SH
   out=$(report "Swipe to close part one: the worker merged main into its branch and pushed it; $pr is open, not merged yet, and ready to merge."); rc=$?
   expect_code 0 "$rc" "an honest open-PR outcome must be recorded: $out"
   assert_contains "$out" "recorded seq 1 [captain]" "the honest outcome was not recorded"
+  out=$(report "Git auto-merged src/swipe.ts while the worker merged main into its branch; $pr remains open."); rc=$?
+  expect_code 0 "$rc" "a file auto-merge note must not read as a merge claim: $out"
   out=$(report "The worker landed main into $pr; it remains open."); rc=$?
   expect_code 0 "$rc" "a truthful landed-but-open outcome must be recorded: $out"
 

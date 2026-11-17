@@ -14,8 +14,10 @@
 # of the three words before it in its own clause negates or defers it ("not",
 # "n't", "once", "to be", "awaiting", "ready", ...), or when it describes
 # merging main into a branch ("merged main into", "main <sha> merged",
-# "auto-merged <file>"). A bare "landed" is not a claim: "the worker landed
-# main into the PR; it remains open" is the truthful report of that state.
+# "auto-merged <file>"), or reads "un-merged". Any other hyphenated form
+# ("squash-merged", "rebase-merged") is a claim. A bare "landed" is not a
+# claim: "the worker landed main into the PR; it remains open" is the truthful
+# report of that state.
 # A clause ends at sentence punctuation, a semicolon, or a line break. Each
 # claim names the PR closest before it in its clause (a PR URL, or a bare
 # "PR 123" / "#123"), else the first one after it in its clause, else the PR URL
@@ -68,7 +70,7 @@ _fm_merge_claim_urls() {
       my $p = $-[0];
       my $before = substr($l, 0, $p);
       my $after = substr($l, $+[0]);
-      next if $before =~ /-$/;
+      next if $before =~ /\b(?:auto|un)-$/;
       next if $after =~ /^\s+(?:main|master|origin\/|upstream|the default branch|the latest main|in main|in the latest)\b/;
       my ($cs) = $clause->($p);
       my @w = (substr($l, $cs, $p - $cs) =~ /([a-z0-9\x27\/]+)/g);
