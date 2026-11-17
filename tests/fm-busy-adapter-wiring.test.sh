@@ -723,6 +723,27 @@ test_claude_tool_calls_refresh_native_progress() {
   pass "claude tool calls refresh native progress inside a turn without changing busy state"
 }
 
+# A board answer that reaches a Claude worker's steering inbox mid-turn is
+# handed to it at its next step by a PostToolUse hook its spawn installs
+# (tests/fm-board-receipt.test.sh drives the handoff itself). With nothing
+# waiting, the hook prints nothing and never fails the step.
+test_claude_spawn_installs_the_board_answer_handoff() {
+  local rec id=busy-cl-4 out settings
+  rec=$(make_spawn_case claude-board-handoff claude "$id")
+  read_case_record "$rec"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" "$PROJ_DIR")
+  expect_code 0 $? "claude spawn should succeed: $out"
+  settings="$WT_DIR/.claude/settings.local.json"
+  jq -e '.hooks.PostToolUse[0].matcher == "*"' "$settings" >/dev/null \
+    || fail "claude hook settings must run the board-answer handoff after every tool call"
+  out=$(jq -r '.hooks.PostToolUse[0].hooks[0].command' "$settings")
+  assert_contains "$out" "fm-board-receipt-hook.sh" "the PostToolUse hook is not the board-answer handoff"
+  out=$(printf '{}' | run_claude_hook "$settings" PostToolUse) \
+    || fail "the board-answer handoff failed a tool call with nothing waiting"
+  [ -z "$out" ] || fail "the board-answer handoff spoke with nothing waiting: $out"
+  pass "claude spawn installs the board-answer handoff after every tool call, silent when nothing waits"
+}
+
 test_codex_unverified_until_a_semantic_source_exists() {
   local rec id=busy-cx-1 out state
   rec=$(make_spawn_case codex-unverified codex "$id")
@@ -1373,6 +1394,7 @@ test_opencode_plugin_v2_applies_events_in_emission_order
 test_claude_hooks_semantic_lifecycle
 test_claude_hooks_stale_incarnation_harmless
 test_claude_tool_calls_refresh_native_progress
+test_claude_spawn_installs_the_board_answer_handoff
 test_gemini_hooks_semantic_lifecycle
 test_gemini_hooks_stale_incarnation_harmless
 test_raw_gemini_launch_has_no_semantic_wiring

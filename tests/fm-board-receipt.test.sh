@@ -43,6 +43,16 @@ fi
 printf 'session:\n  status: feedback\nprompts[1]{uid,prompt,selector,tag,text}:\n  "","all four as recommended","","message",""\n'
 SH
 chmod +x "$FAKEBIN/lavish-axi"
+# A tmux whose only live panes are the ones a case lists in live-panes, so a
+# worker's endpoint is gone unless the case keeps it alive.
+cat > "$FAKEBIN/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  "list-panes -a -F #{pane_id}") cat "$RECEIPT_STUB_DIR/live-panes" 2>/dev/null; exit 0 ;;
+esac
+exit 1
+SH
+chmod +x "$FAKEBIN/tmux"
 export PATH="$FAKEBIN:$PATH"
 
 lavish_session() {  # <artifact>
@@ -207,6 +217,9 @@ test_untaken_answer_alarms_once_and_clears_on_pickup() {
   assert_contains "$row" "task w-stuck" "the alarm names its worker"
   assert_contains "$row" "${BOARD##*/}" "the alarm names its board"
   assert_contains "$row" "6m" "the alarm says how long the answer has waited"
+  assert_contains "$row" "session is gone, so it cannot take the round" "the alarm does not say the worker's session has ended"
+  assert_not_contains "$row" "busy in a turn" "the alarm calls a worker with no live session busy"
+  assert_contains "$row" "message: all four as recommended" "the alarm does not carry the captured answer"
   [ -n "$(field "$(receipt 1)" alarmed_at)" ] || fail "the receipt does not record its alarm"
   [ "$(field "$(receipt 1)" state)" = delivered ] || fail "an alarm changed the receipt's state"
   take w-stuck
@@ -217,6 +230,112 @@ test_untaken_answer_alarms_once_and_clears_on_pickup() {
     || fail "the late pickup did not clear its alarm exactly once: $(wake_rows ":$SRC:")"
   [ "$(row_count ":$SRC:unacknowledged:1")" = 1 ] || fail "the late pickup re-raised the alarm"
   pass "an answer the worker never took alarms once after the delay and clears once on pickup"
+}
+
+# The worker's after-each-step hook, as bin/fm-spawn.sh installs it for a
+# Claude worker: Claude Code runs it after every tool call with the call's JSON
+# on stdin and adds any additionalContext it prints before the next step.
+after_step() {  # <task>
+  printf '{"hook_event_name":"PostToolUse","tool_name":"Bash"}' \
+    | "$ROOT/bin/fm-board-receipt-hook.sh" claude "$HOME_DIR/state" "$1"
+}
+# Seed the worker's busy record the way its spawn does: busy, in its first turn,
+# in a live pane.
+busy_worker() {  # <task>
+  local pane="%$(($(cat "$RECEIPT_STUB_DIR/live-panes" 2>/dev/null | wc -l) + 1))"
+  printf '%s\n' "$pane" >> "$RECEIPT_STUB_DIR/live-panes"
+  perl -pi -e "s/^window=.*/window=$pane/" "$HOME_DIR/state/$1.meta"
+  printf 'harness=claude\n' >> "$HOME_DIR/state/$1.meta"
+  "$ROOT/bin/fm-busy-event.sh" arm "$HOME_DIR/state" "$1" >/dev/null || fail "the busy record could not be armed"
+}
+age_file() {  # <path> <seconds>
+  perl -e 'my $t = time - $ARGV[1]; utime $t, $t, $ARGV[0] or die' "$1" "$2"
+}
+
+# The reproduction of the miss: a worker held in one long step when its board
+# is answered. The typed doorbell reaches it only between steps, if at all, so
+# the answer is handed to it at its next step by its own hook, exactly once,
+# and that handoff is not mistaken for the worker taking the round.
+test_busy_worker_is_handed_the_answer_at_its_next_step() {
+  armed_board midturn w-busy
+  busy_worker w-busy
+  out=$(after_step w-busy) || fail "the after-step hook failed the worker's step"
+  printf '%s' "$out" | jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' >/dev/null \
+    || fail "the hook did not answer in Claude's PostToolUse shape: $out"
+  context=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')
+  assert_contains "$context" "001.msg" "the handoff does not name the steering-inbox record"
+  assert_contains "$context" "bin/fm-procevent-lavish.sh read $(result_file 1)" \
+    "the handoff does not carry the round's own instruction"
+  [ -z "$(after_step w-busy)" ] || fail "the same round was handed over twice"
+  [ -z "$(printf '{}' | "$ROOT/bin/fm-board-receipt-hook.sh" claude "$HOME_DIR/state" w-other)" ] \
+    || fail "another worker was handed this worker's round"
+  cycle
+  [ "$(field "$(receipt 1)" state)" = delivered ] \
+    || fail "handing the round over was taken for the worker reading it: $(cat "$(receipt 1)")"
+  [ "$(row_count ":$SRC:")" = 0 ] || fail "a handoff inside the alarm delay woke firstmate"
+  worker_read w-busy 1
+  cycle
+  [ "$(field "$(receipt 1)" acknowledged_by)" = read ] || fail "the worker's read after the handoff was not the pickup"
+  pass "a busy worker is handed its board answer at its next step, once, without that counting as taken"
+}
+
+# Claude Code runs the worker's hooks inside its subagents too, marking those
+# payloads with agent_id (https://code.claude.com/docs/en/hooks).
+test_subagent_step_leaves_the_answer_for_its_worker() {
+  armed_board subagent w-parent
+  busy_worker w-parent
+  out=$(printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","agent_id":"a1b2c3"}' \
+    | "$ROOT/bin/fm-board-receipt-hook.sh" claude "$HOME_DIR/state" w-parent)
+  [ -z "$out" ] || fail "a subagent's step was handed its worker's round: $out"
+  [ ! -e "$HOME_DIR/state/board-receipts/$SRC.1.midturn" ] || fail "a subagent's step claimed the handoff"
+  assert_contains "$(after_step w-parent)" "001.msg" "the worker's own next step was not handed the round"
+  pass "a subagent's step hands nothing over and leaves the round for its worker's own next step"
+}
+
+test_handled_round_is_not_handed_over() {
+  armed_board handledmid w-done
+  busy_worker w-done
+  FM_HOME="$HOME_DIR" "$ROOT/bin/fm-procevent.sh" handled "$SRC" 1 >/dev/null \
+    || fail "the round could not be acknowledged"
+  [ -z "$(after_step w-done)" ] || fail "a round already acknowledged was handed to the worker again"
+  pass "a round acknowledged before the worker's next step is not handed over"
+}
+
+test_busy_worker_alarm_carries_the_answer_and_its_turn() {
+  armed_board longstep w-long
+  busy_worker w-long
+  : > "$HOME_DIR/state/w-long.progress"
+  age_file "$HOME_DIR/state/w-long.progress" 420
+  after_step w-long >/dev/null
+  perl -0pi -e 's/^mid_turn_at=(\d+)$/"mid_turn_at=" . ($1 - 200)/me' \
+    "$HOME_DIR/state/board-receipts/$SRC.1.midturn"
+  age_delivery 1 400
+  cycle
+  [ "$(row_count ":$SRC:unacknowledged:1")" = 1 ] \
+    || fail "a busy worker's untaken answer did not alarm once: $(wake_rows ":$SRC:")"
+  row=$(wake_rows ":$SRC:unacknowledged:1")
+  assert_contains "$row" "busy in a turn; its current step started 7m" "the alarm does not say the worker is busy in one long step"
+  assert_contains "$row" "handed to it mid-turn at a step boundary 3m" "the alarm does not say the answer was handed over mid-turn"
+  assert_contains "$row" "message: all four as recommended" "the alarm does not carry the captured answer"
+  assert_contains "$row" "bin/fm-procevent-lavish.sh read $(result_file 1)" "the alarm does not point at the full round"
+  assert_contains "$row" "bin/fm-control.sh w-long interrupt" "the alarm does not say how to reach a busy worker now"
+  [ -z "$(after_step w-long)" ] || fail "the alarm re-armed the handoff"
+  pass "a busy worker's untaken answer alarms with its turn, the mid-turn handoff, and the captured answer"
+}
+
+test_busy_worker_alarm_without_progress_or_handoff_claims_neither() {
+  armed_board nostep w-nostep
+  busy_worker w-nostep
+  age_delivery 1 400
+  cycle
+  row=$(wake_rows ":$SRC:unacknowledged:1")
+  [ -n "$row" ] || fail "a busy worker's untaken answer did not alarm"
+  assert_contains "$row" "busy in a turn; how long its current step has run is unknown" \
+    "the alarm invents a step duration with no progress marker"
+  assert_contains "$row" "No mid-turn handoff is recorded" "the alarm does not say no handoff is recorded"
+  assert_not_contains "$row" "started" "the alarm gives a step start with no progress marker"
+  assert_not_contains "$row" "has not finished a step" "the alarm claims no step finished from a missing handoff"
+  pass "a busy worker's alarm with no progress marker or handoff reports the duration unknown and no handoff recorded"
 }
 
 test_acknowledged_round_counts_when_the_record_was_not_filed() {
@@ -265,6 +384,11 @@ fm_test_run \
   test_answer_read_then_worked_at_length_is_acknowledged_at_pickup \
   test_read_racing_its_delivery_is_still_the_pickup \
   test_untaken_answer_alarms_once_and_clears_on_pickup \
+  test_busy_worker_is_handed_the_answer_at_its_next_step \
+  test_subagent_step_leaves_the_answer_for_its_worker \
+  test_handled_round_is_not_handed_over \
+  test_busy_worker_alarm_carries_the_answer_and_its_turn \
+  test_busy_worker_alarm_without_progress_or_handoff_claims_neither \
   test_acknowledged_round_counts_when_the_record_was_not_filed \
   test_alarm_delay_is_tunable_and_bounded \
   test_retired_worker_receipt_is_pruned_without_an_alarm

@@ -809,6 +809,21 @@ The token-free live guard refreshes this evidence and fails naming the Claude Co
 bin/fm-test-run.sh tests/fm-claude-busy-progress-live.test.sh
 ```
 
+## Claude worker board-answer handoff
+
+Verified on 2026-11-17 with Claude Code 2.1.326 on macOS, a `claude -p` run in a worktree whose `.claude/settings.local.json` was written by the real `bin/fm-spawn.sh`, with one board round recorded as delivered to that worker, against the same local API stub run with a capture file, so no model is called.
+After the stub's one Bash tool call, the `PostToolUse` hook (`bin/fm-board-receipt-hook.sh`) claimed the round's `.midturn` marker, and the next request Claude Code sent carried the handoff text after the tool result, as its own message following it:
+
+```text
+ok - Claude Code 2.1.326 (Claude Code): a board answer waiting on a busy worker reaches the model after its next tool call
+```
+
+The token-free live guard refreshes this evidence and fails naming the Claude Code version if a release stops running `PostToolUse` hooks after a tool call or stops passing their `additionalContext` to the model:
+
+```sh
+bin/fm-test-run.sh tests/fm-claude-board-answer-handoff-live.test.sh
+```
+
 ## Idle session stop
 
 Verified on 2026-11-13 with Claude Code 2.1.325 on macOS, in a scratch firstmate home on a private tmux server (an explicit `-S` socket), with four interactive `claude` scouts launched by the real `bin/fm-spawn.sh` against a local API stub (`tests/fixtures/fm-claude-scripted-stub.py`) that plays each worker from its own brief, so no model is called.

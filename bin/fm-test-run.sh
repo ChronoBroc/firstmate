@@ -394,6 +394,7 @@ family_for_basename() {
     fm-backend-rex-composer-live-e2e.test.sh|\
     fm-watch-wedge-cap-live.test.sh|fm-read-repetition-live.test.sh|\
     fm-claude-tool-exclude-live.test.sh|fm-claude-busy-progress-live.test.sh|\
+    fm-claude-board-answer-handoff-live.test.sh|\
     fm-idle-stop-live-e2e.test.sh)
       printf '%s\n' live-harness-optin
       ;;
@@ -778,6 +779,7 @@ tests/fm-ci-workflow.test.sh 5833
 tests/fm-classify-corr-token.test.sh 23085
 tests/fm-classify-decision-key.test.sh 4362
 tests/fm-claude-account-quota.test.sh 2492
+tests/fm-claude-board-answer-handoff-live.test.sh 75
 tests/fm-claude-busy-progress-live.test.sh 75
 tests/fm-claude-stop-autoarm-live-e2e.test.sh 73
 tests/fm-claude-stop-autoarm.test.sh 61189
@@ -1712,6 +1714,7 @@ families_for_changed_path() {
       ;;
     tests/fixtures/fm-claude-tool-call-stub.py)
       printf '%s\n' __script__:fm-claude-busy-progress-live.test.sh
+      printf '%s\n' __script__:fm-claude-board-answer-handoff-live.test.sh
       ;;
     tests/fixtures/fm-claude-scripted-stub.py)
       printf '%s\n' __script__:fm-idle-stop-live-e2e.test.sh
@@ -1778,8 +1781,9 @@ families_for_changed_path() {
       printf '%s\n' __script__:fm-extension-binding.test.sh
       printf '%s\n' __script__:fm-procevent-extension-errors.test.sh
       ;;
-    bin/fm-board-receipt-lib.sh)
+    bin/fm-board-receipt-lib.sh|bin/fm-board-receipt-hook.sh)
       printf '%s\n' __script__:fm-board-receipt.test.sh
+      printf '%s\n' __script__:fm-claude-board-answer-handoff-live.test.sh
       ;;
     bin/fm-procevent.sh|bin/fm-procevent-lib.sh|bin/fm-procevent-extension-capture.pl)
       printf '%s\n' __script__:fm-board-receipt.test.sh
