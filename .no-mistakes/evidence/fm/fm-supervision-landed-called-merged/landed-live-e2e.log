@@ -1,0 +1,3 @@
+# outcome: Swipe-to-close PR https://github.com/example/widget/pull/3228 is open and ready to merge; the worker says it landed main into the branch and typecheck is green, but the PR has not merged. No teardown done; worker session state is unreadable.
+ok - supervision host live (2.1.326 (Claude Code)): a worker's landed-but-open PR is reported as open and its worker is left running
+rc=0

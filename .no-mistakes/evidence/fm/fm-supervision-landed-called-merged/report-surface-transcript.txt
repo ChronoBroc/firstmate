@@ -1,0 +1,21 @@
+$ fm-branch-report.sh --summary "PR https://github.com/example/optcg/pull/3189 is on main."  (forge: OPEN)
+merge claim refused: the summary calls https://github.com/example/optcg/pull/3189 merged or on main, but the forge reports it OPEN; a worker's "landed" can mean it merged main into its branch and pushed, which leaves the PR open. Report it as open and waiting for its merge, and send the report again.
+report refused: nothing recorded; reword the summary as the refusal above says
+exit=3
+
+$ fm-branch-report.sh --summary "Swipe to close landed and is merged."  (forge: OPEN)
+merge claim refused: the summary calls https://github.com/example/optcg/pull/3189 merged or on main, but the forge reports it OPEN; a worker's "landed" can mean it merged main into its branch and pushed, which leaves the PR open. Report it as open and waiting for its merge, and send the report again.
+report refused: nothing recorded; reword the summary as the refusal above says
+exit=3
+
+$ fm-branch-report.sh --summary "Swipe: worker merged main into its branch; https://github.com/example/optcg/pull/3189 is open, not merged yet."  (forge: OPEN)
+recorded seq 1 [captain]; the captain has returned, so it is queued for MAIN to relay
+exit=0
+
+$ fm-branch-report.sh --summary "PR https://github.com/example/optcg/pull/3189 is merged."  (forge: MERGED)
+recorded seq 2 [captain]; the captain has returned, so it is queued for MAIN to relay
+exit=0
+
+--- outcome store:
+{"seq":1,"epoch":1794899607,"task":"swipe","wake":"signal: swipe.status","verdict":"captain","summary":"Swipe: worker merged main into its branch; https://github.com/example/optcg/pull/3189 is open, not merged yet.","silent":false,"statusEndpoint":118,"statusIdent":"strong:16777232:447734383:1794899606.809370636"}
+{"seq":2,"epoch":1794899607,"task":"swipe","wake":"signal: swipe.status","verdict":"captain","summary":"PR https://github.com/example/optcg/pull/3189 is merged.","silent":false,"statusEndpoint":118,"statusIdent":"strong:16777232:447734383:1794899606.809370636"}
