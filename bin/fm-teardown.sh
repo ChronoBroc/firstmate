@@ -82,7 +82,8 @@
 # for the common case where there is no remote at all.
 # Landed is not merged: a pushed branch is landed work, so MAIN may clean up a
 # ship whose PR is still open. The supervision branch (FM_SUPERVISION_ACTOR=
-# branch) may not: for a ship with a recorded pr= it additionally needs proof
+# branch) may not: for a ship with a recorded pr=, or a no-mistakes or
+# direct-PR ship whose PR the forge finds for it, it additionally needs proof
 # the PR merged (fm_pr_merge_proof in bin/fm-pr-lib.sh: this home's merge record
 # or the forge's live state), and refuses before anything is stopped otherwise.
 # Freeze-then-decide: a worker can still write after that first proof, so the
@@ -4030,16 +4031,58 @@ fi
 # whose PR has MERGED, and a pushed branch is not that. A ship with a recorded
 # PR is cleaned up by the branch only on merge proof (fm_pr_merge_proof in
 # bin/fm-pr-lib.sh), so a worker's "landed" wording cannot retire a worker
-# whose PR is still open. MAIN's cleanup keeps the landed-work rule above.
-if [ "$KIND" = ship ] && [ -n "$PR_URL" ] && [ "$(fm_lease_actor)" = branch ]; then
+# whose PR is still open. A PR-delivery ship with no recorded PR is resolved
+# first: the PR URL its newest done: status line names, else the forge's PR for
+# its head branch. A found PR needs the same proof; no PR at the forge keeps the
+# landed-work rule below; a lookup that cannot run refuses. MAIN's cleanup
+# keeps the landed-work rule.
+branch_unregistered_pr_merge_proof() {
+  local line url head out row number state
+  if [ -f "$STATE/$ID.status" ] && [ ! -L "$STATE/$ID.status" ]; then
+    line=$(grep '^done' "$STATE/$ID.status" 2>/dev/null | tail -n 1 || true)
+    while IFS= read -r url; do
+      if fm_pr_url_parse "$url"; then
+        BRANCH_MERGE_PR=$url
+        fm_pr_merge_proof "$STATE" "$ID" "$url"
+        return
+      fi
+    done <<URLS
+$(printf '%s\n' "$line" | grep -oE 'https://[^][[:space:]<>()"'"'"'`,;]+' | sed 's/[.:!?]*$//' || true)
+URLS
+  fi
+  head=$(fm_meta_get "$META" branch)
+  [ -n "$head" ] || head=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || return 2
+  [ -n "$head" ] || return 2
+  out=$(cd "$WT" 2>/dev/null && gh-axi pr list --state all --head "$head" --limit 1 2>/dev/null) || return 2
+  case "$out" in "count: 0"*) return 0 ;; esac
+  row=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*\([0-9][0-9]*\),\([A-Za-z_]*\).*/\1 \2/p' | head -n 1)
+  number=${row%% *}
+  state=${row#* }
+  [ -n "$number" ] && [ -n "$state" ] && [ "$state" != "$row" ] || return 2
+  BRANCH_MERGE_PR="#$number on branch $head"
+  FM_PR_RECORD_STATE=$state
+  case "$state" in
+    merged|MERGED) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+if [ "$KIND" = ship ] && [ "$(fm_lease_actor)" = branch ]; then
+  BRANCH_MERGE_PR=$PR_URL
   branch_merge_rc=0
-  fm_pr_merge_proof "$STATE" "$ID" "$PR_URL" || branch_merge_rc=$?
+  if [ -n "$PR_URL" ]; then
+    fm_pr_merge_proof "$STATE" "$ID" "$PR_URL" || branch_merge_rc=$?
+  elif [ "$MODE" = no-mistakes ] || [ "$MODE" = direct-PR ]; then
+    branch_unregistered_pr_merge_proof || branch_merge_rc=$?
+  fi
   if [ "$branch_merge_rc" -ne 0 ]; then
     if [ "$branch_merge_rc" -eq 1 ]; then
-      echo "REFUSED: the PR $PR_URL of task $ID is not merged (the forge reports it ${FM_PR_RECORD_STATE:-not merged}); the supervision branch cleans up a ship only after its PR merges." >&2
+      echo "REFUSED: the PR $BRANCH_MERGE_PR of task $ID is not merged (the forge reports it ${FM_PR_RECORD_STATE:-not merged}); the supervision branch cleans up a ship only after its PR merges." >&2
       echo "The worker and its copy were left running. Report the PR as not merged." >&2
+    elif [ -n "$BRANCH_MERGE_PR" ]; then
+      echo "REFUSED: cannot prove the PR $BRANCH_MERGE_PR of task $ID merged (no merge record, and the forge could not be read); the supervision branch cleans up a ship only after its PR merges." >&2
+      echo "The worker and its copy were left running. Report the PR's merge as unconfirmed." >&2
     else
-      echo "REFUSED: cannot prove the PR $PR_URL of task $ID merged (no merge record, and the forge could not be read); the supervision branch cleans up a ship only after its PR merges." >&2
+      echo "REFUSED: task $ID records no PR, and the forge could not be asked for the PR of its branch; the supervision branch cleans up a ship only after its PR merges. Retry once the forge can be read." >&2
       echo "The worker and its copy were left running. Report the PR's merge as unconfirmed." >&2
     fi
     exit 1

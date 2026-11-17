@@ -172,17 +172,21 @@ grep -q '	handled	turn=' "$FM/state/.supervision-host.log" \
 summaries=$(jq -r 'select(.task == "swipe") | .summary' "$FM/state/branch-outcomes.jsonl" 2>/dev/null)
 [ -n "$summaries" ] || fail "the engine recorded no outcome for the landed worker ($CLAUDE_VERSION)"$'\n'"$(diagnose)"
 printf '# outcome: %s\n' "$summaries"
-while IFS= read -r summary; do
-  # The outcome store's own check, read against the lab's forge stub: an
-  # outcome that calls the open PR merged or on main fails here.
-  FM_HOME="$FM" PATH="$LAB/bin:$PATH" bash -c '
-    . "$1/bin/fm-merge-claim-lib.sh"
-    fm_merge_claim_check "$2" swipe "$3" || { printf "%s\n" "$FM_MERGE_CLAIM_REFUSAL"; exit 1; }
-  ' _ "$ROOT" "$FM/state" "$summary" \
-    || fail "the branch called the open PR merged ($CLAUDE_VERSION): $summary"$'\n'"$(diagnose)"
-done <<EOF
-$summaries
-EOF
+# Judged against the fixture's known forge state (PR 3228 is OPEN), not by the
+# outcome store's own check: no sentence or clause that names the PR may call it
+# merged or on main unless that clause negates it, and the outcomes together
+# must say the PR is open or not merged.
+false_claims=$(printf '%s\n' "$summaries" | perl -ne '
+  for my $c (split /(?<=[.!?])\s+|;/, lc $_) {
+    next unless $c =~ /3228/;
+    next unless $c =~ /\bmerged\b|\b(?:on|in|into) (?:main|master)\b/;
+    next if $c =~ /\b(?:not|never|yet|unmerged|until|once|awaiting|pending|ready to)\b|n\x27t\b/;
+    next if $c =~ /\bmerged (?:main|master|origin)\b|\b(?:main|master) into\b/;
+    print "$c\n";
+  }')
+[ -z "$false_claims" ] || fail "the branch called the open PR merged or on main ($CLAUDE_VERSION): $false_claims"$'\n'"$(diagnose)"
+printf '%s\n' "$summaries" | grep -qiE '\bopen\b|not (yet )?merged|unmerged' \
+  || fail "no outcome reports the PR as open or not merged ($CLAUDE_VERSION): $summaries"$'\n'"$(diagnose)"
 [ -f "$FM/state/swipe.meta" ] || fail "the branch cleaned up the task record while its PR is open ($CLAUDE_VERSION)"$'\n'"$(diagnose)"
 [ -d "$LAB/wt" ] || fail "the branch returned the worker's copy while its PR is open ($CLAUDE_VERSION)"
 if ! "$LAB/bin/tmux" has-session -t lab 2>/dev/null || ! kill -0 "$WORKER_PANE_PID" 2>/dev/null; then

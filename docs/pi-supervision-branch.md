@@ -255,7 +255,7 @@ The guards are wired into these scripts:
 | --- | --- |
 | `fm-send.sh`, `fm-control.sh`, and `fm-teardown.sh` | Overlap, lease-checked, with claim serialization retained through the mutation. |
 | `fm-pr-merge.sh`, `fm-merge-local.sh`, `fm-spawn.sh`, `fm-send.sh --resolve-key` for a decision key, and `fm-teardown.sh` for a second mate | Main-owned while attended; branch refused. |
-| `fm-teardown.sh` for a ship with a recorded PR, and `fm-branch-outcome.sh append` for a summary calling a PR merged | Branch refused without merge proof (`fm_pr_merge_proof` in `bin/fm-pr-lib.sh`): a pushed branch is landed work for MAIN, not a merge. |
+| `fm-teardown.sh` for a ship with a recorded PR or (no-mistakes and direct-PR) one the forge finds for its done line or branch, and `fm-branch-outcome.sh append` for a summary calling a PR merged | Branch refused without merge proof (`fm_pr_merge_proof` in `bin/fm-pr-lib.sh`): a pushed branch is landed work for MAIN, not a merge. |
 
 A relaunch through `fm-control` stays branch-legal recovery in both postures.
 Under the away-posture record, the PR merge, a fresh spawn, and a decision answer relocate to the branch behind each script's own gate.

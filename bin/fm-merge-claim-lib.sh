@@ -11,14 +11,16 @@
 #
 # A claim is affirmative merge wording in the summary: the word "merged" or
 # "landed", or "is/now/landed/already on|in main|master". The word is not a
-# claim when one of the three words before it negates or defers it ("not",
-# "n't", "once", "to be", "awaiting", "ready", ...), or when it describes
-# merging main into a branch ("merged main into", "main <sha> merged",
+# claim when one of the three words before it in its own clause negates or
+# defers it ("not", "n't", "once", "to be", "awaiting", "ready", ...), or when
+# it describes merging main into a branch ("merged main into", "main <sha> merged",
 # "auto-merged <file>"). An open PR is therefore never "landed" in an outcome
 # either: that is the worker's word for what it did to its branch.
-# Each claim names the PR URL closest before it in the summary, else the first
-# one after it, else the task's recorded pr=. A claim naming no PR at all is
-# left alone, because there is nothing to verify it against.
+# A clause ends at sentence punctuation, a semicolon, or a line break. Each
+# claim names the PR URL closest before it in its clause, else the first one
+# after it in its clause, else the closest before it in the summary, else the
+# first one after it, else the task's recorded pr=. A claim naming no PR at all
+# is left alone, because there is nothing to verify it against.
 # Proof is fm_pr_merge_proof (bin/fm-pr-lib.sh): this home's merge record or the
 # forge's live state, read within FM_MERGE_CLAIM_TIMEOUT seconds (default 10).
 #
@@ -47,6 +49,9 @@ _fm_merge_claim_urls() {
       $u =~ s/[.:!?]+$//;
       push @urls, [$p, $u] if $u =~ m{/(?:pull|pulls|merge_requests)/[0-9]+$|/\+/[0-9]+$};
     }
+    my @cut = (0);
+    while ($l =~ /[.!?]+(?=\s|$)|[;\n]/g) { push @cut, $+[0]; }
+    my $clause = sub { my $p = shift; my ($cs, $ce) = (0, length $l); for my $c (@cut) { $cs = $c if $c <= $p; } for my $c (@cut) { if ($c > $p) { $ce = $c; last; } } return ($cs, $ce); };
     my $defer = qr/^(?:not|never|no|yet|until|unless|before|once|when|whenever|after|if|whether|await|awaits|awaiting|wait|waits|waiting|ready|pending|can|cannot|will|would|should|could|may|might|must|need|needs|ask|asks|asking|asked|to|be|for|get|gets)$/;
     my @claims;
     while ($l =~ /\b(?:merged|landed)\b/g) {
@@ -55,7 +60,8 @@ _fm_merge_claim_urls() {
       my $after = substr($l, $+[0]);
       next if $before =~ /-$/;
       next if $after =~ /^\s+(?:main|master|origin\/|upstream|the default branch|the latest main|in main|in the latest)\b/;
-      my @w = ($before =~ /([a-z0-9\x27\/]+)/g);
+      my ($cs) = $clause->($p);
+      my @w = (substr($l, $cs, $p - $cs) =~ /([a-z0-9\x27\/]+)/g);
       @w = @w[-3 .. -1] if @w > 3;
       next if grep { $_ =~ $defer || $_ =~ /n\x27t$/ } @w;
       next if @w && ($w[-1] =~ /^[0-9a-f]{7,40}$/ || $w[-1] eq "main" || $w[-1] eq "master");
@@ -63,14 +69,18 @@ _fm_merge_claim_urls() {
     }
     while ($l =~ /\b(?:is|are|now|landed|lands|went|already|sits)\s+(?:now\s+)?(?:on|in)\s+(?:main|master)\b/g) {
       my $p = $-[0];
-      my @w = (substr($l, 0, $p) =~ /([a-z0-9\x27\/]+)/g);
+      my ($cs) = $clause->($p);
+      my @w = (substr($l, $cs, $p - $cs) =~ /([a-z0-9\x27\/]+)/g);
       @w = @w[-3 .. -1] if @w > 3;
       next if grep { $_ =~ $defer || $_ =~ /n\x27t$/ } @w;
       push @claims, $p;
     }
     for my $c (@claims) {
+      my ($cs, $ce) = $clause->($c);
       my $u = "";
-      for my $e (@urls) { $u = $e->[1] if $e->[0] < $c; }
+      for my $e (@urls) { $u = $e->[1] if $e->[0] >= $cs && $e->[0] < $c; }
+      if ($u eq "") { for my $e (@urls) { if ($e->[0] > $c && $e->[0] < $ce) { $u = $e->[1]; last; } } }
+      if ($u eq "") { for my $e (@urls) { $u = $e->[1] if $e->[0] < $c; } }
       if ($u eq "") { for my $e (@urls) { if ($e->[0] > $c) { $u = $e->[1]; last; } } }
       print "$u\n";
     }

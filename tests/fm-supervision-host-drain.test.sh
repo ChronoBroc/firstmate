@@ -84,7 +84,9 @@ test_report_surface_refuses_an_unproven_merge_claim() {
   cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
 [ "${1:-} ${2:-}" = "api graphql" ] || exit 1
-printf '%s\n' "state=${FAKE_PR_STATE:-OPEN}" "merged=$([ "${FAKE_PR_STATE:-OPEN}" = MERGED ] && echo true || echo false)"
+st=${FAKE_PR_STATE:-OPEN}
+case " $* " in *"number=${FAKE_MERGED_PR##*/} "*) [ -z "${FAKE_MERGED_PR:-}" ] || st=MERGED ;; esac
+printf '%s\n' "state=$st" "merged=$([ "$st" = MERGED ] && echo true || echo false)"
 SH
   chmod +x "$fakebin/gh"
   report() {  # <summary>
@@ -101,6 +103,14 @@ SH
   expect_code 3 "$rc" "a landed claim for an open PR must be refused"
   out=$(report "Swipe to close part one landed and is merged."); rc=$?
   expect_code 3 "$rc" "a merged claim naming no URL must be checked against the task's recorded PR"
+  out=$(report "No conflicts. Merged $pr."); rc=$?
+  expect_code 3 "$rc" "a negation in an earlier sentence must not hide a merged claim for an open PR"
+  out=$(report "No conflicts; $pr is on main."); rc=$?
+  expect_code 3 "$rc" "a negation in an earlier clause must not hide an on-main claim for an open PR"
+  out=$(FAKE_MERGED_PR=https://github.com/example/repo/pull/3189 \
+    report "https://github.com/example/repo/pull/3189 is merged. Merged $pr."); rc=$?
+  expect_code 3 "$rc" "a merged claim must be checked against the PR its own sentence names"
+  assert_contains "$out" "$pr" "the refusal must name the open PR its sentence claims merged"
   [ ! -e "$state/branch-outcomes.jsonl" ] || fail "a refused merge claim touched the outcome store"
 
   out=$(report "Swipe to close part one: the worker merged main into its branch and pushed it; $pr is open, not merged yet, and ready to merge."); rc=$?

@@ -836,6 +836,98 @@ test_main_teardown_of_a_pushed_ship_with_an_open_pr_is_unchanged() {
   pass "MAIN's cleanup of a pushed ship is unchanged by the branch's merge-proof rule"
 }
 
+# The same pushed ship before its PR was ever registered: no pr= in its record.
+# The forge still knows the PR by its head branch, which the fake gh-axi lists
+# as <row> ("7,open", "7,merged"), or as no PR at all when <row> is empty, or
+# fails outright when <row> is "error". <status> is the worker's newest done:
+# line.
+setup_pushed_unregistered_ship() {  # <case-name> <row> <status>
+  local case_dir row=$2
+  case_dir=$(setup_pushed_ship_with_open_pr "$1" OPEN)
+  sed -i.bak '/^pr=/d' "$case_dir/state/task-x1.meta" && rm -f "$case_dir/state/task-x1.meta.bak"
+  printf '%s\n' "$3" > "$case_dir/state/task-x1.status"
+  if [ "$row" = error ]; then
+    printf '%s\n' '#!/usr/bin/env bash' 'echo "error: gh-axi unavailable" >&2' 'exit 1' > "$case_dir/fakebin/gh-axi"
+  elif [ -n "$row" ]; then
+    cat > "$case_dir/fakebin/gh-axi" <<SH
+#!/usr/bin/env bash
+case "\${1:-} \${2:-}" in
+  "pr list")
+    case " \$* " in
+      *" --head fm/task-x1 "*)
+        printf '%s\n' "count: 1 (showing first 1)" "pull_requests[1]{number,state}:" "  $row" ; exit 0 ;;
+    esac
+    printf '%s\n' "count: 0 (showing first 0)" "pull_requests[]: []" ; exit 0 ;;
+  "pr view") echo "error: pull request not found" >&2 ; exit 1 ;;
+esac
+exit 0
+SH
+  fi
+  chmod +x "$case_dir/fakebin/gh-axi"
+  printf '%s\n' "$case_dir"
+}
+
+run_branch_teardown_case() {  # <case-dir>
+  local rc=0
+  FM_SUPERVISION_ACTOR=branch run_teardown "$1" > "$1/stdout" 2> "$1/stderr" || rc=$?
+  printf '%s' "$rc"
+}
+
+test_branch_teardown_refuses_an_unregistered_ship_whose_branch_pr_is_open() {
+  local case_dir rc
+  case_dir=$(setup_pushed_unregistered_ship branch-unregistered-open "7,open" \
+    'done [at=1794889112]: landed. MERGE-PR-LANDED {"pr":7,"pushed":true}')
+  rc=$(run_branch_teardown_case "$case_dir")
+  [ "$rc" -ne 0 ] || fail "branch-unregistered-open: the supervision branch cleaned up a ship whose unregistered PR is open"
+  assert_grep 'REFUSED' "$case_dir/stderr" "branch-unregistered-open: refusal was not reported"
+  assert_grep '#7' "$case_dir/stderr" "branch-unregistered-open: refusal did not name the open PR"
+  assert_present "$case_dir/state/task-x1.meta" "branch-unregistered-open: the task record was removed"
+  [ -d "$case_dir/wt" ] || fail "branch-unregistered-open: the worker's copy was returned"
+  pass "the supervision branch refuses to clean up a pushed ship whose unregistered branch PR is open"
+}
+
+test_branch_teardown_refuses_an_unregistered_ship_whose_done_line_names_an_open_pr() {
+  local case_dir rc
+  case_dir=$(setup_pushed_unregistered_ship branch-unregistered-status-open "" \
+    'done [at=1794889112]: PR https://github.com/example/repo/pull/7 landed. MERGE-PR-LANDED {"pr":7,"pushed":true}')
+  rc=$(run_branch_teardown_case "$case_dir")
+  [ "$rc" -ne 0 ] || fail "branch-unregistered-status-open: the supervision branch cleaned up a ship whose done line names an open PR"
+  assert_grep 'https://github.com/example/repo/pull/7' "$case_dir/stderr" \
+    "branch-unregistered-status-open: refusal did not name the open PR"
+  assert_grep 'OPEN' "$case_dir/stderr" "branch-unregistered-status-open: refusal did not state the forge's open state"
+  assert_present "$case_dir/state/task-x1.meta" "branch-unregistered-status-open: the task record was removed"
+  pass "the supervision branch refuses to clean up a ship whose newest done line names an open PR"
+}
+
+test_branch_teardown_cleans_up_an_unregistered_ship_whose_branch_pr_merged() {
+  local case_dir rc
+  case_dir=$(setup_pushed_unregistered_ship branch-unregistered-merged "7,merged" \
+    'done [at=1794889112]: merged. MERGE-PR-LANDED {"pr":7,"pushed":true}')
+  rc=$(run_branch_teardown_case "$case_dir")
+  expect_code 0 "$rc" "branch-unregistered-merged: the supervision branch could not clean up a merged ship: $(cat "$case_dir/stderr")"
+  assert_absent "$case_dir/state/task-x1.meta" "branch-unregistered-merged: the task record survived cleanup"
+  pass "the supervision branch cleans up an unregistered ship whose branch PR the forge reports merged"
+}
+
+test_branch_teardown_of_an_unregistered_ship_with_no_pr_at_the_forge_is_unchanged() {
+  local case_dir rc
+  case_dir=$(setup_pushed_unregistered_ship branch-unregistered-none "" 'done [at=1794889112]: pushed.')
+  rc=$(run_branch_teardown_case "$case_dir")
+  expect_code 0 "$rc" "branch-unregistered-none: cleanup of pushed work with no PR changed: $(cat "$case_dir/stderr")"
+  assert_absent "$case_dir/state/task-x1.meta" "branch-unregistered-none: the task record survived cleanup"
+  pass "the supervision branch's cleanup of a pushed ship with no PR at the forge is unchanged"
+}
+
+test_branch_teardown_refuses_an_unregistered_ship_when_the_forge_cannot_be_asked() {
+  local case_dir rc
+  case_dir=$(setup_pushed_unregistered_ship branch-unregistered-error error 'done [at=1794889112]: pushed.')
+  rc=$(run_branch_teardown_case "$case_dir")
+  [ "$rc" -ne 0 ] || fail "branch-unregistered-error: cleanup proceeded without asking the forge for the branch's PR"
+  assert_grep 'REFUSED' "$case_dir/stderr" "branch-unregistered-error: refusal was not reported"
+  assert_present "$case_dir/state/task-x1.meta" "branch-unregistered-error: the task record was removed"
+  pass "the supervision branch refuses an unregistered ship's cleanup when the forge cannot be asked for its PR"
+}
+
 test_teardown_closes_a_gerrit_task_with_its_change_url_as_a_note() {
   local case_dir out real_tasks_axi gerrit_url=https://gerrit.example.com/c/project/+/12345
   case_dir=$(make_case tasks-axi-close-gerrit)
@@ -6664,6 +6756,11 @@ test_teardown_closes_the_backlog_item_itself
 test_branch_teardown_refuses_a_ship_whose_recorded_pr_is_open
 test_branch_teardown_cleans_up_a_ship_whose_recorded_pr_merged
 test_main_teardown_of_a_pushed_ship_with_an_open_pr_is_unchanged
+test_branch_teardown_refuses_an_unregistered_ship_whose_branch_pr_is_open
+test_branch_teardown_refuses_an_unregistered_ship_whose_done_line_names_an_open_pr
+test_branch_teardown_cleans_up_an_unregistered_ship_whose_branch_pr_merged
+test_branch_teardown_of_an_unregistered_ship_with_no_pr_at_the_forge_is_unchanged
+test_branch_teardown_refuses_an_unregistered_ship_when_the_forge_cannot_be_asked
 test_teardown_closes_a_gerrit_task_with_its_change_url_as_a_note
 test_teardown_closes_a_gitlab_task_with_its_merge_request_url_as_a_note
 test_teardown_manual_backend_leaves_the_backlog_to_the_operator
