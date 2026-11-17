@@ -1,0 +1,17 @@
+$ fm-claude-trust.sh --add-dirs ... livetask /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/state
+error: refusing to pre-register Claude trust: '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/state' is not one of task 'livetask''s channel directories under '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/state', '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/data' or '{run-worktree}'
+exit=1
+$ fm-claude-trust.sh --add-dirs ... livetask /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.m3vf68/home
+error: refusing to pre-register Claude trust: '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home' is not one of task 'livetask''s channel directories under '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/state', '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/data' or '{run-worktree}'
+exit=1
+$ fm-claude-trust.sh --add-dirs ... evil /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.m3vf68/home/data/evil
+error: refusing to pre-register Claude trust: '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/outside' is not one of task 'evil''s channel directories under '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/state', '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/data' or '{run-worktree}'
+exit=1
+$ fm-claude-trust.sh --add-dirs ... livetask /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/state/operational-inbox /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.m3vf68/outside
+error: refusing to pre-register Claude trust: '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/outside' is not one of task 'livetask''s channel directories under '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/state', '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/data' or '{run-worktree}'
+exit=1
+store after refusals: <absent>
+$ fm-claude-trust.sh --add-dirs ... livetask /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/state/operational-inbox /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/state/livetask.inbox
+trusted: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/state/operational-inbox
+trusted: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-lab.m3vf68/home/state/livetask.inbox
+exit=0
