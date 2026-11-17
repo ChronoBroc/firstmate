@@ -16,10 +16,11 @@
 # main|master". Such wording is not a claim when one of the three words before
 # it in the clause negates or defers it ("not", "n't", "once", "to be",
 # "awaiting", "ready", ..., or "un-merged"), when it describes merging main
-# into a branch ("merged main into", "main <sha> merged"), or when "merged" is
+# into a branch ("merged main into", "main merged into"), or when "merged" is
 # directly followed by a file path and the clause names no PR ("auto-merged
 # src/a.ts"). A bare "landed" is not a claim: "the worker landed main into the
-# PR; it remains open" is the truthful report of that state.
+# PR; it remains open" is the truthful report of that state. PR URLs and PR
+# references are read as opaque tokens, so no word inside them exempts a claim.
 # Every PR a claim clause names (a PR URL, or a bare "PR 123" / "#123") must be
 # proven merged; a claim clause naming none stands for the task's recorded pr=.
 # A bare number is the recorded pr= when that ends in it, else that number in
@@ -56,24 +57,27 @@ _fm_merge_claim_urls() {
       push @ids, [$p, $u] if $u =~ m{/(?:pull|pulls|merge_requests)/[0-9]+$|/\+/[0-9]+$};
     }
     while ($l =~ /\b(?:pr|pull request)\s*#?\s*([0-9]+)\b|(?<![\w\/])#([0-9]+)\b/g) {
-      my ($p, $n) = ($-[0], defined $1 ? $1 : $2);
+      my ($p, $e, $n) = ($-[0], $+[0], defined $1 ? $1 : $2);
       next if grep { $p >= $_->[0] && $p < $_->[1] } @spans;
       push @ids, [$p, "#$n"];
+      push @spans, [$p, $e];
     }
     @ids = sort { $a->[0] <=> $b->[0] } @ids;
-    my @cut = (0, length $l);
-    while ($l =~ /[.!?]+(?=\s|$)|[;\n]|\b(?:but|while)\b/g) { push @cut, $+[0]; }
+    my $m = $l;
+    substr($m, $_->[0], $_->[1] - $_->[0]) = "z" x ($_->[1] - $_->[0]) for @spans;
+    my @cut = (0, length $m);
+    while ($m =~ /[.!?]+(?=\s|$)|[;\n]|\b(?:but|while)\b/g) { push @cut, $+[0]; }
     my %seen; @cut = sort { $a <=> $b } grep { !$seen{$_}++ } @cut;
     my $defer = qr/^(?:not|never|no|yet|until|unless|before|once|when|whenever|after|if|whether|await|awaits|awaiting|wait|waits|waiting|ready|pending|can|cannot|will|would|should|could|may|might|must|need|needs|ask|asks|asking|asked|to|be|for|get|gets)$/;
     my $negated = sub {
       my ($cs, $p) = @_;
-      my @w = (substr($l, $cs, $p - $cs) =~ /([a-z0-9\x27\/]+)/g);
+      my @w = (substr($m, $cs, $p - $cs) =~ /([a-z0-9\x27\/]+)/g);
       @w = @w[-3 .. -1] if @w > 3;
       return scalar grep { $_ =~ $defer || $_ =~ /n\x27t$/ } @w;
     };
     for my $i (0 .. $#cut - 1) {
       my ($cs, $ce) = ($cut[$i], $cut[$i + 1]);
-      my $c = substr($l, $cs, $ce - $cs);
+      my $c = substr($m, $cs, $ce - $cs);
       my @in = map { $_->[1] } grep { $_->[0] >= $cs && $_->[0] < $ce } @ids;
       my $claim = 0;
       while ($c =~ /\b(?:([a-z]+)-)?merged\b/g) {
@@ -81,11 +85,10 @@ _fm_merge_claim_urls() {
         next if $prefix eq "un";
         next if $negated->($cs, $p);
         next if $after =~ /^\s+(?:main|master|origin\/|upstream|the default branch|the latest main|the base)\b/;
-        my @w = (substr($l, $cs, $p - $cs) =~ /([a-z0-9\x27\/]+)/g);
-        next if @w && ($w[-1] =~ /^[0-9a-f]{7,40}$/ || $w[-1] eq "main" || $w[-1] eq "master");
+        next if substr($m, $cs, $p - $cs) =~ /\b(?:main|master|origin\/\S+|the base)\s+(?:was\s+|is\s+)?$/ && $after =~ /^\s+into\b/;
         if (!@in && $after =~ /^\s+(\S+)/) {
           my $t = $1; $t =~ s/[.,:!?]+$//;
-          next if $t !~ /^https?:/ && ($t =~ m{/} || $t =~ /\.[a-z0-9]{1,6}$/);
+          next if $t =~ m{/} || $t =~ /\.[a-z0-9]{1,6}$/;
         }
         $claim = 1;
       }

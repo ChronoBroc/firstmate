@@ -106,6 +106,12 @@ SH
   assert_contains "$out" "the forge reports it OPEN" "a squash-merged claim must be checked against the forge"
   out=$(report "Rebase-merged $pr."); rc=$?
   expect_code 3 "$rc" "a rebase-merged claim for an open PR must be refused"
+  out=$(report "https://github.com/example/ready-to-use/pull/3228 is merged."); rc=$?
+  expect_code 3 "$rc" "a word inside a PR URL must not exempt a merged claim"
+  out=$(report "https://github.com/example/ready-to-use/pull/3228 is on main."); rc=$?
+  expect_code 3 "$rc" "a word inside a PR URL must not exempt an on-main claim"
+  out=$(report "PR 3228 at e5025a546 merged."); rc=$?
+  expect_code 3 "$rc" "a commit id before merged must not exempt a merged claim"
   out=$(report "PR 3228 was auto-merged."); rc=$?
   expect_code 3 "$rc" "an auto-merged claim about a PR must be refused while the PR is open"
   out=$(report "PR 3228 is merged in main."); rc=$?
