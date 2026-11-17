@@ -40,8 +40,8 @@
 #     bin/fm-spawn.sh installs for Claude workers), hands each round still
 #     waiting on that worker to it at its next step instead: under the source
 #     lock it claims <source>.<seq>.midturn (mid_turn_at=<epoch>) for a
-#     delivered receipt with no pickup whose inbox record is still unhandled,
-#     and prints that record's body. A claimed round is never handed over
+#     delivered receipt with no pickup whose round is not marked handled and
+#     whose inbox record is still unhandled, and prints that record's body. A claimed round is never handed over
 #     twice. The handoff is not a pickup: the worker still takes the round by
 #     reading it, so the alarm below still judges a worker that was handed
 #     the answer and did not act on it.
@@ -275,7 +275,8 @@ fm_board_receipt_mid_turn() {  # <state> <task>
     if [ -f "$path" ] && [ ! -e "$marker" ] && [ ! -e "${path%.receipt}.read" ] \
       && text=$(cat -- "$path" 2>/dev/null) \
       && [ "$(_fm_board_receipt_get "$text" task)" = "$task" ] \
-      && [ "$(_fm_board_receipt_get "$text" state)" = delivered ]; then
+      && [ "$(_fm_board_receipt_get "$text" state)" = delivered ] \
+      && ! fm_procevent_is_handled "$state" "$id" "$seq"; then
       name=$(_fm_board_receipt_get "$text" inbox_record)
       record="$(fm_task_inbox_dir "$state" "$task")/$name"
       if fm_task_inbox_seq_of "$name" >/dev/null && [ -f "$record" ] \

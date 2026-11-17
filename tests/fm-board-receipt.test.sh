@@ -279,6 +279,28 @@ test_busy_worker_is_handed_the_answer_at_its_next_step() {
   pass "a busy worker is handed its board answer at its next step, once, without that counting as taken"
 }
 
+# Claude Code runs the worker's hooks inside its subagents too, marking those
+# payloads with agent_id (https://code.claude.com/docs/en/hooks).
+test_subagent_step_leaves_the_answer_for_its_worker() {
+  armed_board subagent w-parent
+  busy_worker w-parent
+  out=$(printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","agent_id":"a1b2c3"}' \
+    | "$ROOT/bin/fm-board-receipt-hook.sh" claude "$HOME_DIR/state" w-parent)
+  [ -z "$out" ] || fail "a subagent's step was handed its worker's round: $out"
+  [ ! -e "$HOME_DIR/state/board-receipts/$SRC.1.midturn" ] || fail "a subagent's step claimed the handoff"
+  assert_contains "$(after_step w-parent)" "001.msg" "the worker's own next step was not handed the round"
+  pass "a subagent's step hands nothing over and leaves the round for its worker's own next step"
+}
+
+test_handled_round_is_not_handed_over() {
+  armed_board handledmid w-done
+  busy_worker w-done
+  FM_HOME="$HOME_DIR" "$ROOT/bin/fm-procevent.sh" handled "$SRC" 1 >/dev/null \
+    || fail "the round could not be acknowledged"
+  [ -z "$(after_step w-done)" ] || fail "a round already acknowledged was handed to the worker again"
+  pass "a round acknowledged before the worker's next step is not handed over"
+}
+
 test_busy_worker_alarm_carries_the_answer_and_its_turn() {
   armed_board longstep w-long
   busy_worker w-long
@@ -363,6 +385,8 @@ fm_test_run \
   test_read_racing_its_delivery_is_still_the_pickup \
   test_untaken_answer_alarms_once_and_clears_on_pickup \
   test_busy_worker_is_handed_the_answer_at_its_next_step \
+  test_subagent_step_leaves_the_answer_for_its_worker \
+  test_handled_round_is_not_handed_over \
   test_busy_worker_alarm_carries_the_answer_and_its_turn \
   test_busy_worker_alarm_without_progress_or_handoff_claims_neither \
   test_acknowledged_round_counts_when_the_record_was_not_filed \

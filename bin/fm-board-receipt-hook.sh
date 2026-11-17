@@ -7,8 +7,10 @@
 #
 # bin/fm-spawn.sh installs this as a Claude Code PostToolUse hook for every
 # Claude worker, so it runs as that worker's own process after each tool call.
-# The hook payload on stdin is read and discarded. When a delivered board round
-# is still waiting on <task-id>, it prints one PostToolUse JSON object whose
+# Claude Code runs the same hook for the worker's subagents, marking their
+# payloads with agent_id; such a step hands nothing over, so the round stays for
+# the worker's own next step. When a delivered board round is still waiting on
+# <task-id>, it prints one PostToolUse JSON object whose
 # additionalContext carries that round's steering-inbox instruction, which
 # Claude Code adds to the worker's context before its next step; otherwise it
 # prints nothing. bin/fm-board-receipt-lib.sh ("Mid-turn handoff") owns which
@@ -20,7 +22,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 case "${1-}" in -h|--help|help) sed -n '2,/^set -u$/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//'; exit 0 ;; esac
-cat >/dev/null 2>&1 || true
+payload=$(cat 2>/dev/null) || payload=
 [ "${1-}" = claude ] && [ -n "${2-}" ] && [ -n "${3-}" ] || exit 0
 STATE=$2
 TASK=$3
@@ -37,6 +39,12 @@ for receipt in "$STATE"/board-receipts/*.receipt; do
   fi
 done
 [ "$waiting" -eq 1 ] || exit 0
+agent=$(printf '%s' "$payload" | perl -MJSON::PP -e '
+  local $/;
+  my $p = eval { decode_json(<STDIN>) };
+  print ref $p eq "HASH" && defined $p->{agent_id} ? $p->{agent_id} : "";
+' 2>/dev/null) || exit 0
+[ -z "$agent" ] || exit 0
 
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh" || exit 0
