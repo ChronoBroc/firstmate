@@ -4032,31 +4032,46 @@ fi
 # PR is cleaned up by the branch only on merge proof (fm_pr_merge_proof in
 # bin/fm-pr-lib.sh), so a worker's "landed" wording cannot retire a worker
 # whose PR is still open. A PR-delivery ship with no recorded PR is resolved
-# first: the PR URL its newest done: status line names, else the forge's PR for
-# its head branch. A found PR needs the same proof; no PR at the forge keeps the
-# landed-work rule below; a lookup that cannot run refuses. MAIN's cleanup
+# first: the "PR <url>" its newest done: status line names (the rule
+# bin/fm-pr-check.sh scan uses) and the forge's PR for its head branch. A found
+# PR needs the same proof; two different PRs refuse as ambiguous; no PR at all
+# keeps the landed-work rule below; a lookup that cannot run refuses. MAIN's cleanup
 # keeps the landed-work rule.
 branch_unregistered_pr_merge_proof() {
-  local line url head out
+  local line token url='' head out branch_url
   if [ -f "$STATE/$ID.status" ] && [ ! -L "$STATE/$ID.status" ]; then
     line=$(grep '^done' "$STATE/$ID.status" 2>/dev/null | tail -n 1 || true)
-    while IFS= read -r url; do
-      if fm_pr_url_parse "$url"; then
-        BRANCH_MERGE_PR=$url
-        fm_pr_merge_proof "$STATE" "$ID" "$url"
-        return
+    while IFS= read -r token; do
+      token=${token#*PR }
+      token=$(printf '%s' "$token" | sed 's/[).,;:'"'"'"]*$//')
+      fm_pr_url_parse "$token" || continue
+      if [ -n "$url" ] && [ "$url" != "$FM_PR_URL" ]; then
+        BRANCH_MERGE_PR="$url or $FM_PR_URL"
+        return 3
       fi
-    done <<URLS
-$(printf '%s\n' "$line" | grep -oE 'https://[^][[:space:]<>()"'"'"'`,;]+' | sed 's/[.:!?]*$//' || true)
-URLS
+      url=$FM_PR_URL
+    done <<TOKENS
+$(printf '%s\n' "$line" | grep -oE '(^|[^[:alnum:]_])PR https://[^[:space:]]+' || true)
+TOKENS
   fi
+  BRANCH_MERGE_PR=$url
   head=$(fm_meta_get "$META" branch)
   [ -n "$head" ] || head=$(git -C "$WT" symbolic-ref --quiet --short HEAD 2>/dev/null) || return 2
   [ -n "$head" ] || return 2
   out=$(cd "$WT" 2>/dev/null && gh-axi pr list --state all --head "$head" --limit 1 --fields url 2>/dev/null) || return 2
-  case "$out" in "count: 0"|"count: 0 "*|"count: 0"$'\n'*) return 0 ;; esac
-  url=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*[0-9][0-9]*,.*,"\(https:[^"]*\)"$/\1/p' | head -n 1)
-  fm_pr_url_parse "$url" || return 2
+  case "$out" in
+    "count: 0"|"count: 0 "*|"count: 0"$'\n'*) ;;
+    *)
+      branch_url=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*[0-9][0-9]*,.*,"\(https:[^"]*\)"$/\1/p' | head -n 1)
+      fm_pr_url_parse "$branch_url" || return 2
+      if [ -n "$url" ] && [ "$url" != "$FM_PR_URL" ]; then
+        BRANCH_MERGE_PR="$url or $FM_PR_URL"
+        return 3
+      fi
+      url=$FM_PR_URL
+      ;;
+  esac
+  [ -n "$url" ] || return 0
   BRANCH_MERGE_PR=$url
   fm_pr_merge_proof "$STATE" "$ID" "$url"
 }
@@ -4072,6 +4087,9 @@ if [ "$KIND" = ship ] && [ "$(fm_lease_actor)" = branch ]; then
     if [ "$branch_merge_rc" -eq 1 ]; then
       echo "REFUSED: the PR $BRANCH_MERGE_PR of task $ID is not merged (the forge reports it ${FM_PR_RECORD_STATE:-not merged}); the supervision branch cleans up a ship only after its PR merges." >&2
       echo "The worker and its copy were left running. Report the PR as not merged." >&2
+    elif [ "$branch_merge_rc" -eq 3 ]; then
+      echo "REFUSED: task $ID records no PR, and its done line and branch name different PRs ($BRANCH_MERGE_PR); the supervision branch cleans up a ship only after its one PR merges. Register the task's PR (bin/fm-pr-check.sh $ID <url>) and retry." >&2
+      echo "The worker and its copy were left running. Report the PR's merge as unconfirmed." >&2
     elif [ -n "$BRANCH_MERGE_PR" ]; then
       echo "REFUSED: cannot prove the PR $BRANCH_MERGE_PR of task $ID merged (no merge record, and the forge could not be read); the supervision branch cleans up a ship only after its PR merges." >&2
       echo "The worker and its copy were left running. Report the PR's merge as unconfirmed." >&2

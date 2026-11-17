@@ -903,6 +903,38 @@ test_branch_teardown_refuses_an_unregistered_ship_whose_done_line_names_an_open_
   pass "the supervision branch refuses to clean up a ship whose newest done line names an open PR"
 }
 
+test_branch_teardown_takes_an_unregistered_ships_pr_only_from_its_pr_token() {
+  local case_dir rc
+  case_dir=$(setup_pushed_unregistered_ship branch-unregistered-pr-token none OPEN \
+    'done [at=1794889112]: Integrated https://github.com/example/repo/pull/10; PR https://github.com/example/repo/pull/11 checks green')
+  cat > "$case_dir/fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-} ${2:-}" = "api graphql" ] || { echo "error: pull request not found" >&2; exit 1; }
+case " $* " in
+  *" number=10 "*) printf '%s\n' state=MERGED merged=true ;;
+  *) printf '%s\n' state=OPEN merged=false ;;
+esac
+SH
+  chmod +x "$case_dir/fakebin/gh"
+  rc=$(run_branch_teardown_case "$case_dir")
+  [ "$rc" -ne 0 ] || fail "branch-unregistered-pr-token: a merged PR the done line only mentioned retired a ship whose own PR is open"
+  assert_grep 'https://github.com/example/repo/pull/11' "$case_dir/stderr" \
+    "branch-unregistered-pr-token: refusal did not name the ship's own PR"
+  assert_present "$case_dir/state/task-x1.meta" "branch-unregistered-pr-token: the task record was removed"
+  pass "the supervision branch reads an unregistered ship's PR only from its done line's PR <url> token"
+}
+
+test_branch_teardown_refuses_an_unregistered_ship_whose_done_line_and_branch_disagree() {
+  local case_dir rc
+  case_dir=$(setup_pushed_unregistered_ship branch-unregistered-ambiguous "Swipe to close" MERGED \
+    'done [at=1794889112]: PR https://github.com/example/repo/pull/9 checks green')
+  rc=$(run_branch_teardown_case "$case_dir")
+  [ "$rc" -ne 0 ] || fail "branch-unregistered-ambiguous: cleanup proceeded while the done line and branch named different PRs"
+  assert_grep 'REFUSED' "$case_dir/stderr" "branch-unregistered-ambiguous: refusal was not reported"
+  assert_present "$case_dir/state/task-x1.meta" "branch-unregistered-ambiguous: the task record was removed"
+  pass "the supervision branch refuses an unregistered ship whose done line and branch name different PRs"
+}
+
 test_branch_teardown_cleans_up_an_unregistered_ship_whose_branch_pr_merged() {
   local case_dir rc
   case_dir=$(setup_pushed_unregistered_ship branch-unregistered-merged "Swipe to close" MERGED \
@@ -6762,6 +6794,8 @@ test_branch_teardown_cleans_up_a_ship_whose_recorded_pr_merged
 test_main_teardown_of_a_pushed_ship_with_an_open_pr_is_unchanged
 test_branch_teardown_refuses_an_unregistered_ship_whose_branch_pr_is_open
 test_branch_teardown_refuses_an_unregistered_ship_whose_done_line_names_an_open_pr
+test_branch_teardown_takes_an_unregistered_ships_pr_only_from_its_pr_token
+test_branch_teardown_refuses_an_unregistered_ship_whose_done_line_and_branch_disagree
 test_branch_teardown_cleans_up_an_unregistered_ship_whose_branch_pr_merged
 test_branch_teardown_of_an_unregistered_ship_with_no_pr_at_the_forge_is_unchanged
 test_branch_teardown_refuses_an_unregistered_ship_when_the_forge_cannot_be_asked
