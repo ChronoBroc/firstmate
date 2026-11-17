@@ -581,7 +581,34 @@ trusted: /private/tmp/fm-sm-trust-live-69759/fm-homes/livemate-n1
 No dialog appeared, the composer was reached, and neither did the machine-scoped bypass warning, because this ran against the real config.
 The lab home was deleted and the test entry was removed from the store and verified absent, with the same point-in-time caveat as the worktree arms above.
 
-`bin/fm-spawn.sh` therefore pre-registers the directory every claude launch starts in through `bin/fm-claude-trust.sh` before launch, and `tests/fm-claude-trust.test.sh` pins both halves of the scope contract for both shapes: a fresh worktree and a seeded secondmate home are trusted, and an out-of-scope path is refused.
+### Added directories
+
+Verified 2026-11-16 on Claude Code 2.1.326 against an isolated `CLAUDE_CONFIG_DIR`, a lab home outside any git repository, and a private tmux server.
+The control arm ran a real `bin/fm-spawn.sh` claude ship spawn with the launch captured by the suite's fake tmux, then ran that exact launch command in a real pane.
+
+```
+ Adding a new directory:
+ <lab>/case/home/state/operational-inbox
+ This session hasn't worked here before. Is this a directory you created or one you trust?
+ ❯ No, exit
+   Yes, add it
+ Enter to confirm · Esc to cancel
+```
+
+With only some of the four task-channel directories trusted, the next untrusted one asked in turn, and 2.1.325 launched with the same flags showed no such dialog.
+The treatment arm ran the same spawn and launch with `bin/fm-claude-trust.sh --add-dirs` registering each granted directory as its own entry.
+
+```
+ ▐▛███▛█   Claude Code v2.1.326
+ ...
+❯ : Firstmate operational input waiting: read '<lab>/case/home/state/operational-inbox/<record>.msg' and handle its contents as Firstmate operational input.
+  ⎿  Not logged in · Please run /login
+```
+
+No dialog appeared and the brief doorbell was submitted; the login notice is the throwaway config's, which holds no account.
+`tests/fm-claude-trust.test.sh` pins that a claude spawn trusts exactly its `--add-dir` directories and nothing wider, and that the mode refuses any other path.
+
+`bin/fm-spawn.sh` therefore pre-registers the directory every claude launch starts in, and each directory it passes as `--add-dir`, through `bin/fm-claude-trust.sh` before launch, and `tests/fm-claude-trust.test.sh` pins both halves of the scope contract for both shapes: a fresh worktree and a seeded secondmate home are trusted, and an out-of-scope path is refused.
 That automated spawn case runs against a fake claude, so it asserts the store entry and the launch command and nothing more; the live arms above are what establish that the entry actually suppresses the dialog.
 The composer-classification record below observes the same gate from the other side, where an untrusted worktree left Claude, Grok, and Muse unverified because the guard reads a first-launch trust dialog as an unreadable composer.
 

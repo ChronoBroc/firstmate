@@ -696,10 +696,11 @@
 # any per-task state exists, and before its busy hooks are written, every
 # claude launch pre-registers its launch directory -
 # the task worktree, or the secondmate home for a --secondmate spawn -
+# and each directory it passes as --add-dir
 # in the launching user's own Claude trust store through bin/fm-claude-trust.sh,
 # because Claude's interactive workspace-trust dialog gates a folder it has never
 # seen and firstmate cannot answer it. That helper's header owns the structural
-# scope test for both shapes and every refusal; a failed registration stops this
+# scope test for every shape and every refusal; a failed registration stops this
 # spawn rather than launching a worker that would wedge on the dialog.
 # polytoken (the captain-approved TUI-pane-plus-REST hybrid) is the one harness
 # whose worker's unattended permission posture cannot ride a launch flag: a
@@ -4065,26 +4066,35 @@ rovo_config_override_flag() {
 # lazily by their first record, so they are made here: an --add-dir naming a
 # directory that does not exist at launch would leave the channel created
 # later outside the grant. The grant never covers the whole state/ (watcher
-# internals live there) or anything wider.
-claude_add_dirs_flag() {  # <kind> <state-dir> <data-dir> <code-root> <task-id>
+# internals live there) or anything wider. claude_add_dirs sets the list in
+# CLAUDE_ADD_DIR_LIST so the same directories are both pre-trusted (Claude
+# 2.1.326 asks about each --add-dir on its own; bin/fm-claude-trust.sh
+# --add-dirs owns why) and granted by claude_add_dirs_flag.
+CLAUDE_ADD_DIR_LIST=()
+claude_add_dirs() {  # <kind> <state-dir> <data-dir> <code-root> <task-id>
   local kind=$1 state_dir=$2 data_dir=$3 code_root=$4 id=$5
-  local state_real data_real root_real out='' d
-  local dirs=()
+  local state_real data_real root_real
+  CLAUDE_ADD_DIR_LIST=()
   state_real=$(cd "$state_dir" && pwd -P) || return 1
   case "$kind" in
   secondmate)
     mkdir -p "$state_real/$id.inbox/handled" || return 1
-    dirs=("$state_real/$id.inbox")
+    CLAUDE_ADD_DIR_LIST=("$state_real/$id.inbox")
     ;;
   *)
     data_real=$(cd "$data_dir" && pwd -P) || return 1
     root_real=$(cd "$code_root" && pwd -P) || return 1
     [ -d "$root_real/.agents/skills" ] || return 1
     mkdir -p "$state_real/operational-inbox" "$state_real/$id.inbox/handled" "$data_real/$id" || return 1
-    dirs=("$state_real/operational-inbox" "$state_real/$id.inbox" "$data_real/$id" "$root_real/.agents/skills")
+    CLAUDE_ADD_DIR_LIST=("$state_real/operational-inbox" "$state_real/$id.inbox" "$data_real/$id" "$root_real/.agents/skills")
     ;;
   esac
-  for d in "${dirs[@]}"; do
+}
+
+claude_add_dirs_flag() {  # <dir>...
+  local out='' d
+  [ "$#" -gt 0 ] || return 1
+  for d in "$@"; do
     out="$out--add-dir $(shell_quote "$d") "
   done
   printf '%s' "$out"
@@ -6315,7 +6325,9 @@ spawn_assert_agent_worktree
 # arm keeps this in the same class as the two worktree refusals just above: no
 # temp root, no retired relaunch wiring and no busy record exists yet to strand,
 # so the refusal names the endpoint the same way they do and leaves nothing else
-# behind.
+# behind. The directories the launch will pass as --add-dir are registered here
+# too, through the same helper's --add-dirs mode, because Claude asks about each
+# one it does not already trust before the brief is read.
 # agy gates a fresh worktree or secondmate home behind its own folder-trust
 # dialog and honours a trustedWorkspaces entry written ahead of launch
 # (bin/fm-agy-trust.sh), so the same pre-registration removes the dialog for it.
@@ -6333,6 +6345,14 @@ claude*)
   fi
   if ! "$FM_ROOT/bin/fm-claude-trust.sh" "${spawn_trust_args[@]}" >/dev/null; then
     echo "error: could not pre-register Claude workspace trust for $WT; refusing to launch a claude worker that would wedge on the trust dialog; $(spawn_endpoint_hint)" >&2
+    exit 1
+  fi
+  if ! claude_add_dirs "$KIND" "$STATE" "$DATA" "$FM_ROOT" "$ID"; then
+    echo "error: could not resolve the task-channel directories for $ID's claude --add-dir grant; $(spawn_endpoint_hint)" >&2
+    exit 1
+  fi
+  if ! "$FM_ROOT/bin/fm-claude-trust.sh" --add-dirs "$STATE" "$DATA" "$FM_ROOT" "$ID" "${CLAUDE_ADD_DIR_LIST[@]}" >/dev/null; then
+    echo "error: could not pre-register Claude workspace trust for $ID's --add-dir directories; refusing to launch a claude worker that would wedge on the added-directory trust dialog; $(spawn_endpoint_hint)" >&2
     exit 1
   fi
   ;;
@@ -7788,7 +7808,7 @@ case "$LAUNCH" in
 esac
 case "$LAUNCH" in
 *__CLAUDEADDDIRS__*)
-  CLAUDE_ADD_DIRS=$(claude_add_dirs_flag "$KIND" "$STATE" "$DATA" "$FM_ROOT" "$ID") || {
+  CLAUDE_ADD_DIRS=$(claude_add_dirs_flag "${CLAUDE_ADD_DIR_LIST[@]}") || {
     echo "error: could not resolve the task-channel directories for $ID's claude --add-dir grant" >&2
     exit 1
   }

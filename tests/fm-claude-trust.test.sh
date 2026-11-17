@@ -676,6 +676,124 @@ test_claude_spawn_pretrusts_its_worktree_and_reaches_the_brief() {
   pass "fm-spawn.sh: a claude spawn pre-trusts its worktree and launches with a readable brief doorbell"
 }
 
+# The --add-dir values a launch command passes, one per line, read with the same
+# shell argument splitting the pane sees.
+claude_launch_add_dirs() {  # <launch command>
+  local command
+  command=$(fm_test_launch_command "$1")
+  (
+    eval "set -- $command"
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = --add-dir ] && [ "$#" -gt 1 ]; then
+        printf '%s\n' "$2"
+        shift
+      fi
+      shift
+    done
+  )
+}
+
+# Claude Code 2.1.326 asks "Adding a new directory ... is this a directory you
+# trust?" for every --add-dir it does not already trust, with the cursor on "No,
+# exit", before the worker reads its brief. A claude spawn must therefore trust
+# exactly the directories its launch grants: each one as its own entry, and
+# nothing wider - not the home, not the whole state directory.
+test_claude_spawn_pretrusts_exactly_its_add_dirs() {
+  local case_dir home proj wt config fakebin launch_log out dirs d expected actual
+  case_dir="$TMP_ROOT/spawn-add-dirs"
+  home="$case_dir/home"
+  proj="$case_dir/project"
+  wt="$case_dir/wt"
+  config="$case_dir/claude-config"
+  launch_log="$case_dir/launch.log"
+  mkdir -p "$config"
+  fakebin=$(make_spawn_fakebin "$case_dir/fake" claude)
+  fm_test_spawn_home "$home" claude
+  fm_git_worktree "$proj" "$wt" wt-add-dirs
+  fm_test_spawn_brief "$home" adddirspawn
+  out=$(FM_TEST_CLAUDE_CONFIG_DIR="$config" FM_FAKE_LAUNCH_LOG="$launch_log" \
+    fm_test_run_spawn "$home" "$wt" "$fakebin" adddirspawn "$proj" claude \
+    --mode no-mistakes --yolo off)
+  expect_code 0 $? "the claude spawn must succeed: $out"
+  dirs=$(claude_launch_add_dirs "$(cat "$launch_log")")
+  [ "$(printf '%s\n' "$dirs" | grep -c .)" -eq 4 ] \
+    || fail "the claude launch did not pass its four task-channel directories: $dirs"
+  while IFS= read -r d; do
+    assert_trusted "$config/.claude.json" "$d" \
+      "the claude spawn launched with --add-dir $d without pre-registering trust for it"
+  done <<EOF_DIRS
+$dirs
+EOF_DIRS
+  expected=$(printf '%s\n%s\n%s\n' "$dirs" "$(cd "$wt" && pwd -P)" "$(cd "$proj" && pwd -P)" | sort -u)
+  actual=$(trusted_paths "$config/.claude.json" | sort -u)
+  [ "$actual" = "$expected" ] \
+    || fail "the claude spawn trusted more than its launch directory and --add-dir grant: $actual"
+  pass "fm-spawn.sh: a claude spawn pre-trusts exactly the directories it passes as --add-dir"
+}
+
+# A secondmate launch grants one --add-dir, its steering inbox in the launching
+# home's state directory, and must trust exactly that one too.
+test_secondmate_spawn_pretrusts_its_inbox_add_dir() {
+  local case_dir home out dirs
+  case_dir="$TMP_ROOT/sm-add-dirs"
+  home="$case_dir/fm-homes/adddirs-s1"
+  seed_secondmate_home "$home" adddirs-s1 clone
+  out=$(spawn_secondmate_claude "$case_dir" "$home" adddirs-s1)
+  expect_code 0 $? "a claude secondmate spawn must succeed: $out"
+  dirs=$(claude_launch_add_dirs "$(cat "$case_dir/launch.log")")
+  [ "$dirs" = "$(cd "$case_dir/primary/state" && pwd -P)/adddirs-s1.inbox" ] \
+    || fail "the secondmate launch did not grant exactly its steering inbox: $dirs"
+  assert_trusted "$case_dir/claude-config/.claude.json" "$dirs" \
+    "the claude secondmate spawn did not pre-register trust for its steering inbox"
+  assert_not_trusted "$case_dir/claude-config/.claude.json" "$(cd "$case_dir/primary/state" && pwd -P)" \
+    "the claude secondmate spawn trusted the whole state directory"
+  pass "fm-spawn.sh: a claude secondmate spawn pre-trusts its steering-inbox --add-dir"
+}
+
+# --add-dirs mode trusts only a task's own channel directories, structurally
+# tied to the state and data directories and the code root it is handed, and a
+# request naming anything else is refused whole, leaving the store untouched.
+test_add_dirs_mode_refuses_everything_outside_the_task_channels() {
+  local case_dir config home state data root other out
+  case_dir="$TMP_ROOT/add-dirs-scope"
+  config="$case_dir/claude-config"
+  home="$case_dir/home"
+  mkdir -p "$config" "$home/state/operational-inbox" "$home/state/t1.inbox" \
+    "$home/state/t2.inbox" "$home/data/t1" "$case_dir/elsewhere"
+  state=$(cd "$home/state" && pwd -P)
+  data=$(cd "$home/data" && pwd -P)
+  root=$(cd "$ROOT" && pwd -P)
+  other=$(cd "$case_dir/elsewhere" && pwd -P)
+  run_add_dirs() {
+    CLAUDE_CONFIG_DIR="$config" HOME="$config" "$TRUST" --add-dirs "$@" 2>&1
+  }
+  out=$(run_add_dirs "$state" "$data" "$root" t1 "$state")
+  expect_code 1 $? "the whole state directory must be refused: $out"
+  out=$(run_add_dirs "$state" "$data" "$root" t1 "$home")
+  expect_code 1 $? "the whole home must be refused: $out"
+  out=$(run_add_dirs "$state" "$data" "$root" t1 "$state/t2.inbox")
+  expect_code 1 $? "another task's inbox must be refused: $out"
+  out=$(run_add_dirs "$state" "$data" "$root" ../t1 "$state/operational-inbox")
+  expect_code 1 $? "a task id that is not plain must be refused: $out"
+  out=$(run_add_dirs "$state" "$data" "$case_dir" t1 "$state/operational-inbox")
+  expect_code 1 $? "a code root that is not a firstmate checkout must be refused: $out"
+  ln -s "$other" "$home/data/t9"
+  out=$(run_add_dirs "$state" "$data" "$root" t9 "$home/data/t9")
+  expect_code 1 $? "a channel path that is a symlink out of the home must be refused: $out"
+  out=$(run_add_dirs "$state" "$data" "$root" t1 "$state/operational-inbox" "$other")
+  expect_code 1 $? "a request naming one out-of-scope path must be refused whole: $out"
+  [ -z "$(trusted_paths "$config/.claude.json")" ] \
+    || fail "a refused --add-dirs request still recorded trust: $(trusted_paths "$config/.claude.json")"
+  out=$(run_add_dirs "$state" "$data" "$root" t1 "$state/operational-inbox" "$state/t1.inbox" "$data/t1" "$root/.agents/skills")
+  expect_code 0 $? "the task's own four channel directories must be trusted: $out"
+  for d in "$state/operational-inbox" "$state/t1.inbox" "$data/t1" "$root/.agents/skills"; do
+    assert_trusted "$config/.claude.json" "$d" "--add-dirs did not trust $d"
+  done
+  [ "$(trusted_paths "$config/.claude.json" | grep -c .)" -eq 4 ] \
+    || fail "--add-dirs trusted more than the directories it was given"
+  pass "fm-claude-trust.sh: --add-dirs trusts only a task's own channel directories"
+}
+
 # A secondmate home is the second directory a claude launch starts in, and it is
 # as unseen by Claude as a fresh worktree. The standalone-clone shape is the one
 # that wedged in production: the trust step was skipped for every secondmate, so
@@ -1001,6 +1119,9 @@ test_corrupt_store_fails_closed
 test_missing_node_is_refused
 test_scope_refusal_stays_fail_closed_without_node
 test_claude_spawn_pretrusts_its_worktree_and_reaches_the_brief
+test_claude_spawn_pretrusts_exactly_its_add_dirs
+test_secondmate_spawn_pretrusts_its_inbox_add_dir
+test_add_dirs_mode_refuses_everything_outside_the_task_channels
 test_refused_spawn_leaves_no_task_state
 test_secondmate_standalone_clone_home_is_trusted
 test_secondmate_leased_worktree_home_is_trusted
