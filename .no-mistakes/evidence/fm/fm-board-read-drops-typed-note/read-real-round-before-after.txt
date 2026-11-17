@@ -1,0 +1,61 @@
+### real lavish-axi 0.1.97 poll result (round.result)
+session:
+  file: /private/tmp/fmlav.H3JdV7/art/review.html
+  status: feedback
+prompts[1]{uid,prompt,selector,tag,text}:
+  "1","X: A | Note: hello\n\nContext data:\n{\n  \"question\": \"x\",\n  \"answer\": \"A\",\n  \"note\": \"hello\"\n}",form#f,choice,"X: A"
+
+### BASE ba847ddb: fm-procevent-lavish.sh read
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+captain_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: form#f
+tag: choice
+text:
+| X: A
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+rc=0
+
+### FIX 807e55ef: fm-procevent-lavish.sh read
+SESSION-ENDING MESSAGE: (none)
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 1
+captain_message_count: 0
+
+ANNOTATIONS
+ANNOTATION 1 of 1
+element_uid: 1
+element_selector: form#f
+tag: choice
+text:
+| X: A
+prompt:
+| X: A | Note: hello
+| 
+| Context data:
+| {
+|   "question": "x",
+|   "answer": "A",
+|   "note": "hello"
+| }
+END ANNOTATIONS
+END LAVISH RESULT (1 of 1)
+rc=0
