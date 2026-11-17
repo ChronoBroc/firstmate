@@ -32,7 +32,8 @@
 #            selector, tag, and text. A non-choice freeform comment (`prompt`)
 #            is printed as its own field even when a selector is also present
 #            and even when that comment matches the element text, so typed
-#            words are never dropped. Choice Context data is not a comment.
+#            words are never dropped. A choice row prints its prompt, with any
+#            Context data, whenever that prompt differs from its text label.
 #            Captain-supplied body lines are visibly prefixed so they cannot
 #            forge structural labels. Empty message and annotation sections
 #            are reported explicitly.
@@ -873,8 +874,10 @@ cmd_reconciles() { cmd_choice_rows reconciles "$@"; }
 # the field a truncated grep of the raw capture historically dropped.
 # A non-choice annotation that carries a freeform `prompt` prints that comment
 # as its own field; a selector must not hide the typed words, even when the
-# comment matches the captured element text. Choice rows keep Context data
-# out of that field. A pure annotation has no prompt.
+# comment matches the captured element text. A choice row's prompt is printed
+# whenever it differs from its text label, because a page's queued prompt can
+# carry a typed note and its Context data that the shorter label omits. A pure
+# annotation has no prompt.
 cmd_read() {
   local file=${1-} lifecycle session_ended
   [ -n "$file" ] || usage
@@ -952,7 +955,7 @@ cmd_read() {
         my $comment = defined $f->{prompt} ? $f->{prompt} : "";
         my $body = length $elem ? $elem : $comment;
         emit_body($body);
-        if ($tag ne "choice" && length $comment) {
+        if (length $comment && ($tag ne "choice" || $comment ne $body)) {
           print "prompt:\n";
           emit_body($comment);
         }

@@ -3475,17 +3475,41 @@ session:
   session_ended: true
   ended_by: user
 prompts[1]{uid,prompt,selector,tag,text}:
-  "el-choice","Context data: {\"question\":\"quota-source\",\"answer\":\"subscription\"}","section#quota > button",choice,"Subscription quota"
+  "1","X: A | Note: hello","html > body > main > form",choice,"X: A"
 EOF
-out=$(read_out) || fail "read failed on a choice capture"
-assert_contains "$out" "| Subscription quota" \
-  "a choice row no longer showed its element text"
-assert_contains "$out" "tag: choice" "a choice row lost its type"
-assert_not_contains "$out" "Context data:" \
-  "a choice row surfaced machine-generated context as a comment"
+out=$(read_out) || fail "read failed on a choice capture carrying a typed note"
+assert_contains "$out" $'tag: choice\ntext:\n| X: A\nprompt:\n| X: A | Note: hello' \
+  "a typed note queued in a choice prompt behind a shorter text label was dropped"
+pass "read presents a choice prompt that carries more than its text label"
+
+# The page's queuePrompt data object arrives inside the prompt as Context data.
+cat > "$READ" <<'EOF'
+session:
+  file: /review.html
+  status: feedback
+prompts[1]{uid,prompt,selector,tag,text}:
+  "1","Peek band: A: keep as built | Note: render the cards to the top edge\n\nContext data:\n{\n  \"question\": \"peek-band\",\n  \"answer\": \"A\",\n  \"note\": \"render the cards to the top edge\"\n}","html > body > main > form",choice,"Peek band: A"
+EOF
+out=$(read_out) || fail "read failed on a choice capture carrying context data"
+assert_contains "$out" "| Peek band: A: keep as built | Note: render the cards to the top edge" \
+  "a choice prompt's typed note was dropped"
+assert_contains "$out" $'| Context data:\n| {\n|   "question": "peek-band",' \
+  "a choice prompt's data object was dropped"
+assert_contains "$out" "complete: yes" "a choice capture carrying context data was not complete"
+pass "read presents a choice prompt's data object"
+
+cat > "$READ" <<'EOF'
+session:
+  file: /review.html
+  status: feedback
+prompts[1]{uid,prompt,selector,tag,text}:
+  "1","Dispatch: fm-a, fm-b","section#dispatch",choice,"Dispatch: fm-a, fm-b"
+EOF
+out=$(read_out) || fail "read failed on a choice capture whose prompt equals its text"
+assert_contains "$out" "| Dispatch: fm-a, fm-b" "a choice row no longer showed its text"
 assert_not_contains "$out" $'\nprompt:\n' \
-  "a choice row gained a freeform comment field"
-pass "read does not present choice context as a comment"
+  "a choice prompt identical to its text was printed twice"
+pass "read does not repeat a choice prompt that equals its text"
 
 cat > "$READ" <<'EOF'
 session:
