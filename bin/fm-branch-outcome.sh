@@ -81,7 +81,9 @@
 # Usage:
 #   fm-branch-outcome.sh append --task <id> --verdict routine|captain \
 #       --summary <text> [--wake <text>] [--silent true|false]
-#     Append one outcome record; prints the assigned seq.
+#     Append one outcome record; prints the assigned seq. A summary that calls
+#     a PR merged without proof is refused with exit 3 before anything is
+#     written (bin/fm-merge-claim-lib.sh owns that check).
 #   fm-branch-outcome.sh unread
 #     Print every unread record (raw JSONL). Exit 0 with no output when none.
 #   fm-branch-outcome.sh mark-read --through <seq>
@@ -526,6 +528,12 @@ case "$CMD" in
     if [ "$SILENT" = true ] && [ "$VERDICT" != routine ]; then
       echo "error: silent outcomes must have the routine verdict" >&2
       exit 2
+    fi
+    # shellcheck source=bin/fm-merge-claim-lib.sh
+    . "$SCRIPT_DIR/fm-merge-claim-lib.sh"
+    if ! fm_merge_claim_check "$STATE" "$TASK" "$SUMMARY"; then
+      printf 'merge claim refused: %s\n' "$FM_MERGE_CLAIM_REFUSAL" >&2
+      exit 3
     fi
     fm_lock_acquire_wait "$LOCK"
     if ! LAST_SEQ=$(last_seq); then

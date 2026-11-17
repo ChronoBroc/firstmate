@@ -27,7 +27,8 @@
 # record ($STATE/.supervision-host-turn), so a report typed after its turn
 # ended, or from any other shell, is refused. Exit codes: 0 recorded, 1 the
 # store refused or failed (nothing recorded), 2 usage, 3 refused (actor, turn,
-# or scope).
+# scope, or a summary calling a PR merged without proof - the store's merge
+# claim check, bin/fm-merge-claim-lib.sh).
 #
 # A non-silent row an away turn recorded after the captain returned (the turn
 # record says posture=away, or predates the posture field, and no away record
@@ -119,7 +120,11 @@ fi
 
 set -- append --task "$TASK" --verdict "$VERDICT" --summary "$SUMMARY" --silent "$SILENT"
 [ -z "$WAKE" ] || set -- "$@" --wake "$WAKE"
-if ! SEQ=$("$SCRIPT_DIR/fm-branch-outcome.sh" "$@"); then
+APPEND_RC=0
+SEQ=$("$SCRIPT_DIR/fm-branch-outcome.sh" "$@") || APPEND_RC=$?
+if [ "$APPEND_RC" -eq 3 ]; then
+  refuse "nothing recorded; reword the summary as the refusal above says"
+elif [ "$APPEND_RC" -ne 0 ]; then
   echo "outcome store append failed (nothing recorded)" >&2
   exit 1
 fi

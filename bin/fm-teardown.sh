@@ -80,6 +80,11 @@
 # local-only projects additionally accept work merged into the local default
 # branch (firstmate performs that merge after configured approval) as a fallback
 # for the common case where there is no remote at all.
+# Landed is not merged: a pushed branch is landed work, so MAIN may clean up a
+# ship whose PR is still open. The supervision branch (FM_SUPERVISION_ACTOR=
+# branch) may not: for a ship with a recorded pr= it additionally needs proof
+# the PR merged (fm_pr_merge_proof in bin/fm-pr-lib.sh: this home's merge record
+# or the forge's live state), and refuses before anything is stopped otherwise.
 # Freeze-then-decide: a worker can still write after that first proof, so the
 # final proof runs on a frozen copy. Every process rooted (by cwd) in the copy
 # or the task's tasktmp is stopped with SIGSTOP, parents first, and the landed-work
@@ -4019,6 +4024,26 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ] &&
   fi
   require_orca_worktree_path_match "$ORCA_WORKTREE_ID" "$WT" || exit 1
   ORCA_PATH_MATCH_VERIFIED=1
+fi
+
+# Role partition, second half: the supervision branch's cleanup is for a ship
+# whose PR has MERGED, and a pushed branch is not that. A ship with a recorded
+# PR is cleaned up by the branch only on merge proof (fm_pr_merge_proof in
+# bin/fm-pr-lib.sh), so a worker's "landed" wording cannot retire a worker
+# whose PR is still open. MAIN's cleanup keeps the landed-work rule above.
+if [ "$KIND" = ship ] && [ -n "$PR_URL" ] && [ "$(fm_lease_actor)" = branch ]; then
+  branch_merge_rc=0
+  fm_pr_merge_proof "$STATE" "$ID" "$PR_URL" || branch_merge_rc=$?
+  if [ "$branch_merge_rc" -ne 0 ]; then
+    if [ "$branch_merge_rc" -eq 1 ]; then
+      echo "REFUSED: the PR $PR_URL of task $ID is not merged (the forge reports it ${FM_PR_RECORD_STATE:-not merged}); the supervision branch cleans up a ship only after its PR merges." >&2
+      echo "The worker and its copy were left running. Report the PR as not merged." >&2
+    else
+      echo "REFUSED: cannot prove the PR $PR_URL of task $ID merged (no merge record, and the forge could not be read); the supervision branch cleans up a ship only after its PR merges." >&2
+      echo "The worker and its copy were left running. Report the PR's merge as unconfirmed." >&2
+    fi
+    exit 1
+  fi
 fi
 
 if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then

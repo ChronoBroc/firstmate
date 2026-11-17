@@ -69,6 +69,58 @@ test_report_surface_enforces_actor_turn_and_scope() {
 }
 
 
+# A worker's "landed" (main merged into its branch and pushed, a MERGE-PR-LANDED
+# line) leaves its PR open. A branch outcome may call that PR merged or on main
+# only on proof: this home's merge record or the forge's live state.
+test_report_surface_refuses_an_unproven_merge_claim() {
+  local home state out rc pr=https://github.com/example/repo/pull/3228 fakebin
+  home="$TMP_ROOT/report-merge-claim"
+  state="$home/state"
+  fakebin="$home/fakebin"
+  mkdir -p "$state" "$fakebin"
+  printf 'turn=t1\nrows=4\ntasks=swipe\nunscoped=0\nwake=signal: swipe.status\n' > "$state/.supervision-host-turn"
+  printf 'kind=ship\nmode=direct-PR\npr=%s\n' "$pr" > "$state/swipe.meta"
+  printf 'done [at=1794889112]: PR %s landed. MERGE-PR-LANDED {"pr":3228,"pushed":true}\n' "$pr" > "$state/swipe.status"
+  cat > "$fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-} ${2:-}" = "api graphql" ] || exit 1
+printf '%s\n' "state=${FAKE_PR_STATE:-OPEN}" "merged=$([ "${FAKE_PR_STATE:-OPEN}" = MERGED ] && echo true || echo false)"
+SH
+  chmod +x "$fakebin/gh"
+  report() {  # <summary>
+    PATH="$fakebin:$PATH" FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t1 \
+      "$REPORT" --task swipe --verdict captain --summary "$1" 2>&1
+  }
+
+  out=$(report "Swipe to close part one, $pr, is merged (typecheck green, lint clean)."); rc=$?
+  expect_code 3 "$rc" "a merged claim for an open PR must be refused"
+  assert_contains "$out" "the forge reports it OPEN" "the refusal must state the forge's open state"
+  out=$(report "Ranked discovery guarantee landed: $pr is on main (commit e5025a546)."); rc=$?
+  expect_code 3 "$rc" "an on-main claim for an open PR must be refused"
+  out=$(report "Cleaned up swipe after its PR $pr landed with typecheck green."); rc=$?
+  expect_code 3 "$rc" "a landed claim for an open PR must be refused"
+  out=$(report "Swipe to close part one landed and is merged."); rc=$?
+  expect_code 3 "$rc" "a merged claim naming no URL must be checked against the task's recorded PR"
+  [ ! -e "$state/branch-outcomes.jsonl" ] || fail "a refused merge claim touched the outcome store"
+
+  out=$(report "Swipe to close part one: the worker merged main into its branch and pushed it; $pr is open, not merged yet, and ready to merge."); rc=$?
+  expect_code 0 "$rc" "an honest open-PR outcome must be recorded: $out"
+  assert_contains "$out" "recorded seq 1 [captain]" "the honest outcome was not recorded"
+
+  out=$(FAKE_PR_STATE=MERGED report "Swipe to close part one, $pr, is merged."); rc=$?
+  expect_code 0 "$rc" "a merged claim the forge proves must be recorded: $out"
+
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t1 \
+    FAKE_PR_STATE=OPEN "$REPORT" --task swipe --verdict captain --summary "$pr is merged." 2>&1); rc=$?
+  expect_code 3 "$rc" "the forge's open state must refuse again after an earlier merged reading"
+  FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_pr_poll_merge_mark_notified "$2" swipe github github.com example/repo 3228' \
+    _ "$ROOT/bin/fm-pr-lib.sh" "$state" || fail "fixture: could not write the merge record"
+  out=$(report "Swipe to close part one, $pr, is merged."); rc=$?
+  expect_code 0 "$rc" "a merged claim this home's merge record proves must be recorded without the forge: $out"
+  pass "report surface: an outcome calls a PR merged only on this home's merge record or the forge's live state"
+}
+
+
 # The return brief is rendered after the record is archived, so a non-silent
 # report made after that may be missing from it: the report queues its relay
 # for main, while a report made during the away window only waits for the brief.
@@ -587,6 +639,7 @@ test_branch_outcomes_keep_a_drain_presented_outcome_across_an_index_repair() {
 
 fm_test_run \
   test_report_surface_enforces_actor_turn_and_scope \
+  test_report_surface_refuses_an_unproven_merge_claim \
   test_report_after_the_return_is_queued_for_main \
   test_dispatch_entry_scopes_rows_and_renders_the_away_tail \
   test_branch_outcomes_only_on_a_host_home_off_pi \

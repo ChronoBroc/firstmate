@@ -761,6 +761,81 @@ test_teardown_closes_the_backlog_item_itself() {
   pass "teardown closes its own backlog item before reporting success"
 }
 
+# A worker that "landed" its PR in the MERGE-PR-LANDED sense merged main into
+# its branch and pushed it; the PR itself stays open on the forge. The pushed
+# branch makes the work reachable from a remote, which is ordinary landed work
+# for MAIN's cleanup, but the supervision branch may clean up a ship only once
+# its recorded PR is proven merged.
+setup_pushed_ship_with_open_pr() {  # <case-name> <forge-state: OPEN|MERGED>
+  local case_dir forge_state=$2
+  case_dir=$(make_case "$1")
+  write_meta "$case_dir" direct-PR ship
+  wt_commit_file "$case_dir" feature.txt "swipe to close"
+  git -C "$case_dir/wt" merge -q --no-edit main >/dev/null 2>&1 || true
+  git -C "$case_dir/wt" push -q origin fm/task-x1
+  append_pr_meta_url "$case_dir"
+  printf '%s\n' "done [at=1794889112]: PR https://github.com/example/repo/pull/7 landed. MERGE-PR-LANDED {\"pr\":7,\"pushed\":true}" \
+    > "$case_dir/state/task-x1.status"
+  cat > "$case_dir/fakebin/gh" <<SH
+#!/usr/bin/env bash
+case "\${1:-} \${2:-}" in
+  "api graphql")
+    printf '%s\n' 'state=$forge_state' 'merged=$([ "$forge_state" = MERGED ] && echo true || echo false)'
+    exit 0 ;;
+  "pr view")
+    case " \$* " in
+      *"state,headRefOid,url"*)
+        printf '%s\t%s\t%s\n' '$forge_state' "\$(git -C '$case_dir/wt' rev-parse HEAD)" 'https://github.com/example/repo/pull/7'
+        exit 0 ;;
+    esac ;;
+esac
+echo "error: pull request not found" >&2
+exit 1
+SH
+  chmod +x "$case_dir/fakebin/gh"
+  printf '%s\n' "$case_dir"
+}
+
+test_branch_teardown_refuses_a_ship_whose_recorded_pr_is_open() {
+  local case_dir rc
+  case_dir=$(setup_pushed_ship_with_open_pr branch-open-pr OPEN)
+  set +e
+  FM_SUPERVISION_ACTOR=branch run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "branch-open-pr: the supervision branch cleaned up a ship whose PR is still open"
+  assert_grep 'REFUSED' "$case_dir/stderr" "branch-open-pr: refusal was not reported"
+  assert_grep 'https://github.com/example/repo/pull/7' "$case_dir/stderr" \
+    "branch-open-pr: refusal did not name the open PR"
+  assert_grep 'OPEN' "$case_dir/stderr" "branch-open-pr: refusal did not state the forge's open state"
+  assert_present "$case_dir/state/task-x1.meta" "branch-open-pr: the task record was removed"
+  [ -d "$case_dir/wt" ] || fail "branch-open-pr: the worker's copy was returned"
+  pass "the supervision branch refuses to clean up a pushed ship whose recorded PR is open"
+}
+
+test_branch_teardown_cleans_up_a_ship_whose_recorded_pr_merged() {
+  local case_dir rc
+  case_dir=$(setup_pushed_ship_with_open_pr branch-merged-pr MERGED)
+  set +e
+  FM_SUPERVISION_ACTOR=branch run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 0 "$rc" "branch-merged-pr: the supervision branch could not clean up a merged ship: $(cat "$case_dir/stderr")"
+  assert_absent "$case_dir/state/task-x1.meta" "branch-merged-pr: the task record survived cleanup"
+  pass "the supervision branch cleans up a ship whose recorded PR the forge reports merged"
+}
+
+test_main_teardown_of_a_pushed_ship_with_an_open_pr_is_unchanged() {
+  local case_dir rc
+  case_dir=$(setup_pushed_ship_with_open_pr main-open-pr OPEN)
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 0 "$rc" "main-open-pr: MAIN's cleanup of pushed work changed: $(cat "$case_dir/stderr")"
+  pass "MAIN's cleanup of a pushed ship is unchanged by the branch's merge-proof rule"
+}
+
 test_teardown_closes_a_gerrit_task_with_its_change_url_as_a_note() {
   local case_dir out real_tasks_axi gerrit_url=https://gerrit.example.com/c/project/+/12345
   case_dir=$(make_case tasks-axi-close-gerrit)
@@ -6586,6 +6661,9 @@ test_forced_secondmate_own_missing_adapter_sibling_refuses_before_child_cleanup
 test_retained_sources_still_reach_the_ordinary_refusal
 test_local_only_fork_remote_allows
 test_teardown_closes_the_backlog_item_itself
+test_branch_teardown_refuses_a_ship_whose_recorded_pr_is_open
+test_branch_teardown_cleans_up_a_ship_whose_recorded_pr_merged
+test_main_teardown_of_a_pushed_ship_with_an_open_pr_is_unchanged
 test_teardown_closes_a_gerrit_task_with_its_change_url_as_a_note
 test_teardown_closes_a_gitlab_task_with_its_merge_request_url_as_a_note
 test_teardown_manual_backend_leaves_the_backlog_to_the_operator
