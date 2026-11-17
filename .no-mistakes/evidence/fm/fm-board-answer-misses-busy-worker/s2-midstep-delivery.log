@@ -1,0 +1,33 @@
+--- PostToolUse hook fm-spawn installed:
+[
+  {
+    "matcher": "*",
+    "hooks": [
+      {
+        "type": "command",
+        "command": "'{run-worktree}/bin/fm-board-receipt-hook.sh' claude '/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-s2-midstep.dJrbfy/home/state' 'board-midstep'"
+      }
+    ]
+  }
+]
+tool call started (PreToolUse progress marker present); claude processes:        3
+--- 05:14:50 worker is inside its tool call; captain answers the board now
+--- receipt while step still running:
+v=fm-board-receipt-v1
+source=lavish-fedcba9876543210
+seq=1
+task=board-midstep
+round=feedback
+board=
+inbox_record=001.msg
+delivered_at=1794914090
+alarm_after=300
+state=delivered
+--- 05:14:57 claude finished
+--- midturn marker:
+mid_turn_at=1794914097
+--- text Claude Code sent the model after the tool call (non-tool_result parts of last user turn):
+PostToolUse:Bash hook additional context: A review-board answer reached your steering inbox as 001.msg while you were working. Act on it now, before your next step, and then file that record into handled/: Lavish review feedback is captured for task board-midstep at /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-s2-midstep.dJrbfy/home/state/procevent-inbox/lavish-fedcba9876543210.1.result. Read it with bin/fm-procevent-lavish.sh read /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-s2-midstep.dJrbfy/home/state/procevent-inbox/lavish-fedcba9876543210.1.result, apply the round, and re-arm the board with the reply.
+--- handoff occurrences in final request: 1
+--- repeat hook after claim: '(empty)'
+ok - answer delivered mid-step reaches real claude at that step's end

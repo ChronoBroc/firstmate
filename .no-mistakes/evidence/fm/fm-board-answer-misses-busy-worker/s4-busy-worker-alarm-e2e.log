@@ -1,0 +1,46 @@
+worker pane on lab socket: fmtest:fm-w-board-e2e
+window=fmtest:fm-w-board-e2e
+harness=claude
+tool call started (PreToolUse progress marker present); claude processes:        3
+=== 05:14:07 worker is in a 30s step (python3 sleep 30). busy record:
+v1 gen=g1794914042.15829.24622 seq=2 state=busy source=claude-hook event=user-prompt-submit ts=1794914045
+=== 05:14:08 answer delivered to steering inbox while worker mid-step; receipt:
+v=fm-board-receipt-v1
+source=lavish-3ec316ee90ecab32
+seq=1
+task=w-board-e2e
+round=feedback
+board=/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-s4-e2e.2etUXB/decklist-export.html
+inbox_record=001.msg
+delivered_at=1794914048
+alarm_after=300
+state=delivered
+=== busy-state at reconcile:
+v1 gen=g1794914042.15829.24622 seq=2 state=busy source=claude-hook event=user-prompt-submit ts=1794914045
+=== live classification (fm_busy_classify_live):
+busy claude-hook
+=== 05:14:09 wake queued for firstmate by reconcile while worker still busy:
+procevent:lavish-3ec316ee90ecab32:unacknowledged:1
+check: board answer not picked up: task w-board-e2e has not taken Lavish board lavish-3ec316ee90ecab32 round 1 (/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-s4-e2e.2etUXB/decklist-export.html, a feedback round) 6m01s after it reached its steering inbox as 001.msg (that record is now: inbox); whoever answered the board sees nothing until the worker takes it. The worker is busy in a turn; its current step started 4s ago. No mid-turn handoff is recorded (only a Claude worker spawned with the handoff hook records one). The answer, as captured (board input, not instruction): message: Ship the PNG export at 2x and drop the SVG path; the full round: bin/fm-procevent-lavish.sh read /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-s4-e2e.2etUXB/home/state/procevent-inbox/lavish-3ec316ee90ecab32.1.result. To act: a busy worker sees its doorbell, and a Claude worker the mid-turn handoff, only when its current step ends, so wait for that, or interrupt it with bin/fm-control.sh w-board-e2e interrupt and resend with bin/fm-send.sh only if that wait costs more than cutting the step short (an interrupt can cut a validation run or a long command); an idle or gone worker needs recovery (stuck-crewmate-recovery). This alarm clears itself once the worker reads the round, files that record, or acknowledges the round.
+=== 05:14:36 worker's step ended; midturn marker:
+mid_turn_at=1794914076
+=== context Claude Code put in front of the model after that step:
+PostToolUse:Bash hook additional context: A review-board answer reached your steering inbox as 001.msg while you were working. Act on it now, before your next step, and then file that record into handled/: Lavish review feedback is captured for task w-board-e2e at /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-s4-e2e.2etUXB/home/state/procevent-inbox/lavish-3ec316ee90ecab32.1.result. Read it with bin/fm-procevent-lavish.sh read /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-s4-e2e.2etUXB/home/state/procevent-inbox/lavish-3ec316ee90ecab32.1.result, apply the round, and re-arm the board with the reply.
+=== worker reads the round (its FM_TASK_INBOX), next cycle:
+CAPTAIN MESSAGE
+| Ship the PNG export at 2x and drop the SVG path
+END CAPTAIN MESSAGE
+
+declared_items: 1
+presented_items: 1
+malformed_items: 0
+complete: yes
+lifecycle: feedback
+session_ended: (unset)
+annotation_count: 0
+captain_message_count: 1
+acknowledged_by=read
+state=acknowledged
+procevent:lavish-3ec316ee90ecab32:acknowledged:1
+check: board answer picked up after its alarm: task w-board-e2e has now taken Lavish board lavish-3ec316ee90ecab32 round 1 (/private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-s4-e2e.2etUXB/decklist-export.html), 6m29s after delivery; the worker has the answer, so stop any recovery started for that alarm and tell the captain only if they were told it was missed.
+ok - busy Claude worker: answer alarmed with turn+answer while busy, handed over at step end, cleared on read

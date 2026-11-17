@@ -1,0 +1,14 @@
+1..12
+ok - an answer the worker took is acknowledged by the next cycle and costs no wake
+ok - a worker that reads its round, works it for an hour, then files it is acknowledged at the read and never alarms
+ok - a worker reading its round while the delivery is still being published is acknowledged at the read
+ok - an answer the worker never took alarms once after the delay and clears once on pickup
+ok - a busy worker is handed its board answer at its next step, once, without that counting as taken
+ok - a subagent's step hands nothing over and leaves the round for its worker's own next step
+ok - a round acknowledged before the worker's next step is not handed over
+ok - a busy worker's untaken answer alarms with its turn, the mid-turn handoff, and the captured answer
+ok - a busy worker's alarm with no progress marker or handoff reports the duration unknown and no handoff recorded
+ok - a round its worker acknowledged counts as taken even when the inbox record stayed
+ok - the alarm delay defaults to five minutes, is tunable, and a receipt keeps the delay it was written with
+ok - a retired worker's receipt is pruned without an alarm
+FM_TEST_COMPLETE
