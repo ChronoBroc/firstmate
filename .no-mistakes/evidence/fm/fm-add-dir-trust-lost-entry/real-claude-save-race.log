@@ -1,0 +1,10 @@
+## claude --version: 2.1.326 (Claude Code); harness: ~/.no-mistakes/evidence/01M7M3W0E1913R5C9J8KWBTH1S/real-claude-save-race.sh (fresh isolated CLAUDE_CONFIG_DIR per iteration, 6 real 'claude -p' processes saving config while fm-claude-trust.sh registers a new worktree)
+## base dc2155d9 fm-claude-trust.sh
+iter 26: registration reported 'trusted: /private/tmp/fmrace.sVnZxV/wt-base-26' but worktree entry LOST after real Claude Code saves
+[base] iterations=40 concurrent_claude=6  entries_lost=1  registrations_refused=0  claude_numStartups=?
+
+## fix 42b2975e fm-claude-trust.sh
+[head] iterations=40 concurrent_claude=6  entries_lost=0  registrations_refused=0  claude_numStartups=?
+
+## fix 42b2975e, second batch
+[head2] iterations=60 concurrent_claude=6  entries_lost=0  registrations_refused=0  claude_numStartups=?
