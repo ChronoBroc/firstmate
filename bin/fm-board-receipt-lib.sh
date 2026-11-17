@@ -218,30 +218,35 @@ fm_board_receipt_answer_line() {  # <result-file>
   printf '%s' "$line"
 }
 
-# One sentence on what the worker is doing, for the alarm: its turn state from
-# its busy record (bin/fm-busy-lib.sh), how long its current step has run (the
-# progress marker its before-each-step hook refreshes), and the mid-turn
-# handoff when there was one.
+# One sentence on what the worker is doing, for the alarm: its live turn state
+# (fm_busy_classify_live in bin/fm-busy-lib.sh, so a gone endpoint reads gone,
+# never busy), how long its current step has run (the progress marker its
+# before-each-step hook refreshes), and the mid-turn handoff when one is
+# recorded.
 _fm_board_receipt_activity() {  # <state> <task> <receipt-path> <now>
-  local state=$1 task=$2 path=$3 now=$4 rec turn='' step handed
-  if declare -F fm_busy_record_read >/dev/null && rec=$(fm_busy_record_read "$state" "$task" 2>/dev/null); then
-    turn=${rec%% *}
+  local state=$1 task=$2 path=$3 now=$4 meta verdict='' started handed
+  meta="$state/$task.meta"
+  if declare -F fm_busy_classify_live >/dev/null; then
+    verdict=$(fm_busy_classify_live "$(fm_backend_of_meta "$meta")" "$(fm_backend_target_of_meta "$meta")" \
+      "$(fm_meta_get "$meta" harness)" "$task" "$state" 2>/dev/null)
   fi
   handed=$(_fm_board_receipt_get "$(cat -- "${path%.receipt}.midturn" 2>/dev/null)" mid_turn_at)
-  case "$turn" in
+  case "${verdict%% *}" in
     busy)
-      step=$(fm_path_age "$state/$task.progress" 2>/dev/null)
-      case "$step" in
-        ''|*[!0-9]*) printf 'The worker is busy in a turn.' ;;
-        *) printf 'The worker is busy in a turn; its current step started %s ago.' "$(_fm_board_receipt_waited "$step")" ;;
+      started=$(fm_path_mtime "$state/$task.progress" 2>/dev/null)
+      case "$started" in
+        ''|*[!0-9]*) printf 'The worker is busy in a turn; how long its current step has run is unknown.' ;;
+        *) printf 'The worker is busy in a turn; its current step started %s ago.' "$(_fm_board_receipt_waited "$((now - started))")" ;;
       esac
       ;;
     idle) printf 'The worker is idle and has not taken the round, so the doorbell typed into its terminal did not land or was not acted on.' ;;
+    dead) printf 'The worker'"'"'s session is gone, so it cannot take the round.' ;;
     *) printf 'The worker'"'"'s turn state is unknown.' ;;
   esac
   case "$handed" in
     ''|*[!0-9]*)
-      [ "$turn" != busy ] || printf ' It has not finished a step since the answer arrived.'
+      [ "${verdict%% *}" != busy ] \
+        || printf ' No mid-turn handoff is recorded (only a Claude worker spawned with the handoff hook records one).'
       ;;
     *) printf ' The answer was handed to it mid-turn at a step boundary %s ago and it has not read the round.' \
       "$(_fm_board_receipt_waited "$((now - handed))")" ;;

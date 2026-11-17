@@ -43,6 +43,16 @@ fi
 printf 'session:\n  status: feedback\nprompts[1]{uid,prompt,selector,tag,text}:\n  "","all four as recommended","","message",""\n'
 SH
 chmod +x "$FAKEBIN/lavish-axi"
+# A tmux whose only live panes are the ones a case lists in live-panes, so a
+# worker's endpoint is gone unless the case keeps it alive.
+cat > "$FAKEBIN/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  "list-panes -a -F #{pane_id}") cat "$RECEIPT_STUB_DIR/live-panes" 2>/dev/null; exit 0 ;;
+esac
+exit 1
+SH
+chmod +x "$FAKEBIN/tmux"
 export PATH="$FAKEBIN:$PATH"
 
 lavish_session() {  # <artifact>
@@ -207,7 +217,8 @@ test_untaken_answer_alarms_once_and_clears_on_pickup() {
   assert_contains "$row" "task w-stuck" "the alarm names its worker"
   assert_contains "$row" "${BOARD##*/}" "the alarm names its board"
   assert_contains "$row" "6m" "the alarm says how long the answer has waited"
-  assert_contains "$row" "turn state is unknown" "the alarm does not say what is known of the worker's turn"
+  assert_contains "$row" "session is gone, so it cannot take the round" "the alarm does not say the worker's session has ended"
+  assert_not_contains "$row" "busy in a turn" "the alarm calls a worker with no live session busy"
   assert_contains "$row" "message: all four as recommended" "the alarm does not carry the captured answer"
   [ -n "$(field "$(receipt 1)" alarmed_at)" ] || fail "the receipt does not record its alarm"
   [ "$(field "$(receipt 1)" state)" = delivered ] || fail "an alarm changed the receipt's state"
@@ -228,8 +239,13 @@ after_step() {  # <task>
   printf '{"hook_event_name":"PostToolUse","tool_name":"Bash"}' \
     | "$ROOT/bin/fm-board-receipt-hook.sh" claude "$HOME_DIR/state" "$1"
 }
-# Seed the worker's busy record the way its spawn does: busy, in its first turn.
+# Seed the worker's busy record the way its spawn does: busy, in its first turn,
+# in a live pane.
 busy_worker() {  # <task>
+  local pane="%$(($(cat "$RECEIPT_STUB_DIR/live-panes" 2>/dev/null | wc -l) + 1))"
+  printf '%s\n' "$pane" >> "$RECEIPT_STUB_DIR/live-panes"
+  perl -pi -e "s/^window=.*/window=$pane/" "$HOME_DIR/state/$1.meta"
+  printf 'harness=claude\n' >> "$HOME_DIR/state/$1.meta"
   "$ROOT/bin/fm-busy-event.sh" arm "$HOME_DIR/state" "$1" >/dev/null || fail "the busy record could not be armed"
 }
 age_file() {  # <path> <seconds>
@@ -285,6 +301,21 @@ test_busy_worker_alarm_carries_the_answer_and_its_turn() {
   pass "a busy worker's untaken answer alarms with its turn, the mid-turn handoff, and the captured answer"
 }
 
+test_busy_worker_alarm_without_progress_or_handoff_claims_neither() {
+  armed_board nostep w-nostep
+  busy_worker w-nostep
+  age_delivery 1 400
+  cycle
+  row=$(wake_rows ":$SRC:unacknowledged:1")
+  [ -n "$row" ] || fail "a busy worker's untaken answer did not alarm"
+  assert_contains "$row" "busy in a turn; how long its current step has run is unknown" \
+    "the alarm invents a step duration with no progress marker"
+  assert_contains "$row" "No mid-turn handoff is recorded" "the alarm does not say no handoff is recorded"
+  assert_not_contains "$row" "started" "the alarm gives a step start with no progress marker"
+  assert_not_contains "$row" "has not finished a step" "the alarm claims no step finished from a missing handoff"
+  pass "a busy worker's alarm with no progress marker or handoff reports the duration unknown and no handoff recorded"
+}
+
 test_acknowledged_round_counts_when_the_record_was_not_filed() {
   armed_board rearmed w-rearm
   FM_HOME="$HOME_DIR" "$ROOT/bin/fm-procevent.sh" handled "$SRC" 1 >/dev/null \
@@ -333,6 +364,7 @@ fm_test_run \
   test_untaken_answer_alarms_once_and_clears_on_pickup \
   test_busy_worker_is_handed_the_answer_at_its_next_step \
   test_busy_worker_alarm_carries_the_answer_and_its_turn \
+  test_busy_worker_alarm_without_progress_or_handoff_claims_neither \
   test_acknowledged_round_counts_when_the_record_was_not_filed \
   test_alarm_delay_is_tunable_and_bounded \
   test_retired_worker_receipt_is_pruned_without_an_alarm
