@@ -1341,6 +1341,48 @@ fm_pr_gerrit_read_revision() {  # <host> <number>
   FM_PR_RECORD_REVISION=$revision
 }
 
+# fm_pr_read_record_url <url>: the live state of one supported PR, MR, or
+# change, read from its own forge by provider. Sets FM_PR_RECORD_STATE and
+# FM_PR_RECORD_MERGED like the per-forge readers above; returns 1 for an
+# unparseable URL or any forge read error.
+fm_pr_read_record_url() {  # <url>
+  # Consumed by fm_pr_merge_proof callers.
+  # shellcheck disable=SC2034
+  FM_PR_RECORD_STATE=
+  # shellcheck disable=SC2034
+  FM_PR_RECORD_MERGED=
+  fm_pr_url_parse "${1-}" || return 1
+  case "$FM_PR_PROVIDER" in
+    github) fm_pr_github_read_record "$FM_PR_HOST" "$FM_PR_OWNER" "$FM_PR_REPO" "$FM_PR_NUMBER" ;;
+    gitlab) fm_pr_gitlab_read_record "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" ;;
+    forgejo) fm_pr_forgejo_read_record "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" ;;
+    gerrit) fm_pr_gerrit_read_record "$FM_PR_HOST" "$FM_PR_NUMBER" ;;
+    *) return 1 ;;
+  esac
+}
+
+# fm_pr_merge_proof <state> <task-id> <url>: is this PR proven merged?
+# The ONE owner of what proves a merge to the supervision branch's guards
+# (bin/fm-teardown.sh, bin/fm-branch-report.sh). Proof is either the merge
+# record this home writes once a merge is confirmed - the task's merge
+# notification marker, written for a merge bin/fm-pr-merge.sh performed and for
+# one the merge poll observed (bin/fm-merge-outcome-lib.sh) - or the forge's
+# live state. A worker's own status wording is never proof.
+# Returns 0 proven merged, 1 the forge reports it not merged (FM_PR_RECORD_STATE
+# holds the forge's word for it), 2 unknown (an unparseable URL or a forge read
+# that failed).
+fm_pr_merge_proof() {  # <state> <task-id> <url>
+  local state=$1 id=$2 url=$3
+  fm_pr_url_parse "$url" || return 2
+  if fm_pr_task_id_valid "$id" \
+    && fm_pr_poll_merge_already_notified "$state" "$id" \
+      "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER"; then
+    return 0
+  fi
+  fm_pr_read_record_url "$url" || return 2
+  [ "$FM_PR_RECORD_MERGED" = true ] || return 1
+}
+
 fm_pr_poll_retirement_data_valid() {
   local state=$1 id=$2 state_device data data_hash data_identity
   state_device=$(fm_pr_file_device "$state") || return 1

@@ -69,6 +69,140 @@ test_report_surface_enforces_actor_turn_and_scope() {
 }
 
 
+# A worker's "landed" (main merged into its branch and pushed, a MERGE-PR-LANDED
+# line) leaves its PR open. A branch outcome may call that PR merged or on main
+# only on proof: this home's merge record or the forge's live state.
+test_report_surface_refuses_an_unproven_merge_claim() {
+  local home state out rc pr=https://github.com/example/repo/pull/3228 fakebin
+  home="$TMP_ROOT/report-merge-claim"
+  state="$home/state"
+  fakebin="$home/fakebin"
+  mkdir -p "$state" "$fakebin"
+  printf 'turn=t1\nrows=4\ntasks=swipe\nunscoped=0\nwake=signal: swipe.status\n' > "$state/.supervision-host-turn"
+  printf 'kind=ship\nmode=direct-PR\npr=%s\n' "$pr" > "$state/swipe.meta"
+  printf 'done [at=1794889112]: PR %s landed. MERGE-PR-LANDED {"pr":3228,"pushed":true}\n' "$pr" > "$state/swipe.status"
+  cat > "$fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-} ${2:-}" = "api graphql" ] || exit 1
+st=${FAKE_PR_STATE:-OPEN}
+case " $* " in *"number=${FAKE_MERGED_PR##*/} "*) [ -z "${FAKE_MERGED_PR:-}" ] || st=MERGED ;; esac
+printf '%s\n' "state=$st" "merged=$([ "$st" = MERGED ] && echo true || echo false)"
+SH
+  chmod +x "$fakebin/gh"
+  report() {  # <summary>
+    PATH="$fakebin:$PATH" FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t1 \
+      "$REPORT" --task swipe --verdict captain --summary "$1" 2>&1
+  }
+
+  out=$(report "Swipe to close part one, $pr, is merged (typecheck green, lint clean)."); rc=$?
+  expect_code 3 "$rc" "a merged claim for an open PR must be refused"
+  assert_contains "$out" "the forge reports it OPEN" "the refusal must state the forge's open state"
+  out=$(report "Ranked discovery guarantee landed: $pr is on main (commit e5025a546)."); rc=$?
+  expect_code 3 "$rc" "an on-main claim for an open PR must be refused"
+  out=$(report "Swipe to close part one landed and is merged."); rc=$?
+  expect_code 3 "$rc" "a merged claim naming no URL must be checked against the task's recorded PR"
+  out=$(report "Swipe to close part one, PR 3228, was squash-merged."); rc=$?
+  expect_code 3 "$rc" "a squash-merged claim for an open PR must be refused"
+  assert_contains "$out" "the forge reports it OPEN" "a squash-merged claim must be checked against the forge"
+  out=$(report "Rebase-merged $pr."); rc=$?
+  expect_code 3 "$rc" "a rebase-merged claim for an open PR must be refused"
+  out=$(report "https://github.com/example/ready-to-use/pull/3228 is merged."); rc=$?
+  expect_code 3 "$rc" "a word inside a PR URL must not exempt a merged claim"
+  out=$(report "https://github.com/example/ready-to-use/pull/3228 is on main."); rc=$?
+  expect_code 3 "$rc" "a word inside a PR URL must not exempt an on-main claim"
+  out=$(report "PR 3228 at e5025a546 merged."); rc=$?
+  expect_code 3 "$rc" "a commit id before merged must not exempt a merged claim"
+  out=$(report "Not merged https://github.com/example/repo/pull/3189. Merged $pr."); rc=$?
+  expect_code 3 "$rc" "a negation in the previous sentence must not exempt a merged claim after a URL ending that sentence"
+  assert_contains "$out" "$pr" "the refusal must name the open PR the second sentence claims merged"
+  out=$(report "No conflicts, merged $pr."); rc=$?
+  expect_code 3 "$rc" "a negation of something else in the clause must not exempt a merged claim"
+  out=$(report "No conflicts, PR 3228 is on main."); rc=$?
+  expect_code 3 "$rc" "a negation of something else in the clause must not exempt an on-main claim"
+  out=$(report "PR 3228 merged upstream."); rc=$?
+  expect_code 3 "$rc" "merged upstream is a merge claim, not a merge of the base into a branch"
+  out=$(report "PR 3228 was auto-merged."); rc=$?
+  expect_code 3 "$rc" "an auto-merged claim about a PR must be refused while the PR is open"
+  out=$(report "PR 3228 is merged in main."); rc=$?
+  expect_code 3 "$rc" "a merged-in-main claim for an open PR must be refused"
+  out=$(FAKE_MERGED_PR=https://github.com/example/repo/pull/3189 \
+    report "Merged https://github.com/example/repo/pull/3189 and $pr."); rc=$?
+  expect_code 3 "$rc" "a merged claim naming two PRs must check the open one too"
+  assert_contains "$out" "$pr" "the refusal must name the open PR of a joint merged claim"
+  out=$(FAKE_MERGED_PR=https://github.com/example/repo/pull/3189 \
+    report "https://github.com/example/repo/pull/3189 and $pr are merged."); rc=$?
+  expect_code 3 "$rc" "a joint merged claim must check every PR it names"
+  assert_contains "$out" "$pr" "the refusal must name the open PR of a joint merged claim"
+  out=$(report "No conflicts. Merged $pr."); rc=$?
+  expect_code 3 "$rc" "a negation in an earlier sentence must not hide a merged claim for an open PR"
+  out=$(report "No conflicts; $pr is on main."); rc=$?
+  expect_code 3 "$rc" "a negation in an earlier clause must not hide an on-main claim for an open PR"
+  out=$(FAKE_MERGED_PR=https://github.com/example/repo/pull/3189 \
+    report "https://github.com/example/repo/pull/3189 is merged. Merged $pr."); rc=$?
+  expect_code 3 "$rc" "a merged claim must be checked against the PR its own sentence names"
+  assert_contains "$out" "$pr" "the refusal must name the open PR its sentence claims merged"
+  [ ! -e "$state/branch-outcomes.jsonl" ] || fail "a refused merge claim touched the outcome store"
+
+  out=$(report "Swipe to close part one: the worker merged main into its branch and pushed it; $pr is open, not merged yet, and ready to merge."); rc=$?
+  expect_code 0 "$rc" "an honest open-PR outcome must be recorded: $out"
+  assert_contains "$out" "recorded seq 1 [captain]" "the honest outcome was not recorded"
+  out=$(report "Git auto-merged src/swipe.ts while the worker merged main into its branch; $pr remains open."); rc=$?
+  expect_code 0 "$rc" "a file auto-merge note must not read as a merge claim: $out"
+  out=$(report "The worker landed main into $pr; it remains open."); rc=$?
+  expect_code 0 "$rc" "a truthful landed-but-open outcome must be recorded: $out"
+
+  out=$(FAKE_PR_STATE=MERGED report "Swipe to close part one, $pr, is merged."); rc=$?
+  expect_code 0 "$rc" "a merged claim the forge proves must be recorded: $out"
+
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t1 \
+    FAKE_PR_STATE=OPEN "$REPORT" --task swipe --verdict captain --summary "$pr is merged." 2>&1); rc=$?
+  expect_code 3 "$rc" "the forge's open state must refuse again after an earlier merged reading"
+  FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_pr_poll_merge_mark_notified "$2" swipe github github.com example/repo 3228' \
+    _ "$ROOT/bin/fm-pr-lib.sh" "$state" || fail "fixture: could not write the merge record"
+  out=$(report "Swipe to close part one, $pr, is merged."); rc=$?
+  expect_code 0 "$rc" "a merged claim this home's merge record proves must be recorded without the forge: $out"
+  pass "report surface: an outcome calls a PR merged only on this home's merge record or the forge's live state"
+}
+
+# A task whose PR was never registered (no pr=) still has no merge claim
+# accepted without proof: a bare PR number resolves in the GitHub repository
+# its project clone has as origin, and a claim naming no PR is refused.
+test_report_surface_refuses_an_unregistered_merge_claim_without_proof() {
+  local home state out rc fakebin
+  home="$TMP_ROOT/report-merge-claim-unregistered"
+  state="$home/state"
+  fakebin="$home/fakebin"
+  mkdir -p "$state" "$fakebin"
+  git init -q "$home/project"
+  git -C "$home/project" remote add origin git@github.com:example/repo.git
+  printf 'turn=t1\nrows=4\ntasks=swipe\nunscoped=0\nwake=signal: swipe.status\n' > "$state/.supervision-host-turn"
+  printf 'kind=ship\nmode=direct-PR\nproject=%s\n' "$home/project" > "$state/swipe.meta"
+  printf 'done [at=1794889112]: landed. MERGE-PR-LANDED {"pr":3228,"pushed":true}\n' > "$state/swipe.status"
+  cat > "$fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-} ${2:-}" = "api graphql" ] || exit 1
+case " $* " in *" owner=example "*" repo=repo "*" number=3228 "*) ;; *) exit 1 ;; esac
+printf '%s\n' "state=${FAKE_PR_STATE:-OPEN}" "merged=$([ "${FAKE_PR_STATE:-OPEN}" = MERGED ] && echo true || echo false)"
+SH
+  chmod +x "$fakebin/gh"
+  report() {  # <summary>
+    PATH="$fakebin:$PATH" FM_HOME="$home" FM_SUPERVISION_ACTOR=branch FM_BRANCH_REPORT_TURN=t1 \
+      "$REPORT" --task swipe --verdict captain --summary "$1" 2>&1
+  }
+
+  out=$(report "PR 3228 is merged."); rc=$?
+  expect_code 3 "$rc" "a bare-number merged claim for an open unregistered PR must be refused"
+  assert_contains "$out" "the forge reports it OPEN" "the refusal must state the forge's open state"
+  out=$(report "Swipe to close part one is on main."); rc=$?
+  expect_code 3 "$rc" "an on-main claim naming no PR on an unregistered task must be refused"
+  assert_contains "$out" "names no PR" "the refusal must say the claim names no PR it can check"
+  [ ! -e "$state/branch-outcomes.jsonl" ] || fail "a refused merge claim touched the outcome store"
+  out=$(FAKE_PR_STATE=MERGED report "PR 3228 is merged."); rc=$?
+  expect_code 0 "$rc" "a bare-number merged claim the forge proves must be recorded: $out"
+  pass "report surface: an unregistered task's merge claim needs a PR this home can check and its proof"
+}
+
+
 # The return brief is rendered after the record is archived, so a non-silent
 # report made after that may be missing from it: the report queues its relay
 # for main, while a report made during the away window only waits for the brief.
@@ -378,7 +512,7 @@ test_branch_outcomes_stay_unread_when_a_projection_fails() {
   : > "$home/config/supervision-host"
   printf '#!/usr/bin/env bash\ncase "$*" in *"newest of"*) exit 5 ;; esac\nexec %q "$@"\n' "$(command -v jq)" > "$home/bin/jq"
   chmod +x "$home/bin/jq"
-  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict routine --summary 'merged the docs fix' >/dev/null \
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict routine --summary 'fixed the docs typo' >/dev/null \
     || fail "fixture: could not record the routine outcome"
   FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task cap --verdict captain --summary 'needs your merge call' >/dev/null \
     || fail "fixture: could not record the captain outcome"
@@ -388,7 +522,7 @@ test_branch_outcomes_stay_unread_when_a_projection_fails() {
   assert_contains "$drained" "BRANCH OUTCOMES SKIPPED: the outcome store could not be projected safely" \
     "a failed projection must be reported"
   drained=$(FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" 2>&1' "$ROOT/bin/fm-wake-drain.sh")
-  assert_contains "$drained" "[seq 1] demo: merged the docs fix" "a routine outcome behind a failed projection must follow on the next drain"
+  assert_contains "$drained" "[seq 1] demo: fixed the docs typo" "a routine outcome behind a failed projection must follow on the next drain"
   assert_contains "$drained" "[seq 2, recorded 0m ago] cap: needs your merge call" "a captain outcome behind a failed projection must follow on the next drain"
   pass "drain: branch outcomes stay unread when a projection of the store fails"
 }
@@ -401,7 +535,7 @@ test_branch_outcomes_stay_unread_without_jq() {
   home="$TMP_ROOT/drain-no-jq"
   mkdir -p "$home/state" "$home/config"
   : > "$home/config/supervision-host"
-  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict routine --summary 'merged the docs fix' >/dev/null \
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict routine --summary 'fixed the docs typo' >/dev/null \
     || fail "fixture: could not record the routine outcome"
   while IFS= read -r dir; do
     [ -n "$dir" ] || continue
@@ -422,7 +556,7 @@ DIRS
   [ "$rc" -ne 0 ] || fail "a drain without jq over a non-empty store must exit nonzero: $drained"
   assert_contains "$drained" "BRANCH OUTCOMES SKIPPED: jq is not installed" "a drain without jq must say it could not present the store"
   drained=$(FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" 2>&1' "$ROOT/bin/fm-wake-drain.sh")
-  assert_contains "$drained" "[seq 1] demo: merged the docs fix" "an outcome a drain without jq could not present must follow on the next drain"
+  assert_contains "$drained" "[seq 1] demo: fixed the docs typo" "an outcome a drain without jq could not present must follow on the next drain"
   pass "drain: branch outcomes stay unread and the drain fails when jq is missing"
 }
 
@@ -434,16 +568,16 @@ test_branch_outcomes_stay_unread_when_the_drain_cannot_print() {
   home="$TMP_ROOT/drain-closed"
   mkdir -p "$home/state" "$home/config"
   : > "$home/config/supervision-host"
-  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict routine --summary 'merged the docs fix' >/dev/null \
+  FM_HOME="$home" "$ROOT/bin/fm-branch-outcome.sh" append --task demo --verdict routine --summary 'fixed the docs typo' >/dev/null \
     || fail "fixture: could not record the routine outcome"
   # Bypass /usr/bin/env: Rust-based env reopens a closed stdout on /dev/null,
   # so the shebang would make printing succeed instead of testing a write error.
   FM_HOME="$home" "$FAKE_CLAUDE" -c 'bash "$0" >&- 2>/dev/null' "$ROOT/bin/fm-wake-drain.sh" || rc=$?
   [ "$rc" -ne 0 ] || fail "a drain that cannot print its outcomes must exit nonzero"
   drained=$(FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" 2>&1' "$ROOT/bin/fm-wake-drain.sh")
-  assert_contains "$drained" "[seq 1] demo: merged the docs fix" "a routine outcome a drain could not print must follow on the next drain"
+  assert_contains "$drained" "[seq 1] demo: fixed the docs typo" "a routine outcome a drain could not print must follow on the next drain"
   drained=$(FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" 2>&1' "$ROOT/bin/fm-wake-drain.sh")
-  assert_not_contains "$drained" "merged the docs fix" "a routine outcome a drain printed must not repeat"
+  assert_not_contains "$drained" "fixed the docs typo" "a routine outcome a drain printed must not repeat"
   pass "drain: branch outcomes stay unread when the drain cannot print them"
 }
 
@@ -587,6 +721,8 @@ test_branch_outcomes_keep_a_drain_presented_outcome_across_an_index_repair() {
 
 fm_test_run \
   test_report_surface_enforces_actor_turn_and_scope \
+  test_report_surface_refuses_an_unproven_merge_claim \
+  test_report_surface_refuses_an_unregistered_merge_claim_without_proof \
   test_report_after_the_return_is_queued_for_main \
   test_dispatch_entry_scopes_rows_and_renders_the_away_tail \
   test_branch_outcomes_only_on_a_host_home_off_pi \

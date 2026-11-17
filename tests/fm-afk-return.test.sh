@@ -408,7 +408,7 @@ test_return_brief_composes_from_record_store_and_held_set() {
   # opening its summary with the marker the branch prompt requires; the account
   # lists both and nothing else.
   outcome_in "$dir" append --task fix-windows --verdict routine \
-    --summary 'per your away instructions: merged the windows fix PR once checks went green' --wake 'check: fix-windows merge poll' >/dev/null \
+    --summary 'per your away instructions: armed the windows fix PR merge for when checks went green' --wake 'check: fix-windows merge poll' >/dev/null \
     || fail "could not seed the words-action outcome row"
   outcome_in "$dir" append --task prerelease --verdict captain \
     --summary 'per your away instructions: filed and dispatched the prerelease cut; it needs your review' --wake 'signal: prerelease.status' >/dev/null \
@@ -438,7 +438,7 @@ test_return_brief_composes_from_record_store_and_held_set() {
   [ "$health_line" -lt "$words_line" ] && [ "$words_line" -lt "$waiting_line" ] && [ "$waiting_line" -lt "$failed_line" ] \
     || fail "the brief sections are out of order (health $health_line, instructions $words_line, waiting $waiting_line, failed $failed_line)"
   assert_contains "$out" $'  your words at entry:\n    merge the windows fix when green, then cut a prerelease\n    if the install deadlocks abort the competing run\n' "the captain's verbatim words were not carried into the brief"
-  assert_contains "$out" $'  the away session acted on them:\n    - fix-windows: per your away instructions: merged the windows fix PR once checks went green\n    - prerelease: per your away instructions: filed and dispatched the prerelease cut; it needs your review\nWaiting on you:\n' "the session's account listed something other than exactly the two actions taken under the words"
+  assert_contains "$out" $'  the away session acted on them:\n    - fix-windows: per your away instructions: armed the windows fix PR merge for when checks went green\n    - prerelease: per your away instructions: filed and dispatched the prerelease cut; it needs your review\nWaiting on you:\n' "the session's account listed something other than exactly the two actions taken under the words"
   assert_not_contains "$out" $'acted on them:\n    - other:' "an outcome that did not cite the words was listed as an action under them"
   assert_not_contains "$out" $'acted on them:\n    - held-note:' "a summary opening with the marker's words but no colon was listed as an action under them"
   assert_not_contains "$out" 'still building' "the return brief rendered a silent routine outcome"
@@ -465,7 +465,7 @@ test_return_brief_composes_from_record_store_and_held_set() {
   printf 'resolved [key=token]: the token was refreshed\n' >> "$dir/home/state/fix-windows.status"
   second=$(run_return "$dir" check) || fail "the remediated return did not clear: $second"
   assert_contains "$second" $'  your words at entry:\n    merge the windows fix when green, then cut a prerelease' "check did not re-render the words from the archived record"
-  assert_contains "$second" 'fix-windows: per your away instructions: merged the windows fix PR' "check did not re-render the session account"
+  assert_contains "$second" 'fix-windows: per your away instructions: armed the windows fix PR merge' "check did not re-render the session account"
   assert_contains "$second" 'supervision ran through the away window with no detected gap' "check lost the health snapshot taken at begin"
   assert_contains "$second" 'catch-up clear' "check did not clear the gate"
   [ ! -e "$gate" ] || fail "the cleared check left the gate behind"

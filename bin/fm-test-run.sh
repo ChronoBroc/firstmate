@@ -383,6 +383,7 @@ family_for_basename() {
     fm-pr-state-live-e2e.test.sh|\
     fm-sessionstart-hook-live-e2e.test.sh|fm-sessionstart-instruction-refresh-live-e2e.test.sh|\
     fm-supervision-host-live-e2e.test.sh|fm-supervision-host-attended-live-e2e.test.sh|\
+    fm-supervision-host-landed-live-e2e.test.sh|\
     fm-host-mirror-live-e2e.test.sh|\
     fm-quota-array-dispatch-live-e2e.test.sh|fm-send-secondmate-marker-herdr-e2e.test.sh|\
     fm-send-inbox-doorbell-live-e2e.test.sh|\
@@ -941,6 +942,7 @@ tests/fm-supervision-events.test.sh 673
 tests/fm-supervision-host-attended-live-e2e.test.sh 49
 tests/fm-supervision-host-drain.test.sh 45950
 tests/fm-supervision-host-hook.test.sh 403793
+tests/fm-supervision-host-landed-live-e2e.test.sh 75
 tests/fm-supervision-host-live-e2e.test.sh 75
 tests/fm-supervision-host-park.test.sh 329326
 tests/fm-supervision-host.test.sh 435581
