@@ -1,0 +1,134 @@
+Note: switching to '97c74efe9c0033e1cc52cbb3d2162def77ea11be'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+fm-test-linux: 6 on Linux 6.12.76-linuxkit
+ok - tmux liveness: a harness-named foreground process classifies alive
+ok - tmux liveness: muse's version-suffixed muse-bin-<version> classifies alive
+ok - tmux liveness: unrelated muse-containing command names stay ambiguous
+ok - tmux liveness: omp's bare binary name classifies alive
+ok - tmux liveness: unrelated omp-containing command names stay ambiguous
+ok - tmux liveness: Command Code's anchored process name classifies alive; a containing name stays ambiguous
+skip: no C compiler, so the version-string process-name case cannot build its executable
+ok - tmux liveness: a process neither name source attributes stays ambiguous rather than inventing an agent
+ok - tmux liveness: Python -I -c bootstrap with same-group Node --expose-gc Hermes TUI classifies alive without harness names
+ok - tmux liveness: the same bootstrap with an unrelated Node script stays ambiguous
+ok - tmux liveness: a launcher whose own identity reads as a bare shell classifies alive from its harness child
+ok - tmux liveness: an idle shell pane classifies dead
+ok - tmux liveness: a harness-named background process in an idle pane still classifies dead
+ok - tmux liveness: an absent window classifies missing rather than inheriting tmux's active-window fallback
+ok - tmux liveness: a running server with no session proves its windows missing
+ok - cursor composer: an idle Cursor pane reads empty even though the cursor row is blind
+ok - cursor composer: a fully dim placeholder reads empty
+ok - cursor composer: bright text matching the placeholder stays pending
+ok - cursor composer: real typed text still reads pending, so the injection guard holds
+ok - cursor composer: an identical screen stays unknown when the pane is not Cursor
+ok - cursor composer: a stale Cursor screen over a dead shell never reads empty
+ok - commandcode composer: an idle pane reads empty although its cursor row is blind and its placeholder is bright
+ok - commandcode composer: typed text still reads pending
+ok - commandcode composer: an identical screen stays unknown when the pane is not Command Code
+ok - hermes composer: an unprefixed default-profile prompt is read by Hermes identity before the generic cursor shape
+ok - hermes composer: a non-Hermes prompt keeps the generic cursor-anchored verdict
+PASS tests/fm-tmux-agent-liveness.test.sh
+@4
+ok - real tmux: fm_backend_tmux_create_task creates a window and refuses a duplicate
+ok - real tmux: fm_backend_tmux_send_text_line sends literal text and submits with Enter
+ok - real tmux: fm_backend_tmux_send_literal + fm_backend_tmux_send_key Enter submit as two separate steps
+ok - real tmux: fm_backend_tmux_capture's -S -N bound trims old history for a small window and reaches it for a large one
+ok - real tmux: fm_backend_tmux_resolve_bare_selector (list-live) finds the created window by name
+ok - real tmux: fm_backend_tmux_resolve_bare_selector fails for a window that does not exist
+ok - real tmux: fm_backend_target_exists finds an existing window
+ok - real tmux: fm_backend_target_exists finds an existing pane
+ok - real tmux: fm_backend_target_exists accepts bare and session-scoped window ids
+ok - real tmux: fm_backend_target_exists accepts window indexes including firstmate:0
+ok - real tmux: fm_backend_target_exists accepts index.pane targets
+ok - real tmux: fm_backend_target_exists accepts a bare session and explicit exact markers
+ok - real tmux: fm_backend_target_exists anchors the session name
+ok - real tmux: fm_backend_target_exists rejects malformed targets
+ok - real tmux: fm_backend_tmux_send_key withholds a key from a gone prefix target
+ok - real tmux: a gone dotted window reads absent beside its undotted neighbor
+ok - real tmux: fm_backend_target_exists rejects a killed window while another session stays alive
+ok - real tmux: fm_backend_target_exists rejects a missing session while another session stays alive
+ok - real tmux: kill removes the window and the readable session inventory authoritatively classifies it missing
+ok - real tmux: container_ensure names the pane's own session, not a more recent grouped session
+ok - real tmux: container_ensure names the group's base session for a pane opened from a live grouped viewer
+ok - real tmux: container_ensure names an ungrouped session unchanged
+ok - real tmux: container_ensure keeps a grouped viewer whose group base session is gone
+ok - real tmux: container_ensure falls back to the pane's surviving session when the $TMUX session id is stale
+PASS tests/fm-backend-tmux-smoke.test.sh
+ok - a live worker on its unchanged recorded server reads alive and working
+ok - after a server restart, a same-named window and a stale busy record no longer make a dead worker read alive or working
+ok - a replaced server reads exactly like a window closed on a surviving server
+ok - a record written before server identity was recorded is not reported dead on that ground
+PASS tests/fm-tmux-server-restart-liveness.test.sh
+ok - fm_tmux_submit_enter_core: busy pane + pending composer returns empty (message queued)
+ok - fm_tmux_submit_enter_core: idle pane + pending composer stays pending (genuine swallow preserved)
+ok - fm_tmux_submit_enter_core: the Claude background-task exit picker gets no confirming Enter
+ok - fm_backend_send_text_submit: a typed message to the exit picker types nothing and sends no Enter
+ok - fm_tmux_submit_enter_core: wrapped input retains swallowed-Enter retries
+ok - fm_tmux_submit_enter_core: placeholder-like bare input retains swallowed-Enter retries
+ok - fm_tmux_submit_enter_core: busy pane clears composer on first Enter - returns empty
+ok - fm_tmux_submit_enter_core: idle pane clears composer on first Enter - returns empty as before
+ok - fm_tmux_submit_enter_core: busy conversion is limited to proven pending input
+ok - fm_tmux_submit_core: failed baseline capture disables busy unknown conversion
+ok - fm_tmux_submit_enter_core: pending-unproven retries without busy conversion
+ok - fm_tmux_submit_enter_core: unrecognized states skip busy conversion
+ok - fm_pane_is_busy: Claude spinner is scoped, multi-frame, and backward-compatible
+PASS tests/fm-tmux-submit-busy.test.sh
+ok - fm_tmux_strip_ghost drops dim/faint runs, keeps normal and bold text
+ok - fm_tmux_strip_ghost handles combined SGR, ESC[22m, and reset-then-dim
+ok - fm_tmux_strip_ghost keeps bright colored text with 2 payloads
+ok - fm_tmux_strip_ghost drops a dark/muted truecolor foreground (grok placeholder)
+ok - fm_tmux_strip_ghost keeps muse's near-threshold glyph and its typed text
+ok - fm_pane_input_pending: a dim ghost-only composer is NOT pending
+ok - fm_pane_input_pending: dim ghost inside a bordered composer is NOT pending
+ok - fm_pane_input_pending: normal-intensity typed text is still pending
+ok - fm_pane_input_pending: bright colored text with 2 payloads is still pending
+ok - fm_pane_input_pending: a dark truecolor ghost-only composer (grok placeholder) is NOT pending
+ok - fm_tmux_composer_state: dark truecolor shell prompts read unknown
+ok - fm_pane_input_pending: real text plus a trailing ghost run is still pending
+ok - fm_tmux_composer_state: text above an empty cursor row is pending
+ok - fm_tmux_composer_state: a message wrapped across three rows is pending
+ok - fm_tmux_composer_state: a proven titled box tolerates a bottom-border cursor
+ok - fm_tmux_composer_identity: unknown busy state cannot become idle identity
+ok - fm_tmux_composer_state: typed Pi and Grok busy signatures inside a box are pending
+ok - fm_tmux_composer_state: a bare busy-footer row reads unknown (strict container-proof rule)
+ok - fm_tmux_composer_state: an unbounded bordered box fails closed as unknown
+ok - fm_tmux_composer_state: clipped and asymmetric composer edges fail closed
+ok - fm_tmux_composer_state: inconsistent box geometry fails closed
+ok - fm_tmux_composer_state: misaligned box bounds fail closed
+ok - fm_tmux_composer_state: unproved ghost and malformed geometry stay unknown while styled placeholder-like text stays pending-unproven
+ok - fm_tmux_composer_state: differing widths prefer pending or unknown, never empty
+ok - fm_tmux_composer_state: emoji and CJK text remain pending under the C locale
+ok - fm_tmux_composer_state: all tmux harnesses share empty and pending classification
+ok - fm_pane_input_pending: unrecognized states defer by default
+ok - fm_tmux_composer_state: one capture feeds the classifier; no band-capture race remains
+ok - fm_tmux_composer_state: absent Pi identity preserves Claude's enclosed bare verdict
+ok - fm_tmux_composer_state: only proven structural and non-bordered empty routes stay empty
+ok - fm_tmux_composer_state: panes without bordered structure retain compatibility fallback
+ok - fm_tmux_composer_state: interior edge glyphs retain non-bordered fallback
+ok - fm-peek output is escape-free (no raw -e bytes reach firstmate context)
+PASS tests/fm-composer-ghost.test.sh
+ok - worker-only capability and anchored process identity
+ok - profile validation and read-only idle-gateway coexistence check
+ok - startup consent only confirms a complete native offer with No thanks already selected
+error: stale busy-state gen for worker (event rejected)
+ok - native hook overlay preserves hooks and enforces session/generation binding
+ok - profile-prefixed composer requires native ready status and preserves drafts
+ok - scout spawn carries native profile, interactive brief, hook overlay and metadata
+ok - stalled Hermes launch stops its pane before the task record is removed
+ok - stalled Hermes launch whose pane cannot be closed keeps its task record
+PASS tests/fm-hermes-harness.test.sh

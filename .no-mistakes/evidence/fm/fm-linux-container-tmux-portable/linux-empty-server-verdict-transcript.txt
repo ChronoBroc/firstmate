@@ -1,0 +1,12 @@
+=== base (ec311e9d) on Debian bookworm container ===
+tmux 3.3a, sessions: []
+raw: no current target
+verdict for crew:fm-gone on empty server: unreadable
+verdict for crew:fm-gone with only 'other' held: missing
+verdict with no server running: missing
+=== head (97c74efe) on Debian bookworm container ===
+tmux 3.3a, sessions: []
+raw: no current target
+verdict for crew:fm-gone on empty server: missing
+verdict for crew:fm-gone with only 'other' held: missing
+verdict with no server running: missing

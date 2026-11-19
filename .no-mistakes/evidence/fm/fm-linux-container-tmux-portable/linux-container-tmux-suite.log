@@ -1,0 +1,71 @@
+Note: switching to '97c74efe9c0033e1cc52cbb3d2162def77ea11be'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+fm-test-linux: 2 on Linux 6.12.76-linuxkit
+ok - tmux liveness: a harness-named foreground process classifies alive
+ok - tmux liveness: muse's version-suffixed muse-bin-<version> classifies alive
+ok - tmux liveness: unrelated muse-containing command names stay ambiguous
+ok - tmux liveness: omp's bare binary name classifies alive
+ok - tmux liveness: unrelated omp-containing command names stay ambiguous
+ok - tmux liveness: Command Code's anchored process name classifies alive; a containing name stays ambiguous
+skip: no C compiler, so the version-string process-name case cannot build its executable
+ok - tmux liveness: a process neither name source attributes stays ambiguous rather than inventing an agent
+ok - tmux liveness: Python -I -c bootstrap with same-group Node --expose-gc Hermes TUI classifies alive without harness names
+ok - tmux liveness: the same bootstrap with an unrelated Node script stays ambiguous
+ok - tmux liveness: a launcher whose own identity reads as a bare shell classifies alive from its harness child
+ok - tmux liveness: an idle shell pane classifies dead
+ok - tmux liveness: a harness-named background process in an idle pane still classifies dead
+ok - tmux liveness: an absent window classifies missing rather than inheriting tmux's active-window fallback
+ok - tmux liveness: a running server with no session proves its windows missing
+ok - cursor composer: an idle Cursor pane reads empty even though the cursor row is blind
+ok - cursor composer: a fully dim placeholder reads empty
+ok - cursor composer: bright text matching the placeholder stays pending
+ok - cursor composer: real typed text still reads pending, so the injection guard holds
+ok - cursor composer: an identical screen stays unknown when the pane is not Cursor
+ok - cursor composer: a stale Cursor screen over a dead shell never reads empty
+ok - commandcode composer: an idle pane reads empty although its cursor row is blind and its placeholder is bright
+ok - commandcode composer: typed text still reads pending
+ok - commandcode composer: an identical screen stays unknown when the pane is not Command Code
+not ok - Hermes's native busy hint on an unprefixed prompt must not read as a draft, or busy interrupts are refused
+FAIL tests/fm-tmux-agent-liveness.test.sh
+@4
+ok - real tmux: fm_backend_tmux_create_task creates a window and refuses a duplicate
+ok - real tmux: fm_backend_tmux_send_text_line sends literal text and submits with Enter
+ok - real tmux: fm_backend_tmux_send_literal + fm_backend_tmux_send_key Enter submit as two separate steps
+ok - real tmux: fm_backend_tmux_capture's -S -N bound trims old history for a small window and reaches it for a large one
+ok - real tmux: fm_backend_tmux_resolve_bare_selector (list-live) finds the created window by name
+ok - real tmux: fm_backend_tmux_resolve_bare_selector fails for a window that does not exist
+ok - real tmux: fm_backend_target_exists finds an existing window
+ok - real tmux: fm_backend_target_exists finds an existing pane
+ok - real tmux: fm_backend_target_exists accepts bare and session-scoped window ids
+ok - real tmux: fm_backend_target_exists accepts window indexes including firstmate:0
+ok - real tmux: fm_backend_target_exists accepts index.pane targets
+ok - real tmux: fm_backend_target_exists accepts a bare session and explicit exact markers
+ok - real tmux: fm_backend_target_exists anchors the session name
+ok - real tmux: fm_backend_target_exists rejects malformed targets
+ok - real tmux: fm_backend_tmux_send_key withholds a key from a gone prefix target
+ok - real tmux: a gone dotted window reads absent beside its undotted neighbor
+ok - real tmux: fm_backend_target_exists rejects a killed window while another session stays alive
+ok - real tmux: fm_backend_target_exists rejects a missing session while another session stays alive
+ok - real tmux: kill removes the window and the readable session inventory authoritatively classifies it missing
+ok - real tmux: container_ensure names the pane's own session, not a more recent grouped session
+ok - real tmux: container_ensure names the group's base session for a pane opened from a live grouped viewer
+ok - real tmux: container_ensure names an ungrouped session unchanged
+ok - real tmux: container_ensure keeps a grouped viewer whose group base session is gone
+ok - real tmux: container_ensure falls back to the pane's surviving session when the $TMUX session id is stale
+PASS tests/fm-backend-tmux-smoke.test.sh
+fm-test-linux: 1 failed

@@ -1,0 +1,5 @@
+=== liveness with BASE tmux.sh
+rc=1
+not ok - a window on a server holding no session must classify missing (tmux said 'no current target'), got unreadable
+=== hermes-harness with BASE composer-lib
+rc=0

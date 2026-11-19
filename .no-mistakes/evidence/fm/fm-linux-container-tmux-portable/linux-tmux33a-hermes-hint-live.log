@@ -1,0 +1,15 @@
+tmux 3.3a
+##### HEAD composer-lib
+busy capture tail (cat -v):  worker M-bM-^]M-/ ^[[38;5;231m^[[48;5;178mC^[[38;5;178m^[[49mtrl+C to interruptM-bM-^@M-&
+busy verdict: empty
+draft capture tail (cat -v):  worker M-bM-^]M-/ ^[[38;5;255mCtrl+C to interruptM-bM-^@M-&
+draft verdict: pending
+idle capture tail (cat -v):  worker M-bM-^]M-/
+idle verdict: empty
+##### BASE composer-lib (ec311e9d)
+busy capture tail (cat -v):  worker M-bM-^]M-/ ^[[38;5;231m^[[48;5;178mC^[[38;5;178m^[[49mtrl+C to interruptM-bM-^@M-&
+busy verdict: pending
+draft capture tail (cat -v):  worker M-bM-^]M-/ ^[[38;5;255mCtrl+C to interruptM-bM-^@M-&
+draft verdict: pending
+idle capture tail (cat -v):  worker M-bM-^]M-/
+idle verdict: empty

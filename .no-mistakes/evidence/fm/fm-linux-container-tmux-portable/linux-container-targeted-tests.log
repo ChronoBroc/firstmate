@@ -1,0 +1,31 @@
+fatal: not a git repository: ~/.no-mistakes/repos/af987dfc3730.git/worktrees/01M7SPJXN68Q8JCCC1PJHR1A4A
+Linux 445f8d3422ce 6.12.76-linuxkit #1 SMP Thu Jun 11 15:44:51 UTC 2026 aarch64 GNU/Linux
+tmux 3.3a
+=== fm-tmux-agent-liveness
+ok - commandcode composer: an idle pane reads empty although its cursor row is blind and its placeholder is bright
+ok - commandcode composer: typed text still reads pending
+ok - commandcode composer: an identical screen stays unknown when the pane is not Command Code
+ok - hermes composer: an unprefixed default-profile prompt is read by Hermes identity before the generic cursor shape
+ok - hermes composer: a non-Hermes prompt keeps the generic cursor-anchored verdict
+EXIT fm-tmux-agent-liveness rc=0
+=== fm-hermes-harness
+error: stale busy-state gen for worker (event rejected)
+ok - native hook overlay preserves hooks and enforces session/generation binding
+ok - profile-prefixed composer requires native ready status and preserves drafts
+not ok - spawn: notice: Hermes reasoning is profile-owned; effort=high is recorded but not passed
+error: could not resolve the shared Treehouse project lock for /tmp/fm-hermes-harness.H5jC0e/spawn/project
+EXIT fm-hermes-harness rc=1
+=== fm-composer-lib
+ok - a dialog note without a sink skips the match, and release leaves a caller RETURN trap
+ok - picker text quoted above a normal composer is not read as a live picker
+ok - fm_composer_strip_ghost: on kiro, near-gray ghost strips while near-gray real text and a chromatic glyph survive
+ok - fm_composer_strip_ghost: on kiro, palette greys strip while bright, chromatic and theme-remapped indexes survive
+ok - composer widening: the near-gray ceiling, palette greys, and hinted idle row apply on kiro only
+EXIT fm-composer-lib rc=0
+=== fm-backend-tmux-smoke
+ok - real tmux: container_ensure names the pane's own session, not a more recent grouped session
+ok - real tmux: container_ensure names the group's base session for a pane opened from a live grouped viewer
+ok - real tmux: container_ensure names an ungrouped session unchanged
+ok - real tmux: container_ensure keeps a grouped viewer whose group base session is gone
+ok - real tmux: container_ensure falls back to the pane's surviving session when the $TMUX session id is stale
+EXIT fm-backend-tmux-smoke rc=0

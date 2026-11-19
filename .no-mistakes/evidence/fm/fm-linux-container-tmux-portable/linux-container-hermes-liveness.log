@@ -1,0 +1,21 @@
+fatal: detected dubious ownership in repository at '/work'
+To add an exception for this directory, call:
+
+	git config --global --add safe.directory /work
+=== fm-hermes-harness
+ok - scout spawn carries native profile, interactive brief, hook overlay and metadata
+ok - stalled Hermes launch stops its pane before the task record is removed
+ok - stalled Hermes launch whose pane cannot be closed keeps its task record
+EXIT fm-hermes-harness rc=0
+=== fm-tmux-agent-liveness
+ok - tmux liveness: a running server with no session proves its windows missing
+ok - cursor composer: an idle Cursor pane reads empty even though the cursor row is blind
+ok - cursor composer: a fully dim placeholder reads empty
+ok - cursor composer: a stale Cursor screen over a dead shell never reads empty
+ok - commandcode composer: an idle pane reads empty although its cursor row is blind and its placeholder is bright
+ok - hermes composer: an unprefixed default-profile prompt is read by Hermes identity before the generic cursor shape
+ok - hermes composer: a non-Hermes prompt keeps the generic cursor-anchored verdict
+ok - commandcode composer: an identical screen stays unknown when the pane is not Command Code
+ok - hermes composer: an unprefixed default-profile prompt is read by Hermes identity before the generic cursor shape
+ok - hermes composer: a non-Hermes prompt keeps the generic cursor-anchored verdict
+EXIT fm-tmux-agent-liveness rc=0

@@ -1,0 +1,13 @@
+tmux 3.3a
+##### HEAD
+server sessions: []
+raw tmux answer for crew:fm-gone: no current target
+verdict (empty server): missing
+verdict (crew session, absent window fm-gone): missing
+verdict (crew session, live window fm-live): ambiguous
+##### BASE ec311e9d bin/backends/tmux.sh
+server sessions: []
+raw tmux answer for crew:fm-gone: no current target
+verdict (empty server): unreadable
+verdict (crew session, absent window fm-gone): missing
+verdict (crew session, live window fm-live): ambiguous

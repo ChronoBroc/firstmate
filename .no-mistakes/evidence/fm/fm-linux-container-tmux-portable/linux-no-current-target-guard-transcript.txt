@@ -1,0 +1,2 @@
+real sessions: [crew]
+verdict when list-windows says 'no current target' but server holds sessions: unreadable
