@@ -189,6 +189,20 @@ fm_backend_tmux_window_inventory() {  # <session-target> [socket]
     *"can't find session:"*|*"no server running on "*|*"error connecting to "*" (No such file or directory)"|*"error connecting to "*" (Connection refused)")
       return 2
       ;;
+    *"no current target"*)
+      # A running server that holds no session at all (one kept alive with
+      # exit-empty off, as a crew home's is) answers an explicit session
+      # target this way instead of "can't find session:". The message alone is
+      # not proof, so the server's own session list must read back empty.
+      local sessions
+      if sessions=$(if [ -n "${2:-}" ]; then
+          LC_ALL=C tmux -S "$2" list-sessions -F '#{session_id}' 2>/dev/null
+        else
+          LC_ALL=C tmux list-sessions -F '#{session_id}' 2>/dev/null
+        fi) && [ -z "$sessions" ]; then
+        return 2
+      fi
+      ;;
   esac
   return 1
 }
