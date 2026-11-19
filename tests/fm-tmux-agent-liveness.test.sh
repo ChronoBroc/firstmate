@@ -32,6 +32,7 @@ SESSION=liveness
 
 cleanup_all() {
   "$REAL_TMUX" -L "$SOCKET" kill-server >/dev/null 2>&1 || true
+  [ -z "${EMPTY_SOCKET:-}" ] || "$REAL_TMUX" -L "$EMPTY_SOCKET" kill-server >/dev/null 2>&1 || true
   [ -n "${LAB:-}" ] && rm -rf "$LAB"
   fm_test_cleanup
 }
@@ -363,6 +364,38 @@ fm_backend_tmux_foreground_comms "$SESSION:no-such-window" >/dev/null \
 [ "$(fm_backend_agent_state tmux "$SESSION:no-such-window")" = missing ] \
   || fail "an absent window in a readable session must classify missing, not whatever the fallback pane runs"
 pass "tmux liveness: an absent window classifies missing rather than inheriting tmux's active-window fallback"
+
+# --- a running server that holds no session proves the window absent --------
+# A crew home keeps its default tmux server running with exit-empty off before
+# any session exists. Such a server answers an explicit session target with
+# "no current target" rather than "can't find session:", and reading that as
+# unreadable left a dead worker counted and unreclaimable. The server's own
+# empty session list is what makes the absence definitive.
+EMPTY_SOCKET="fm-liveness-empty-$$"
+"$REAL_TMUX" -L "$EMPTY_SOCKET" -f /dev/null start-server \; set -g exit-empty off \
+  || fail "could not start the empty private tmux server"
+empty_answer=$("$REAL_TMUX" -L "$EMPTY_SOCKET" list-windows -t "=$SESSION" 2>&1) \
+  && { "$REAL_TMUX" -L "$EMPTY_SOCKET" kill-server; fail "an empty server listed windows for a session it does not hold"; }
+case "$empty_answer" in
+  *"can't find session:"*)
+    "$REAL_TMUX" -L "$EMPTY_SOCKET" kill-server
+    fail "this tmux names the absent session on an empty server, so the case would prove nothing: $empty_answer" ;;
+esac
+mkdir -p "$LAB/empty-shim"
+cat > "$LAB/empty-shim/tmux" <<SH
+#!/usr/bin/env bash
+exec "$REAL_TMUX" -L "$EMPTY_SOCKET" "\$@"
+SH
+chmod +x "$LAB/empty-shim/tmux"
+empty_verdict=$(PATH="$LAB/empty-shim:$PATH" fm_backend_agent_state tmux "$SESSION:fm-gone")
+"$REAL_TMUX" -L "$EMPTY_SOCKET" new-session -d -s other
+other_verdict=$(PATH="$LAB/empty-shim:$PATH" fm_backend_agent_state tmux "$SESSION:fm-gone")
+"$REAL_TMUX" -L "$EMPTY_SOCKET" kill-server
+[ "$empty_verdict" = missing ] \
+  || fail "a window on a server holding no session must classify missing (tmux said '$empty_answer'), got $empty_verdict"
+[ "$other_verdict" = missing ] \
+  || fail "a window whose session is absent from a server holding another must still classify missing, got $other_verdict"
+pass "tmux liveness: a running server with no session proves its windows missing"
 
 # --- Cursor's composer: the terminal cursor is NOT a composer locator --------
 # Cursor Agent CLI parks its terminal cursor below its footer with cursor_flag 0,
