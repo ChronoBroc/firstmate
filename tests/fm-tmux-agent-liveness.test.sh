@@ -27,14 +27,17 @@ command -v tmux >/dev/null 2>&1 || { echo "skip: tmux not found"; exit 0; }
 
 REAL_TMUX=$(command -v tmux)
 SOCKET="fm-liveness-$$"
-LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-liveness.XXXXXX")
+LAB=$(mktemp -d "${TMPDIR:-/tmp}/fm-liveness.XXXXXX") \
+  || { printf 'not ok - could not create the private lab\n' >&2; exit 1; }
+SOCKDIR=$(mktemp -d /tmp/fm-lv.XXXXXX) \
+  || { rm -rf "$LAB"; printf 'not ok - could not create the private socket directory\n' >&2; exit 1; }
 SESSION=liveness
-EMPTY_SOCKET="$LAB/empty.sock"
+EMPTY_SOCKET="$SOCKDIR/empty.sock"
 
 cleanup_all() {
   "$REAL_TMUX" -L "$SOCKET" kill-server >/dev/null 2>&1 || true
   "$REAL_TMUX" -S "$EMPTY_SOCKET" kill-server >/dev/null 2>&1 || true
-  [ -n "${LAB:-}" ] && rm -rf "$LAB"
+  rm -rf "$LAB" "$SOCKDIR"
   fm_test_cleanup
 }
 trap cleanup_all EXIT
