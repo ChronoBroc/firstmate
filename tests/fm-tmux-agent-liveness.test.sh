@@ -393,7 +393,7 @@ routed_sessions=$(PATH="$LAB/empty-shim:$PATH" tmux list-sessions -F '#{session_
   && [ -z "$routed_sessions" ] \
   || fail "the classifier's tmux must reach the empty private server, got sessions: $routed_sessions"
 empty_verdict=$(PATH="$LAB/empty-shim:$PATH" fm_backend_agent_state tmux "$SESSION:fm-gone")
-"$REAL_TMUX" -S "$EMPTY_SOCKET" new-session -d -s other \
+"$REAL_TMUX" -S "$EMPTY_SOCKET" new-session -d -s other -- /bin/sh \
   || fail "could not create the other session on the private tmux server"
 "$REAL_TMUX" -S "$EMPTY_SOCKET" has-session -t "=other" 2>/dev/null \
   || fail "the other session must exist on the private tmux server"
@@ -401,6 +401,8 @@ routed_sessions=$(PATH="$LAB/empty-shim:$PATH" tmux list-sessions -F '#{session_
   && [ "$routed_sessions" = other ] \
   || fail "the classifier's tmux must reach the private server holding only other, got sessions: $routed_sessions"
 other_verdict=$(PATH="$LAB/empty-shim:$PATH" fm_backend_agent_state tmux "$SESSION:fm-gone")
+"$REAL_TMUX" -S "$EMPTY_SOCKET" has-session -t "=other" 2>/dev/null \
+  || fail "the other session must still exist once the classifier has answered"
 "$REAL_TMUX" -S "$EMPTY_SOCKET" kill-server
 [ "$empty_verdict" = missing ] \
   || fail "a window on a server holding no session must classify missing (tmux said '$empty_answer'), got $empty_verdict"
