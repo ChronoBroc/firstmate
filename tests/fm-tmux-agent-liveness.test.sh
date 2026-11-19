@@ -382,17 +382,24 @@ empty_sessions=$("$REAL_TMUX" -S "$EMPTY_SOCKET" list-sessions -F '#{session_nam
   || fail "the empty private tmux server must hold no session, got: $empty_sessions"
 empty_answer=$("$REAL_TMUX" -S "$EMPTY_SOCKET" list-windows -t "=$SESSION" 2>&1) \
   && fail "an empty server listed windows for a session it does not hold"
-mkdir -p "$LAB/empty-shim"
-cat > "$LAB/empty-shim/tmux" <<SH
+mkdir -p "$LAB/empty-shim" \
+  && cat > "$LAB/empty-shim/tmux" <<SH \
+  && chmod +x "$LAB/empty-shim/tmux" \
+  || fail "could not create the empty-server tmux shim"
 #!/usr/bin/env bash
 exec "$REAL_TMUX" -S "$EMPTY_SOCKET" "\$@"
 SH
-chmod +x "$LAB/empty-shim/tmux"
+routed_sessions=$(PATH="$LAB/empty-shim:$PATH" tmux list-sessions -F '#{session_name}' 2>/dev/null) \
+  && [ -z "$routed_sessions" ] \
+  || fail "the classifier's tmux must reach the empty private server, got sessions: $routed_sessions"
 empty_verdict=$(PATH="$LAB/empty-shim:$PATH" fm_backend_agent_state tmux "$SESSION:fm-gone")
 "$REAL_TMUX" -S "$EMPTY_SOCKET" new-session -d -s other \
   || fail "could not create the other session on the private tmux server"
 "$REAL_TMUX" -S "$EMPTY_SOCKET" has-session -t "=other" 2>/dev/null \
   || fail "the other session must exist on the private tmux server"
+routed_sessions=$(PATH="$LAB/empty-shim:$PATH" tmux list-sessions -F '#{session_name}' 2>/dev/null) \
+  && [ "$routed_sessions" = other ] \
+  || fail "the classifier's tmux must reach the private server holding only other, got sessions: $routed_sessions"
 other_verdict=$(PATH="$LAB/empty-shim:$PATH" fm_backend_agent_state tmux "$SESSION:fm-gone")
 "$REAL_TMUX" -S "$EMPTY_SOCKET" kill-server
 [ "$empty_verdict" = missing ] \
