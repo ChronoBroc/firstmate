@@ -382,13 +382,14 @@ empty_sessions=$("$REAL_TMUX" -S "$EMPTY_SOCKET" list-sessions -F '#{session_nam
   || fail "the empty private tmux server must hold no session, got: $empty_sessions"
 empty_answer=$("$REAL_TMUX" -S "$EMPTY_SOCKET" list-windows -t "=$SESSION" 2>&1) \
   && fail "an empty server listed windows for a session it does not hold"
-mkdir -p "$LAB/empty-shim" \
+if ! { mkdir -p "$LAB/empty-shim" \
   && cat > "$LAB/empty-shim/tmux" <<SH \
-  && chmod +x "$LAB/empty-shim/tmux" \
-  || fail "could not create the empty-server tmux shim"
+  && chmod +x "$LAB/empty-shim/tmux"; }; then
 #!/usr/bin/env bash
 exec "$REAL_TMUX" -S "$EMPTY_SOCKET" "\$@"
 SH
+  fail "could not create the empty-server tmux shim"
+fi
 routed_sessions=$(PATH="$LAB/empty-shim:$PATH" tmux list-sessions -F '#{session_name}' 2>/dev/null) \
   && [ -z "$routed_sessions" ] \
   || fail "the classifier's tmux must reach the empty private server, got sessions: $routed_sessions"
