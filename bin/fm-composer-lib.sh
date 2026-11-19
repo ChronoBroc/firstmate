@@ -2292,9 +2292,14 @@ _fm_composer_hermes_state() {  # <screen> <styled>
   # The busy hint uses xterm orange 178, above the shared dim threshold.
   # Strip only the captured native synthetic cursor chip plus that exact hint;
   # the same words typed in the normal bright input color remain a draft.
-  local esc=$'\033' hint
-  hint="${esc}[38;5;231m${esc}[48;5;178mC${esc}[38;5;178m${esc}[49mtrl+C to interrupt…${esc}[39m"
+  # tmux 3.3a (Debian bookworm) drops the closing default-foreground reset
+  # when the hint ends its row, so strip the unreset hint only at a row end.
+  local esc=$'\033' nl=$'\n' hint open
+  open="${esc}[38;5;231m${esc}[48;5;178mC${esc}[38;5;178m${esc}[49mtrl+C to interrupt…"
+  hint="${open}${esc}[39m"
   screen=${screen//"$hint"/}
+  screen=${screen//"$open$nl"/$nl}
+  screen=${screen%"$open"}
   stripped=$(printf '%s\n' "$screen" | fm_composer_strip_ghost | fm_composer_strip_ansi)
   printf '%s\n' "$stripped" | awk '
     { rows[NR]=$0 }
