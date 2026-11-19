@@ -69,7 +69,7 @@ While busy, the placeholder was `Ctrl+C to interrupt…` with this captured styl
 ESC[38;5;231m ESC[48;5;178m C ESC[38;5;178m ESC[49m trl+C to interrupt… ESC[39m
 ```
 
-Only that synthetic cursor/hint sequence is removed; the same words in normal bright input remain a draft.
+Only that synthetic cursor/hint sequence is removed, plus the same sequence lacking its closing `ESC[39m` at a row end, which tmux 3.3a renders there; the same words in normal bright input remain a draft.
 The shared rendered delivery guard also recognizes the native per-turn elapsed footer independently of the interrupt hint.
 A foreground Hermes identity, the native status rule, and the prompt position are required to classify the profile composer.
 The default profile's unprefixed `❯` also matches the generic cursor-anchored shape, so the tmux read checks Hermes identity first; the portable tmux liveness guard covers that prompt's idle placeholder, native busy hint, bright draft, and missing status rule.
