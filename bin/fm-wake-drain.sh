@@ -932,19 +932,15 @@ print_status_presentation() {  # [<deduped-raw-rows>]
 # through status_open_decisions_cursor_offset, which writes no cursor). 1 when
 # every open decision was presented, 2 when a log or cursor cannot be read.
 unpresented_open_decision() {  # <task-and-endpoint-snapshot>
-  local task endpoint ident f open presented tmp key
+  local task endpoint ident f open presented key
   while IFS=$(printf '\t') read -r task endpoint ident; do
     [ -n "$task" ] || continue
     f="$STATE/$task.status"
     open=$(status_open_decisions "$f") || return 2
     [ -n "$open" ] || continue
-    tmp=$(mktemp "${TMPDIR:-/tmp}/fm-presented-decisions.XXXXXX") || return 2
-    if ! FM_STATUS_CURSOR_SNAPSHOT_FILE="$tmp" status_open_decisions_cursor_offset "$f" >/dev/null; then
-      rm -f -- "$tmp"
-      return 2
-    fi
-    presented=$(tail -n +4 "$tmp" | cut -f1) || { rm -f -- "$tmp"; return 2; }
-    rm -f -- "$tmp"
+    presented=$({ FM_STATUS_CURSOR_SNAPSHOT_FILE=/dev/fd/3 status_open_decisions_cursor_offset "$f" >/dev/null; } 3>&1) \
+      || return 2
+    presented=$(printf '%s\n' "$presented" | tail -n +4 | cut -f1)
     while IFS=$(printf '\t') read -r key _; do
       [ -n "$key" ] || continue
       printf '%s\n' "$presented" | grep -qxF -- "$key" || return 0

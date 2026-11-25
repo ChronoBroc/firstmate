@@ -1661,7 +1661,7 @@ FM_STATUS_SNAPSHOT_EVENT_MTIME=
 FM_STATUS_SNAPSHOT_EVENT_ENDPOINT=
 # shellcheck disable=SC2034 # Output globals are consumed by sourcing drain scripts.
 status_snapshot_latest_event() {  # <status-file> <captured-endpoint> <captured-identity>
-  local f=$1 endpoint=$2 expected_ident=$3 limit=65536 start length scratch record line event_endpoint
+  local f=$1 endpoint=$2 expected_ident=$3 limit=65536 start length record line event_endpoint
   local before_mtime after_mtime before_size after_size before_ident after_ident skip_first=0 found=0
   FM_STATUS_SNAPSHOT_EVENT_LINE=
   FM_STATUS_SNAPSHOT_EVENT_MTIME=
@@ -1683,24 +1683,26 @@ status_snapshot_latest_event() {  # <status-file> <captured-endpoint> <captured-
     start=0
   fi
   length=$((endpoint - start))
-  scratch="$(_fm_status_span_scratch "$f").latest"
-  _fm_status_read_span "$f" "$start" "$length" > "$scratch" 2>/dev/null \
-    || { rm -f "$scratch"; return 1; }
-  if record=$(LC_ALL=C perl -e '
-    my ($path, $start, $skip_first) = @ARGV;
-    open my $file, "<", $path or exit 1;
-    binmode $file;
-    scalar(<$file>) if $skip_first;
-    my ($latest, $end);
-    while (defined(my $line = <$file>)) {
-      next unless $line =~ /[^\s]/;
-      $line =~ s/[\r\n]+\z//;
-      ($latest, $end) = ($line, $start + tell($file));
-    }
-    exit 3 unless defined $end;
-    print "$end\t$latest";
-  ' "$scratch" "$start" "$skip_first"); then :; else found=$?; fi
-  rm -f "$scratch"
+  if record=$(
+    _fm_status_read_span "$f" "$start" "$length" 2>/dev/null | LC_ALL=C perl -e '
+      my ($start, $skip_first) = @ARGV;
+      binmode STDIN;
+      my $offset = 0;
+      if ($skip_first) { my $first = <STDIN>; $offset += length($first) if defined $first; }
+      my ($latest, $end);
+      while (defined(my $line = <STDIN>)) {
+        $offset += length($line);
+        next unless $line =~ /[^\s]/;
+        $line =~ s/[\r\n]+\z//;
+        ($latest, $end) = ($line, $start + $offset);
+      }
+      exit 3 unless defined $end;
+      print "$end\t$latest";
+    ' "$start" "$skip_first"
+    read_rc=${PIPESTATUS[0]} parse_rc=${PIPESTATUS[1]}
+    [ "$read_rc" -eq 0 ] || exit 1
+    exit "$parse_rc"
+  ); then :; else found=$?; fi
   [ "$found" -eq 0 ] || [ "$found" -eq 3 ] || return 1
   if [ "$found" -eq 0 ]; then
     event_endpoint=${record%%$'\t'*}
