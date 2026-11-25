@@ -161,8 +161,8 @@ test_engine_that_cannot_inspect_the_host_handles_routine_turn_ends() {
   FM_SUPERVISION_ENGINE_CLAUDE_BIN="$home/engine-wrap" start_host "$home"
   wait_until 250 one_drain_holds_every_turn_end "$home" \
     || fail "engine no ps: no single engine drain was granted a row for each worker's turn end: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
-  wait_until 250 sh -c '[ ! -s "$1" ]' _ "$home/state/.wake-queue" \
-    || fail "engine no ps: granted rows were left queued: $(cat "$home/state/.wake-queue")"
+  wait_until 250 handled_at_least "$home" 1 \
+    || fail "engine no ps: the host never counted the batched turn as handled: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
   host_exited "$home" && fail "engine no ps: a routine turn end reached main: $(cat "$home/host.out")"
   assert_no_re '	failed	' "$home/state/.supervision-host.log" "engine no ps: a turn failed to acknowledge its granted rows"
   [ ! -s "$home/state/.wake-queue" ] || fail "engine no ps: granted rows were left queued: $(cat "$home/state/.wake-queue")"
