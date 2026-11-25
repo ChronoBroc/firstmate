@@ -953,8 +953,8 @@ test_tick_parks_clean_idle_lanes_only_when_opted_in() {
 test_land_requires_opt_in_but_always_cleans_parked() {
   local w out rc
   w=$(make_world land-off "$GH_URL")
-  out=$(run_park "$w" land lane --if-eligible 2>&1)
-  [ -z "$out" ] && [ ! -e "$w/teardown.log" ] || fail "land: acted without config/auto-land: $out"
+  rc=0; out=$(run_park "$w" land lane --if-eligible 2>&1) || rc=$?
+  [ "$rc" = 0 ] && [ -z "$out" ] && [ ! -e "$w/teardown.log" ] || fail "land: acted without config/auto-land (exit $rc): $out"
   : > "$w/config/auto-land"
   out=$(run_park "$w" land lane --if-eligible 2>&1)
   [ "$out" = "cleaned up lane: PR $GH_URL merged; lane torn down and its working copy returned" ] || fail "land: $out"
@@ -969,15 +969,15 @@ test_land_requires_opt_in_but_always_cleans_parked() {
 }
 
 test_auto_land_skips_adopted_pr_records() {
-  local w out
+  local w out rc
   w=$(make_world land-adopted "$GH_URL")
   fm_write_meta "$w/state/lane.meta" "kind=adopted-pr" "project=$w/project" "pr=$GH_URL"
   : > "$w/config/auto-land"
-  out=$(run_park "$w" land lane --if-eligible --queue 2>&1)
-  [ -z "$out" ] && [ ! -e "$w/state/lane.review-park-land" ] \
-    || fail "auto-land: queued cleanup of an adopted PR record: $out"
-  out=$(run_park "$w" land lane --if-eligible 2>&1)
-  [ -z "$out" ] && [ ! -e "$w/teardown.log" ] || fail "auto-land: tore down an adopted PR record: $out"
+  rc=0; out=$(run_park "$w" land lane --if-eligible --queue 2>&1) || rc=$?
+  [ "$rc" = 0 ] && [ -z "$out" ] && [ ! -e "$w/state/lane.review-park-land" ] \
+    || fail "auto-land: queued cleanup of an adopted PR record (exit $rc): $out"
+  rc=0; out=$(run_park "$w" land lane --if-eligible 2>&1) || rc=$?
+  [ "$rc" = 0 ] && [ -z "$out" ] && [ ! -e "$w/teardown.log" ] || fail "auto-land: tore down an adopted PR record (exit $rc): $out"
   [ -f "$w/state/lane.meta" ] || fail "auto-land: adopted PR record was removed"
   pass "config/auto-land never queues or starts cleanup of a non-ship adopted PR record"
 }
