@@ -1,0 +1,38 @@
+1..35
+ok - github gate: clean PR parks, and draft, closed, conflict, behind, unknown mergeability, CI pending/failing/absent, changes requested, unresolved and unread threads each refuse
+ok - github gate refuses while a required check of the base branch has not reported on the head, or the requirement cannot be read
+ok - github gate waits for every reviewer bot to submit a review of the current head, or the quiet window since it was pushed
+ok - gitlab gate: clean MR parks, and draft, conflict, rebase, CI running/failed/absent, changes requested, other merge blockers, unresolved threads, a pipeline on an older commit, and a review bot that has not finished each refuse, across every page of discussions; a failed page is unreadable for gate and tick
+ok - park evaluates the gate twice, leases the slot, writes a private record, stops the agent once, and declares the wait
+ok - park refuses an unsupported backend before leasing, recording, or stopping
+ok - a head change between the verdict and the stop refuses the park and leaves the agent running
+ok - an instruction or a new turn arriving after the preflight refuses the park before the agent is stopped
+ok - park holds the inbox delivery lock across its final check and stop, refusing a newly delivered instruction without stopping the agent
+ok - park leaves the task metadata lock available to fm-control exit
+ok - a pending park stays watched during stop, promotes a later stop, and expires only after the stop bound
+ok - a hung agent check on a pending park ends within the tick, and the next tick resumes and settles it
+ok - a park whose record cannot be written refuses before the agent is stopped
+ok - park refuses a busy or unfinished worker, a waiting instruction, a dirty or lagging copy, an unarmed merge poll, an unleasable slot, and a failed stop
+ok - a lane re-parked after a relaunch keeps its own durable lease, and a slot leased to another holder refuses the park
+ok - head change, failing checks, changes requested, an unresolved thread, a conflict, and new or edited GitHub or GitLab comments, including an inline reply in a resolved thread, each relaunch a fresh worker with the trigger in its instructions
+ok - an edited comment older than the latest 100 is detected and relaunches the parked lane
+ok - a parked branch that merely fell behind its base stays parked
+ok - a relaunch slower than the whole tick budget completes once, is never killed, and is reported by the next tick
+ok - a tick that runs out of time resumes at the next unvisited lane, so a slow early lane cannot starve later ones
+ok - an unchanged parked PR and a bare approval stay parked silently
+ok - a failed relaunch keeps the park record, reports once, and waits for a manual resume
+ok - closed-without-merge reporting for unparked lanes requires a feature flag and does not require an idle worker
+ok - tick parks nothing without opt-in, reads nothing when opted out of cleanup too, never parks an unclean lane, and parks a clean idle one under config/park-on-review
+ok - merge-time cleanup requires opt-in for unparked lanes and always cleans parked lanes
+ok - config/auto-land never queues or starts cleanup of a non-ship adopted PR record
+ok - land queue fails when the cleanup request cannot be written
+ok - a lost pool slot and its leftover paths survive in the detached land report
+ok - a detached merge-time cleanup returns at once, runs its slow teardown to completion, and the next tick reports it once
+ok - a pending merged-lane cleanup survives watcher restart and reports its outcome once
+ok - a temporary control-lock refusal stays pending and retries to one reported cleanup outcome
+ok - a cleanup killed during its teardown keeps its request, and the next tick retries it and reports once
+ok - a cleanup request for a PR the lane no longer names is dropped without a teardown or a report
+ok - an action report survives until the tick has recorded its wake, then is reported once
+ok - a merge-time cleanup waits for a relaunch of the same lane that is under way
+FM_TEST_COMPLETE
+exit=0

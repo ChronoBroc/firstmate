@@ -1,0 +1,2 @@
+not ok - NUL argv identity lost when names/ps args are blind
+exit=1

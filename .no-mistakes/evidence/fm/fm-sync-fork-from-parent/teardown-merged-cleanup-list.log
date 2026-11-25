@@ -1,0 +1,13 @@
+ok - teardown leaves opencode's busy plugin in the returned pool worktree as on main
+BEFORE:
+.review-park-closed-task-x1
+.task-x1.captain-wait.a
+.task-x1.captain-wait.b
+.task-y9.captain-wait.a
+task-x1.pr-register-refused
+task-x1.pr-register-timed-out
+task-x1.review-park
+teardown rc=0
+AFTER:
+.task-y9.captain-wait.a
+ok - teardown removes parent park/registration-timeout records and fork captain-wait records, sparing other tasks
