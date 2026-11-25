@@ -133,6 +133,18 @@ test_engine_in_another_time_zone_handles_its_granted_rows() {
 # ends from several workers at once reach it as one close whose grant holds
 # every one of them, and all of them must clear.
 
+# One engine drain printed a distinct signal row (queue column 4 is the row's
+# key) for each of the demo, alpha, and beta turn ends.
+one_drain_holds_every_turn_end() {  # <home>
+  local drain
+  for drain in "$1"/engine-drain.*; do
+    [ -f "$drain" ] || continue
+    awk -F '\t' '$3 == "signal" && ($4 == "demo.turn-ended" || $4 == "alpha.turn-ended" || $4 == "beta.turn-ended") && !seen[$4]++ { n++ }
+      END { exit n == 3 ? 0 : 1 }' "$drain" && return 0
+  done
+  return 1
+}
+
 test_engine_that_cannot_inspect_the_host_handles_routine_turn_ends() {
   local home task
   home=$(make_home engine-no-ps attended)
@@ -147,13 +159,10 @@ test_engine_that_cannot_inspect_the_host_handles_routine_turn_ends() {
   chmod +x "$home/engine-wrap"
   touch "$home/state/demo.turn-ended" "$home/state/alpha.turn-ended" "$home/state/beta.turn-ended"
   FM_SUPERVISION_ENGINE_CLAUDE_BIN="$home/engine-wrap" start_host "$home"
-  for task in demo alpha beta; do
-    wait_until 250 grep -qs "	handled	.*$task.turn-ended" "$home/state/.supervision-host.log" \
-      || fail "engine no ps: the $task turn end was not handled: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
-  done
-  grep -l 'demo.turn-ended' "$home"/engine-drain.* 2>/dev/null | xargs grep -l 'alpha.turn-ended' 2>/dev/null \
-    | xargs grep -l 'beta.turn-ended' 2>/dev/null | grep -q . \
-    || fail "engine no ps: no single engine drain was granted several workers' turn ends: $(cat "$home/state/.supervision-host.log")"
+  wait_until 250 one_drain_holds_every_turn_end "$home" \
+    || fail "engine no ps: no single engine drain was granted a row for each worker's turn end: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
+  wait_until 250 sh -c '[ ! -s "$1" ]' _ "$home/state/.wake-queue" \
+    || fail "engine no ps: granted rows were left queued: $(cat "$home/state/.wake-queue")"
   host_exited "$home" && fail "engine no ps: a routine turn end reached main: $(cat "$home/host.out")"
   assert_no_re '	failed	' "$home/state/.supervision-host.log" "engine no ps: a turn failed to acknowledge its granted rows"
   [ ! -s "$home/state/.wake-queue" ] || fail "engine no ps: granted rows were left queued: $(cat "$home/state/.wake-queue")"
