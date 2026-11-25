@@ -52,9 +52,10 @@
 #     so main-only classes (check triggers, decision-owned triggers, a scan
 #     that is unsafe or holds nothing for the branch) stay main's. The one
 #     check close the offer judges by its rows is the watcher's downtime
-#     recovery (`check: rearm-resurface`); when the queue is empty the host
-#     also keeps it only while bin/fm-wake-drain.sh --pending-for-main finds
-#     nothing waiting for main, and retires that episode after parking. That
+#     recovery (`check: rearm-resurface`), which the host also keeps only
+#     while bin/fm-wake-drain.sh --pending-for-main finds nothing waiting for
+#     main within a fixed 5-second bound; an empty one it retires after
+#     parking. That
 #     pass-through starts the successor watcher cycle and leaves it running
 #     before the close is printed, so supervision continues when the session
 #     drops the handoff. It confirms no handling handoff and republishes the
@@ -184,10 +185,7 @@
 # the boundary), FM_SUPERVISION_HOST_TURN_TIMEOUT (1200), FM_SUPERVISION_HOST_ROTATE_TURNS (20:
 # a new engine conversation after this many turns; every main session start
 # also opens a new one), FM_SUPERVISION_HOST_READY_TIMEOUT (25: how long a
-# successor cycle may take to verify), FM_SUPERVISION_HOST_PENDING_TIMEOUT (5:
-# how long an empty recovery close waits on the pending-for-main query, an
-# outcome-store lock wait included, before it goes to main),
-# FM_SUPERVISION_HOST_POLL (1).
+# successor cycle may take to verify), FM_SUPERVISION_HOST_POLL (1).
 # Park duration uses Bash's process-relative SECONDS counter (including Bash
 # 3.2), while durable timestamps still use epoch time. This is not a portable
 # monotonic-clock guarantee. Arm exit probes use ordinary 0.5-second child
@@ -248,7 +246,7 @@ PARK_LIMIT=$(numeric_or "${FM_SUPERVISION_HOST_PARK_LIMIT:-}" "$PARK_SECONDS")
 TURN_TIMEOUT=$(numeric_or "${FM_SUPERVISION_HOST_TURN_TIMEOUT:-}" 1200)
 ROTATE_TURNS=$(numeric_or "${FM_SUPERVISION_HOST_ROTATE_TURNS:-}" 20)
 READY_TIMEOUT=$(numeric_or "${FM_SUPERVISION_HOST_READY_TIMEOUT:-}" 25)
-PENDING_TIMEOUT=$(numeric_or "${FM_SUPERVISION_HOST_PENDING_TIMEOUT:-}" 5)
+PENDING_TIMEOUT=5
 POLL=$(numeric_or "${FM_SUPERVISION_HOST_POLL:-}" 1)
 WARM_COMPACT_TICK=$(numeric_or "${FM_WARM_COMPACT_TICK:-}" 60)
 COOLDOWN=$FM_SUPERVISION_HOST_COOLDOWN
@@ -1232,8 +1230,7 @@ attended_acceptor() {  # <first-reason-line>
     ATTENDED_WHY="branch eligibility could not be computed"
   elif [ "$(printf '%s\n' "$offer" | sed -n 's/^eligible=//p')" != 1 ]; then
     ATTENDED_WHY="main-only"
-  elif [ "$1" = "$RECOVERY_REASON" ] && [ "$(printf '%s\n' "$offer" | sed -n 's/^status=//p')" = empty ] \
-    && ! main_has_nothing_pending; then
+  elif [ "$1" = "$RECOVERY_REASON" ] && ! main_has_nothing_pending; then
     ATTENDED_WHY="main-only"
   fi
   ATTENDED_OFFER=$offer
@@ -1244,9 +1241,9 @@ attended_acceptor() {  # <first-reason-line>
 # resurface_after_downtime), which the offer rule judges by its queued rows.
 RECOVERY_REASON='check: rearm-resurface'
 
-# An empty recovery close stays off main only while main's drain owner says,
-# within PENDING_TIMEOUT seconds, that nothing else waits for main; any other
-# answer, the bound included, leaves it main's.
+# A recovery close stays off main only while main's drain owner says, within
+# PENDING_TIMEOUT seconds, that nothing beyond the queued rows waits for main;
+# any other answer, the bound included, leaves it main's.
 main_has_nothing_pending() {
   local rc=0
   fm_run_timed "$PENDING_TIMEOUT" "$SCRIPT_DIR/fm-wake-drain.sh" --pending-for-main >/dev/null 2>&1 || rc=$?

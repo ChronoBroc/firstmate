@@ -235,6 +235,7 @@ case "${1:-}" in
   '') ;;
   --pending-for-main)
     [ "$#" -eq 1 ] || { echo "wake drain: unexpected arguments" >&2; exit 2; }
+    [ "$ACTOR" = main ] || { echo "wake drain: --pending-for-main answers for main only" >&2; exit 2; }
     PENDING_QUERY=true
     ;;
   --ack-through)
@@ -249,7 +250,7 @@ case "${1:-}" in
   *) echo "usage: fm-wake-drain.sh [--ack-through SEQUENCE --recovery-generation GENERATION | --pending-for-main]" >&2; exit 2 ;;
 esac
 
-[ "$PENDING_QUERY" = true ] || [ "$ACTOR" != branch ] || require_branch_eligible_rows || exit 1
+[ "$ACTOR" != branch ] || require_branch_eligible_rows || exit 1
 
 # Defense in depth for the supervision chain: this script runs at the top of
 # every wake-handling and recovery turn, so assert supervision health here too. A
@@ -933,19 +934,26 @@ print_status_presentation() {  # [<deduped-raw-rows>]
 # can no longer be confirmed (SETTLED WAITS) - using those sections' own
 # sources and gates. Unread informational status lines are not counted: the
 # watcher's own signal scan owns status changes. Read-only: it takes no queue
-# lock and moves no cursor or receipt. Prints one section name per line that
-# has something; exits 0 when anything waits, 1 when nothing does, and 2 when
-# a source cannot be read, which callers treat as something waiting. The
-# supervision host asks it before keeping an empty recovery close off main
+# lock and moves no cursor or receipt. Main only. Prints nothing; exits 0 at
+# the first source that holds something, 1 when none does, and 2 when a source
+# cannot be read, which callers treat as something waiting. The supervision
+# host asks it before keeping a recovery close off main
 # (bin/fm-supervision-host.sh).
 pending_for_main() {
-  local found=1 open diverged rows jq_rc path rc config
-  open=$(scan_open_decisions "$STATE") || return 2
-  [ -z "$open" ] || { printf 'OPEN DECISIONS\n'; found=0; }
-  diverged=$(record_divergence_pairs)
-  [ -z "$diverged" ] || { printf 'RECORD DIVERGENCE\n'; found=0; }
-  [ "$ACTOR" = main ] || return "$found"
-  ! fm_afk_contract_away_present "$STATE" || return "$found"
+  local f exclude open bound diverged rows jq_rc path rc config
+  exclude=$(status_scan_parent_channel_exclude "$STATE")
+  for f in "$STATE"/*.status; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    [ ! -L "$f" ] && [ "$f" != "$exclude" ] || continue
+    [ -f "$f" ] && [ -r "$f" ] || return 2
+    open=$(status_open_decisions "$f") || return 2
+    [ -z "$open" ] || return 0
+  done
+  bound=${FM_DIVERGENCE_TIMEOUT:-20}
+  case "$bound" in ''|*[!0-9]*|0) bound=20 ;; esac
+  diverged=$(fm_run_timed "$bound" "$SCRIPT_DIR/fm-captain-hold.sh" diverged 2>/dev/null) || return 2
+  [ -z "$diverged" ] || return 0
+  ! fm_afk_contract_away_present "$STATE" || return 1
   config=${FM_CONFIG_OVERRIDE:-$FM_HOME/config}
   if fm_supervision_host_outcomes_drained "$config" && [ -s "$STATE/branch-outcomes.jsonl" ]; then
     command -v jq >/dev/null 2>&1 || return 2
@@ -954,7 +962,7 @@ pending_for_main() {
       jq_rc=0
       printf '%s\n' "$rows" | jq -e -s 'any(.[]; .verdict == "captain")' >/dev/null 2>&1 || jq_rc=$?
       case "$jq_rc" in
-        0) printf 'BRANCH OUTCOMES\n'; found=0 ;;
+        0) return 0 ;;
         1) ;;
         *) return 2 ;;
       esac
@@ -965,12 +973,14 @@ pending_for_main() {
     rc=0
     fm_captain_wait_judge "$STATE" "$path" || rc=$?
     case "$rc" in
-      0|3) printf 'SETTLED WAITS\n'; found=0; break ;;
+      0|3) return 0 ;;
+      1) ;;
+      *) return 2 ;;
     esac
   done <<EOF
 $(fm_captain_wait_records "$STATE")
 EOF
-  return "$found"
+  return 1
 }
 
 if [ "$PENDING_QUERY" = true ]; then
