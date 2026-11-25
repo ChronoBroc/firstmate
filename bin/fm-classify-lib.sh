@@ -1652,13 +1652,17 @@ status_presentation_snapshot() {  # <state>
 # below this bound. A pathological latest line that crosses the fixed bound is
 # intentionally unclassifiable and omitted: bounded memory and never presenting
 # a possibly routine line as captain-facing take precedence on that edge.
+# Returns 0 with the event, 2 when the read succeeded and the file stayed
+# stable but the window holds no complete non-blank event (that omission, or a
+# whitespace-only log), and 1 when a read, stat, or identity check failed or the
+# file changed during the read.
 FM_STATUS_SNAPSHOT_EVENT_LINE=
 FM_STATUS_SNAPSHOT_EVENT_MTIME=
 FM_STATUS_SNAPSHOT_EVENT_ENDPOINT=
 # shellcheck disable=SC2034 # Output globals are consumed by sourcing drain scripts.
 status_snapshot_latest_event() {  # <status-file> <captured-endpoint> <captured-identity>
   local f=$1 endpoint=$2 expected_ident=$3 limit=65536 start length scratch record line event_endpoint
-  local before_mtime after_mtime before_size after_size before_ident after_ident skip_first=0
+  local before_mtime after_mtime before_size after_size before_ident after_ident skip_first=0 found=0
   FM_STATUS_SNAPSHOT_EVENT_LINE=
   FM_STATUS_SNAPSHOT_EVENT_MTIME=
   FM_STATUS_SNAPSHOT_EVENT_ENDPOINT=
@@ -1693,14 +1697,17 @@ status_snapshot_latest_event() {  # <status-file> <captured-endpoint> <captured-
       $line =~ s/[\r\n]+\z//;
       ($latest, $end) = ($line, $start + tell($file));
     }
-    exit 1 unless defined $end;
+    exit 3 unless defined $end;
     print "$end\t$latest";
-  ' "$scratch" "$start" "$skip_first"); then :; else rm -f "$scratch"; return 1; fi
+  ' "$scratch" "$start" "$skip_first"); then :; else found=$?; fi
   rm -f "$scratch"
-  event_endpoint=${record%%$'\t'*}
-  line=${record#*$'\t'}
-  case "$event_endpoint" in ''|*[!0-9]*) return 1 ;; esac
-  [ -n "$line" ] || return 1
+  [ "$found" -eq 0 ] || [ "$found" -eq 3 ] || return 1
+  if [ "$found" -eq 0 ]; then
+    event_endpoint=${record%%$'\t'*}
+    line=${record#*$'\t'}
+    case "$event_endpoint" in ''|*[!0-9]*) return 1 ;; esac
+    [ -n "$line" ] || return 1
+  fi
 
   after_mtime=$(_fm_status_file_mtime "$f") || return 1
   after_size=$(_fm_status_file_size "$f") || return 1
@@ -1711,6 +1718,7 @@ status_snapshot_latest_event() {  # <status-file> <captured-endpoint> <captured-
     && [ "$after_size" -eq "$endpoint" ] \
     && [ "$after_ident" = "$expected_ident" ] \
     || return 1
+  [ "$found" -eq 0 ] || return 2
 
   FM_STATUS_SNAPSHOT_EVENT_LINE=$line
   FM_STATUS_SNAPSHOT_EVENT_MTIME=$before_mtime

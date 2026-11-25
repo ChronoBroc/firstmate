@@ -345,7 +345,7 @@ EOF
 }
 
 print_status_outcome_backstop_section() {  # <task-and-endpoint-snapshot>
-  local snapshot=$1 task endpoint ident event event_endpoint line verb key receipt store lock ready
+  local snapshot=$1 task endpoint ident event event_endpoint event_rc line verb key receipt store lock ready
   local output='' used=0 shown=0 omitted=0 bytes item_bytes=220 global_bytes=4000 rc=0
   [ "$ACTOR" = main ] || return 0
 
@@ -376,8 +376,10 @@ print_status_outcome_backstop_section() {  # <task-and-endpoint-snapshot>
     [ -n "$task" ] || continue
     receipt=$(status_outcome_backstop_cursor_offset "$STATE/$task.status") || { rc=1; break; }
     [ "$receipt" -lt "$endpoint" ] || continue
-    if ! status_snapshot_latest_event "$STATE/$task.status" "$endpoint" "$ident"; then
-      [ -z "${_FM_STATUS_READS_STRICT:-}" ] || { rc=1; break; }
+    event_rc=0
+    status_snapshot_latest_event "$STATE/$task.status" "$endpoint" "$ident" || event_rc=$?
+    if [ "$event_rc" -ne 0 ]; then
+      [ "$event_rc" -eq 2 ] || [ -z "${_FM_STATUS_READS_STRICT:-}" ] || { rc=1; break; }
       continue
     fi
     event=$FM_STATUS_SNAPSHOT_EVENT_LINE

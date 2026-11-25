@@ -1230,16 +1230,12 @@ attended_acceptor() {  # <first-reason-line>
     ATTENDED_WHY="branch eligibility could not be computed"
   elif [ "$(printf '%s\n' "$offer" | sed -n 's/^eligible=//p')" != 1 ]; then
     ATTENDED_WHY="main-only"
-  elif [ "$1" = "$RECOVERY_REASON" ] && ! main_has_nothing_pending; then
+  elif [ "$(printf '%s\n' "$offer" | sed -n 's/^recovery=//p')" = 1 ] && ! main_has_nothing_pending; then
     ATTENDED_WHY="main-only"
   fi
   ATTENDED_OFFER=$offer
   [ -z "$ATTENDED_WHY" ]
 }
-
-# The watcher's downtime-recovery close (bin/fm-watch.sh
-# resurface_after_downtime), which the offer rule judges by its queued rows.
-RECOVERY_REASON='check: rearm-resurface'
 
 # A recovery close stays off main only while main's drain owner says, within
 # PENDING_TIMEOUT seconds, that nothing main has not yet seen waits beyond the
@@ -1405,7 +1401,7 @@ while :; do
   # is still empty, or the next downtime would announce it again. A newer
   # generation (status 3) means a row arrived, and the successor announces it.
   if [ -z "$LAST_TURN" ] && [ "$TURN_POSTURE" = attended ] && [ -n "$SUCCESSOR_GENERATION" ] \
-    && [ "$(printf '%s\n' "$REASON" | head -n 1)" = "$RECOVERY_REASON" ]; then
+    && [ "$(printf '%s\n' "$ATTENDED_OFFER" | sed -n 's/^recovery=//p')" = 1 ]; then
     RETIRE_RC=0
     fm_recovery_marker_retire_idle "$STATE/.watcher-down" "$SUCCESSOR_GENERATION" || RETIRE_RC=$?
     case "$RETIRE_RC" in

@@ -274,7 +274,7 @@ It is a non-fatal result that names its own remedy: re-drain, then acknowledge t
 
 The acknowledgement retires the marker only when no rows remain after sequence-bound consumption.
 A concurrently appended wake has a higher sequence, remains queued, and keeps the episode pending for presentation.
-Consequently, a watcher close during handling republishes the same generation as pending and forces one recovery turn even when no queue row remains, while the outstanding generation-bound acknowledgement stays valid.
+Consequently, a watcher close during handling republishes the same generation as pending, and the next park announces one recovery close even when no queue row remains, while the outstanding generation-bound acknowledgement stays valid. That close forces a handling turn unless an attended supervision host absorbs it: with no row queued and nothing main has not yet seen, the host runs neither main nor its engine and retires the handling episode itself ([supervision-host.md](supervision-host.md#attended)).
 An acknowledged episode does not freeze the generation, because the next downtime after it opens an episode of its own.
 
 ## Per-actor acknowledgement

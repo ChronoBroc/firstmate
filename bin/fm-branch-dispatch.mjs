@@ -24,7 +24,8 @@
 //   fm-branch-dispatch.mjs offer [--afk]
 //     Read one actionable close's reason line from stdin and print
 //     branchOfferForWake's verdict: eligible=0|1 (whether the branch may take
-//     this close at all, trigger class included), then the same five lines
+//     this close at all, trigger class included), recovery=0|1 (whether it
+//     judged the watcher's downtime recovery close by its rows), then the same five lines
 //     `scope` prints for the scan it judged. --afk judges it under the away
 //     posture.
 //   fm-branch-dispatch.mjs wake-prompt --report <surface> [--mirror-file <path>] [--away [--readback-file <path>]]
@@ -99,7 +100,9 @@ if (command === "scope") {
   }
   const message = readFileSync(0, "utf8").split(/\r?\n/)[0] ?? "";
   const verdict = dispatch.branchOfferForWake(stateDir(), message, afk, true);
-  process.stdout.write(`eligible=${verdict.eligible ? 1 : 0}\n${scopeLines(verdict.scope, verdict.heartbeat)}`);
+  process.stdout.write(
+    `eligible=${verdict.eligible ? 1 : 0}\nrecovery=${verdict.recovery ? 1 : 0}\n${scopeLines(verdict.scope, verdict.heartbeat)}`,
+  );
 } else if (command === "wake-prompt") {
   let report = "";
   let away = false;

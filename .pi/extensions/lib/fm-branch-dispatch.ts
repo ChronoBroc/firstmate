@@ -86,7 +86,7 @@ export function branchWakePrompt(message: string, reportSurface: string, posture
 
 // The reason line bin/fm-watch.sh (resurface_after_downtime) closes with when
 // it recovers watcher downtime rather than an event of its own.
-export const RECOVERY_RESURFACE_REASON = "check: rearm-resurface";
+const RECOVERY_RESURFACE_REASON = "check: rearm-resurface";
 
 export type UnreadWakeScopeStatus = "safe" | "empty" | "unsafe";
 
@@ -595,6 +595,11 @@ export interface BranchOfferVerdict {
   eligible: boolean;
   /** True when the close is eligible only because of the away collapse. */
   awayOnly: boolean;
+  /**
+   * True when the attended supervision host judged the watcher's generic
+   * downtime recovery close by its queued rows.
+   */
+  recovery: boolean;
 }
 
 // The offer rule for one actionable close: whether a branch may take it, in
@@ -654,7 +659,7 @@ export function branchOfferForWake(state: string, message: string, afk: boolean,
     const judged = scope.status === "unsafe" && queueNotYetCreated(state) ? EMPTY_SCOPE : scope;
     const eligible = judged.status === "empty"
       || (judged.eligible && judged.eligibleSeqs.length === judged.queuedRows);
-    return { scope: judged, heartbeat, eligible, awayOnly: false };
+    return { scope: judged, heartbeat, eligible, awayOnly: false, recovery: true };
   }
   const triggerKeys = /^signal:/.test(message)
     ? message
@@ -673,7 +678,7 @@ export function branchOfferForWake(state: string, message: string, afk: boolean,
     afk ? scopeForUnreadWake(state, heartbeat, false).eligible : scope.eligible
   );
   const eligible = afk ? scope.eligible : attendedEligible;
-  return { scope, heartbeat, eligible, awayOnly: Boolean(eligible && !attendedEligible) };
+  return { scope, heartbeat, eligible, awayOnly: Boolean(eligible && !attendedEligible), recovery: false };
 }
 
 // The exact state-relative filename bin/fm-wake-drain.sh reads for a
