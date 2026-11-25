@@ -929,6 +929,48 @@ test_attended_recovery_with_nothing_for_main_stays_off_main() {
 }
 
 
+# Asking whether anything waits for main reads the outcome store under its
+# lock. A lock held elsewhere must not hold the successor watcher's start past
+# FM_SUPERVISION_HOST_PENDING_TIMEOUT: the unanswered query leaves the empty
+# recovery close main's instead of absorbing it.
+
+test_attended_recovery_with_a_held_outcome_lock_reaches_main_within_the_bound() {
+  local home holder started elapsed
+  home=$(make_home attended-locked-recovery attended)
+  start_host "$home"
+  wait_until 150 watcher_live "$home" || fail "locked recovery: the host never started a watcher cycle"
+  append_status "$home" 'step one'
+  wait_until 250 handled_at_least "$home" 1 \
+    || fail "locked recovery: the routine wake was not handled: $(cat "$home/state/.supervision-host.log")"
+  tear_down_parked_host "$home" KILL
+  [ ! -s "$home/state/.wake-queue" ] || fail "fixture: the queue was not empty after the teardown"
+  [ -s "$home/state/branch-outcomes.jsonl" ] || fail "fixture: the handled wake left no outcome row to read under the lock"
+  FM_HOME="$home" bash -c '
+    . "$1"
+    fm_lock_try_acquire "$STATE/.branch-outcomes.lock" || exit 1
+    trap "fm_lock_release \"$STATE/.branch-outcomes.lock\"" EXIT
+    sleep 120
+  ' _ "$ROOT/bin/fm-wake-lib.sh" &
+  holder=$!
+  wait_until 50 test -e "$home/state/.branch-outcomes.lock" \
+    || { kill "$holder" 2>/dev/null || true; fail "fixture: the lock holder did not take the outcome lock"; }
+  started=$SECONDS
+  FM_SUPERVISION_HOST_PENDING_TIMEOUT=2 start_host "$home"
+  wait_until_deadline 30 host_exited "$home" \
+    || { kill "$holder" 2>/dev/null || true; fail "locked recovery: a held outcome lock kept the recovery close from main: $(cat "$home/state/.supervision-host.log")"; }
+  elapsed=$((SECONDS - started))
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  [ "$elapsed" -lt 20 ] || fail "locked recovery: the close took ${elapsed}s to reach main past a 2s bound"
+  assert_re '^check: rearm-resurface$' "$home/host.out" "locked recovery: main must get the recovery close"
+  assert_re '	pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
+    "locked recovery: the ledger must record the unanswered recovery as main's"
+  watcher_live "$home" || fail "locked recovery: the successor watcher is not running after the pass-through"
+  stop_home_processes "$home"
+  pass "host: an empty recovery whose pending query cannot take the outcome lock reaches main within the bound"
+}
+
+
 # The same teardown while an engine turn handles a worker's turn end leaves
 # only that routine row queued. The recovery close carries nothing main must
 # see, so the supervision session takes it like the routine wake it holds.
@@ -1091,6 +1133,7 @@ fm_test_run \
   test_outcome_after_the_return_survives_a_host_killed_at_the_turn_end \
   test_next_host_clears_a_turn_its_killed_predecessor_left \
   test_attended_recovery_with_nothing_for_main_stays_off_main \
+  test_attended_recovery_with_a_held_outcome_lock_reaches_main_within_the_bound \
   test_attended_recovery_holding_only_routine_rows_is_handled_on_the_engine \
   test_attended_recovery_with_work_waiting_for_main_reaches_main \
   test_report_without_acknowledgement_hands_the_wake_to_main \
