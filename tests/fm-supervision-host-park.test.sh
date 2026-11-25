@@ -170,7 +170,7 @@ test_engine_turn_is_bounded_and_its_descendants_reaped() {
   assert_re '^supervision-host: .*the engine turn hit its 3s bound; this wake is yours$' "$home/host.out" "a bounded turn must hand its wake to main"
   orphan=$(cut -f1 "$home/orphan-pid")
   case "$orphan" in ''|0|*[!0-9]*) fail "hang: the engine tool process recorded no pid: $(cat "$home/orphan-pid" 2>/dev/null)" ;; esac
-  [ -n "$(cut -f2 "$home/orphan-pid")" ] || fail "hang: the engine tool process recorded no start time: $(cat "$home/orphan-pid")"
+  [ -n "$(cut -s -f2 "$home/orphan-pid")" ] || fail "hang: the engine tool process recorded no start time: $(cat "$home/orphan-pid")"
   wait_until 50 sh -c '! kill -0 "$1" 2>/dev/null' _ "$orphan" \
     || fail "an engine tool process in its own process group outlived the turn: $(ps -p "$orphan" -o pid=,pgid=,command=)"
   rm -f "$home/orphan-pid"
