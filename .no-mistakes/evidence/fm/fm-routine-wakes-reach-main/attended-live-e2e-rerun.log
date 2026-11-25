@@ -1,0 +1,12 @@
+skip: control: set FM_SUPERVISION_HOST_ATTENDED_LIVE_CONTROL_REF to a pre-fix ref to run the negative control
+# 17:08:26 positive step 1: primary idle (claude pid 78985, 2.1.332 (Claude Code), model haiku); tracked Stop and StopFailure hooks registered; config/supervision-host present; host pid 8676 parked on watcher 10054; listener runner 13659; captain prompts so far: 1
+# 17:08:26 positive transcript: ~/.crew/accounts.d/claude-max-b/projects/-private-var-folders-3w-swtxkf-x6pd1z2yd06rgwkqm0000gn-T-fm-sh-attended-live-2GXXa7-positive-fm/37958eac-b5d4-4617-9102-35c3322873cf.jsonl
+# 17:08:26 positive step 2: event 1 appended at 1795648106 (demo.status needs-decision)
+# 17:08:33 positive step 2: host log: 1795648112	pass-through	attended	main-only
+# 17:08:33 positive step 2: successor watcher pid 27649 alive; ledger: epoch=1 owner_pid=6487 outcome=arming updated_at=1795648103 owner_session_id=37958eac-b5d4-4617-9102-35c3322873cf claude_session=37958eac-b5d4-4617-9102-35c3322873cf; marker: pending:downtime:10054.1795648109.snWmJD
+# 17:08:43 positive step 2: rewake delivered at 1795648115 (Stop hook exited 2 with the banner); ledger: epoch=1 owner_pid=6487 outcome=rewake updated_at=1795648115 session_pid=78985 recovery_generation=10054.1795648109.snWmJD claude_session=37958eac-b5d4-4617-9102-35c3322873cf
+# 17:08:43 positive step 2: primary turn ran: bin/fm-wake-drain.sh;bin/fm-wake-drain.sh --ack-through 4 --recovery-generation 10054.1795648109.snWmJD;
+# 17:08:48 positive step 3: turn end re-armed: 1795648128	start	gen=host-55697-1795648127; still following successor 27649
+# 17:08:51 positive step 3: event 2 appended at 1795648131
+not ok - positive: the arm following successor 27649 did not deliver its close on event 2: arm_pid=57637	watcher_pid=27649	origin=attached	started_at=1795648128	ended_at=1795648130	exit_code=unknown	signal=unknown	reason=taken-over	beacon_age=4	lock_before=pid:27649|identity:Wed Nov 25 23:08:33 2026     bash /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-sh-attended-live.2GXXa7/positive/fm/bin/fm-watch.sh	lock_after=pid:none|identity:none	successor=started:63494
+exit=1

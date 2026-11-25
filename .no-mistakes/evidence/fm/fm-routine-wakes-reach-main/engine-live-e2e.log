@@ -1,0 +1,5 @@
+# first turn: handled	turn=host-67194-1795648738.1	posture=away	rc=0
+# outcome: {"seq":1,"epoch":1795648759,"task":"demo","wake":"signal: /private/var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T/fm-supervision-host-live.AqMlGO/fm/state/demo.status","verdict":"captain","summary":"The demo worker reports its cleanup finished and nothing else is needed, but I could not confirm this: its local copy is gone, its endpoint is absent, and the backlog could not be read. Its task record is still present; I found no PR link or scout report to prove completion, so I took no cleanup, merge or dispatch action.","silent":false,"statusEndpoint":72,"statusIdent":"strong:16777232:533863007:1795648739.227769121"}
+# second turn: handled	turn=host-67194-1795648738.2	posture=away	rc=0
+ok - supervision host live (2.1.332 (Claude Code)): a real engine handles and resumes away wakes under the branch contract without waking main
+exit=0

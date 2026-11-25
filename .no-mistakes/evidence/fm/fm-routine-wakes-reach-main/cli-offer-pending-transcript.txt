@@ -1,0 +1,30 @@
+## lab home: /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.8rzBSw (supervision-host opted in)
+$ [no queue file] offer 'check: rearm-resurface'
+eligible=1 recovery=1 
+$ [empty queue] offer
+eligible=1 recovery=1 
+$ [queue = one routine demo.turn-ended row] offer
+eligible=1 recovery=1 
+$ [queue = blank record] offer
+eligible=0 recovery=1 
+$ [routine status only] fm-wake-drain.sh --pending-for-main
+exit=1
+$ [unpresented blocker] --pending-for-main
+exit=0
+$ main drain:
+OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):
+demo [key=cred] blocked: credential missing
+OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'
+OPEN DECISIONS: <key> is the [key=...] printed before the verb; a token inside a note is prose, not a key.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+$ [after main presented blocker] --pending-for-main
+exit=1
+$ branch actor refused:
+wake drain: --pending-for-main answers for main only
+exit=2

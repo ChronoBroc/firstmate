@@ -1,0 +1,12 @@
+1..9
+ok - host: an attended recovery with nothing queued and nothing waiting for main stays off main
+ok - host: an attended first-park recovery with no queue file yet stays off main
+ok - wake lib: idle retirement acknowledges only the handling episode it absorbed, never a later outage
+ok - offer: a recovery close whose queue holds a blank record stays main's
+ok - host: an empty recovery whose pending query cannot take the outcome lock reaches main within the bound
+ok - drain: the pending-for-main query counts only what main has not seen, and unreadable sources as unknown
+ok - host: an attended recovery holding only routine rows is handled on the engine and stays off main
+ok - host: an attended recovery reaches main for an unprocessed captain outcome, not for a decision main has seen
+ok - host: an attended recovery holding a routine row reaches main for an unprocessed captain outcome only
+FM_TEST_COMPLETE
+exit=0

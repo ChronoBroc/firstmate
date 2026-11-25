@@ -1,0 +1,5 @@
+1..2
+ok - host: a captain return during a failed engine turn still hands that turn's outcomes to main
+ok - host: an engine turn whose result is incomplete hands its wake to main
+FM_TEST_COMPLETE
+exit=0
