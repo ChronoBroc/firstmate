@@ -84,6 +84,10 @@ export function branchWakePrompt(message: string, reportSurface: string, posture
   return `${head}FIRSTMATE SUPERVISION WAKE: ${message}\n\nHandle this per your operating procedure and finish with ${reportSurface}.${postureTail}`;
 }
 
+// The reason line bin/fm-watch.sh (resurface_after_downtime) closes with when
+// it recovers watcher downtime rather than an event of its own.
+export const RECOVERY_RESURFACE_REASON = "check: rearm-resurface";
+
 export type UnreadWakeScopeStatus = "safe" | "empty" | "unsafe";
 
 export interface UnreadWakeScope {
@@ -142,6 +146,12 @@ export interface UnreadWakeScope {
    * non-heartbeat wake claims it in the away posture.
    */
   heartbeatSeqs: string[];
+  /**
+   * How many rows the queue held when this scan read it, eligible or not.
+   * Zero for an empty or unsafe scan. A scan whose eligibleSeqs covers every
+   * queued row holds nothing for main.
+   */
+  queuedRows: number;
   taskByWakeKey: Record<string, string>;
 }
 
@@ -155,6 +165,7 @@ const EMPTY_SCOPE: UnreadWakeScope = {
   needsDecisionKeys: [],
   checkSeqs: [],
   heartbeatSeqs: [],
+  queuedRows: 0,
   taskByWakeKey: {},
 };
 const UNSAFE_SCOPE: UnreadWakeScope = {
@@ -167,6 +178,7 @@ const UNSAFE_SCOPE: UnreadWakeScope = {
   needsDecisionKeys: [],
   checkSeqs: [],
   heartbeatSeqs: [],
+  queuedRows: 0,
   taskByWakeKey: {},
 };
 
@@ -569,6 +581,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
     needsDecisionKeys,
     checkSeqs,
     heartbeatSeqs,
+    queuedRows: rows.length,
     taskByWakeKey: Object.fromEntries(taskByKey),
   };
 }
@@ -608,10 +621,25 @@ export interface BranchOfferVerdict {
 // The away posture collapses that partition: every actionable row is
 // branch-eligible and the trigger class no longer forces anything to main
 // (scopeForUnreadWake owns the per-row rule).
+//
+// One check close is judged by its rows instead, and only by the attended
+// supervision host off Pi: the watcher's generic downtime recovery
+// (RECOVERY_RESURFACE_REASON). It names no event of its own; it only says the
+// queue may hold rows no watcher announced. So the host may take it when the
+// queue is empty or every queued row is one the branch may claim, and it stays
+// main's whenever any queued row is main's. An empty queue is offered with
+// status "empty": the host still asks main's drain owner whether anything else
+// waits for main (bin/fm-wake-drain.sh --pending-for-main) before keeping it.
 export function branchOfferForWake(state: string, message: string, afk: boolean, attendedHost = false): BranchOfferVerdict {
   const heartbeat = /^heartbeat($|:)/.test(message);
-  const isCheckTrigger = /^check:/.test(message);
+  const recovery = attendedHost && !afk && message === RECOVERY_RESURFACE_REASON;
+  const isCheckTrigger = /^check:/.test(message) && !recovery;
   const scope = scopeForUnreadWake(state, heartbeat, afk, attendedHost && !afk);
+  if (recovery) {
+    const eligible = scope.status === "empty"
+      || (scope.eligible && scope.eligibleSeqs.length === scope.queuedRows);
+    return { scope, heartbeat, eligible, awayOnly: false };
+  }
   const triggerKeys = /^signal:/.test(message)
     ? message
       .slice("signal:".length)

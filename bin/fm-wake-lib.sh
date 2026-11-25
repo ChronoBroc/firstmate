@@ -1217,6 +1217,24 @@ _fm_recovery_marker_ack() {
   fm_lock_release "$lock"
 }
 
+# Retire one recovery generation only while the durable queue is empty, read
+# under the queue lock so no row appended meanwhile is left unannounced: a
+# non-empty queue leaves the marker untouched. The supervision host uses it for
+# a recovery close it absorbed with nothing to hand anyone
+# (bin/fm-supervision-host.sh); every other retirement is main's or the
+# branch's sequence-bound drain acknowledgement. Returns the acknowledgement's
+# status: 0 retired or already retired, 3 a different generation.
+_fm_recovery_marker_retire_idle() {
+  local marker=$1 generation=$2 status=0
+  [ -n "$generation" ] || return 2
+  fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK" || return 1
+  if [ ! -s "$FM_WAKE_QUEUE" ]; then
+    _fm_recovery_marker_ack "$marker" "$generation" || status=$?
+  fi
+  fm_lock_release "$FM_WAKE_QUEUE_LOCK"
+  return "$status"
+}
+
 # Bounded-or-plain acquire for the recovery transitions a caller may bound.
 # On a bounded refusal it records which lock refused and the last holder the
 # acquire saw, so the caller can print the typed startup diagnostic
@@ -1410,6 +1428,9 @@ fm_recovery_transition() {
     acknowledge)
       _fm_recovery_marker_ack "$marker" "$target"
       ;;
+    retire-idle)
+      _fm_recovery_marker_retire_idle "$marker" "$target"
+      ;;
     arm-check)
       _fm_recovery_marker_arm_check "$marker" "$bound"
       ;;
@@ -1461,6 +1482,10 @@ fm_recovery_marker_handback() {
 
 fm_recovery_marker_ack() {
   fm_recovery_transition "$1" acknowledge "$2"
+}
+
+fm_recovery_marker_retire_idle() {  # <marker> <generation>
+  fm_recovery_transition "$1" retire-idle "$2"
 }
 
 fm_recovery_marker_handling_settled() {

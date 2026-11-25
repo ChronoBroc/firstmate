@@ -7,6 +7,8 @@
 # a supervision-host home the supervision session's new and unprocessed
 # outcomes (BRANCH OUTCOMES), and captain outcomes whose reported wait has
 # since ended (SETTLED WAITS), then assert liveness.
+# --pending-for-main instead answers, read-only, whether such a section holds
+# something for main (pending_for_main below owns that contract).
 #
 # Keep sequence-bound row consumption independent from generation-bound episode
 # retirement; docs/watcher-continuity.md owns the recovery contract.
@@ -228,8 +230,13 @@ presented_max_row() { # <rows-file>
   fi
 }
 
+PENDING_QUERY=false
 case "${1:-}" in
   '') ;;
+  --pending-for-main)
+    [ "$#" -eq 1 ] || { echo "wake drain: unexpected arguments" >&2; exit 2; }
+    PENDING_QUERY=true
+    ;;
   --ack-through)
     ACK_THROUGH=${2:-}
     case "$ACK_THROUGH" in ''|*[!0-9]*) echo "wake drain: invalid acknowledgement sequence" >&2; exit 2 ;; esac
@@ -239,10 +246,10 @@ case "${1:-}" in
     case "$ACK_GENERATION" in ''|*[!A-Za-z0-9._-]*) echo "wake drain: invalid recovery generation" >&2; exit 2 ;; esac
     [ "$#" -eq 4 ] || { echo "wake drain: unexpected acknowledgement arguments" >&2; exit 2; }
     ;;
-  *) echo "usage: fm-wake-drain.sh [--ack-through SEQUENCE --recovery-generation GENERATION]" >&2; exit 2 ;;
+  *) echo "usage: fm-wake-drain.sh [--ack-through SEQUENCE --recovery-generation GENERATION | --pending-for-main]" >&2; exit 2 ;;
 esac
 
-[ "$ACTOR" != branch ] || require_branch_eligible_rows || exit 1
+[ "$PENDING_QUERY" = true ] || [ "$ACTOR" != branch ] || require_branch_eligible_rows || exit 1
 
 # Defense in depth for the supervision chain: this script runs at the top of
 # every wake-handling and recovery turn, so assert supervision health here too. A
@@ -530,6 +537,21 @@ EOF
   printf 'OPEN DECISIONS: <key> is the [key=...] printed before the verb; a token inside a note is prose, not a key.\n' || return 1
 }
 
+# The diverged pairs bin/fm-captain-hold.sh reports, empty when the guard
+# cannot run.
+record_divergence_pairs() {
+  local bound diverged
+  # Apply bin/fm-timeout-lib.sh's bound contract, defaulting a bad override.
+  bound=${FM_DIVERGENCE_TIMEOUT:-20}
+  case "$bound" in ''|*[!0-9]*|0) bound=20 ;; esac
+
+  # Bounded, because this runs at the top of every supervision turn: a backlog
+  # tool having a bad day must cost the drain a few seconds at worst, never the
+  # presentation of the wakes it exists to deliver.
+  diverged=$(fm_run_timed "$bound" "$SCRIPT_DIR/fm-captain-hold.sh" diverged 2>/dev/null) || return 0
+  printf '%s' "$diverged"
+}
+
 # Print the RECORD DIVERGENCE section: every captain call whose two records
 # contradict each other - the status log says a key was resolved outright while
 # the task held for the captain is still open. Nothing here closes anything; the
@@ -544,17 +566,10 @@ EOF
 # never changes the drain's exit status - a supervision turn must still present
 # its wakes when the backlog tool is having a bad day.
 print_record_divergence_section() {
-  local diverged task origin key title line shown=0 omitted=0 bound
+  local diverged task origin key title line shown=0 omitted=0
   local output='' used=0 bytes item_bytes=220 global_bytes=2000
 
-  # Apply bin/fm-timeout-lib.sh's bound contract, defaulting a bad override.
-  bound=${FM_DIVERGENCE_TIMEOUT:-20}
-  case "$bound" in ''|*[!0-9]*|0) bound=20 ;; esac
-
-  # Bounded, because this runs at the top of every supervision turn: a backlog
-  # tool having a bad day must cost the drain a few seconds at worst, never the
-  # presentation of the wakes it exists to deliver.
-  diverged=$(fm_run_timed "$bound" "$SCRIPT_DIR/fm-captain-hold.sh" diverged 2>/dev/null) || return 0
+  diverged=$(record_divergence_pairs)
   [ -n "$diverged" ] || return 0
 
   while IFS=$(printf '\t') read -r task origin key title; do
@@ -910,6 +925,58 @@ print_status_presentation() {  # [<deduped-raw-rows>]
   fm_lock_release "$lock"
   return "$rc"
 }
+
+# --pending-for-main: whether main's next drain would present something for
+# main to act on beyond the queue's own rows - an open decision (OPEN
+# DECISIONS), a captain-call record divergence (RECORD DIVERGENCE), a captain
+# outcome not yet processed (BRANCH OUTCOMES), or a captain wait that ended or
+# can no longer be confirmed (SETTLED WAITS) - using those sections' own
+# sources and gates. Unread informational status lines are not counted: the
+# watcher's own signal scan owns status changes. Read-only: it takes no queue
+# lock and moves no cursor or receipt. Prints one section name per line that
+# has something; exits 0 when anything waits, 1 when nothing does, and 2 when
+# a source cannot be read, which callers treat as something waiting. The
+# supervision host asks it before keeping an empty recovery close off main
+# (bin/fm-supervision-host.sh).
+pending_for_main() {
+  local found=1 open diverged rows jq_rc path rc config
+  open=$(scan_open_decisions "$STATE") || return 2
+  [ -z "$open" ] || { printf 'OPEN DECISIONS\n'; found=0; }
+  diverged=$(record_divergence_pairs)
+  [ -z "$diverged" ] || { printf 'RECORD DIVERGENCE\n'; found=0; }
+  [ "$ACTOR" = main ] || return "$found"
+  ! fm_afk_contract_away_present "$STATE" || return "$found"
+  config=${FM_CONFIG_OVERRIDE:-$FM_HOME/config}
+  if fm_supervision_host_outcomes_drained "$config" && [ -s "$STATE/branch-outcomes.jsonl" ]; then
+    command -v jq >/dev/null 2>&1 || return 2
+    rows=$("$SCRIPT_DIR/fm-branch-outcome.sh" present 2>/dev/null) || return 2
+    if [ -n "$rows" ]; then
+      jq_rc=0
+      printf '%s\n' "$rows" | jq -e -s 'any(.[]; .verdict == "captain")' >/dev/null 2>&1 || jq_rc=$?
+      case "$jq_rc" in
+        0) printf 'BRANCH OUTCOMES\n'; found=0 ;;
+        1) ;;
+        *) return 2 ;;
+      esac
+    fi
+  fi
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    rc=0
+    fm_captain_wait_judge "$STATE" "$path" || rc=$?
+    case "$rc" in
+      0|3) printf 'SETTLED WAITS\n'; found=0; break ;;
+    esac
+  done <<EOF
+$(fm_captain_wait_records "$STATE")
+EOF
+  return "$found"
+}
+
+if [ "$PENDING_QUERY" = true ]; then
+  pending_for_main
+  exit $?
+fi
 
 # shellcheck disable=SC2317,SC2329 # Invoked by trap handlers below.
 cleanup() {

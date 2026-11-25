@@ -50,7 +50,11 @@
 #     engine errors, and the Pi branch's offer rule
 #     (bin/fm-branch-dispatch.mjs offer) says the branch may take this close,
 #     so main-only classes (check triggers, decision-owned triggers, a scan
-#     that is unsafe or holds nothing for the branch) stay main's. That
+#     that is unsafe or holds nothing for the branch) stay main's. The one
+#     check close the offer judges by its rows is the watcher's downtime
+#     recovery (`check: rearm-resurface`); when the queue is empty the host
+#     also keeps it only while bin/fm-wake-drain.sh --pending-for-main finds
+#     nothing waiting for main, and retires that episode after parking. That
 #     pass-through starts the successor watcher cycle and leaves it running
 #     before the close is printed, so supervision continues when the session
 #     drops the handoff. It confirms no handling handoff and republishes the
@@ -1224,9 +1228,24 @@ attended_acceptor() {  # <first-reason-line>
     ATTENDED_WHY="branch eligibility could not be computed"
   elif [ "$(printf '%s\n' "$offer" | sed -n 's/^eligible=//p')" != 1 ]; then
     ATTENDED_WHY="main-only"
+  elif [ "$1" = "$RECOVERY_REASON" ] && [ "$(printf '%s\n' "$offer" | sed -n 's/^status=//p')" = empty ] \
+    && ! main_has_nothing_pending; then
+    ATTENDED_WHY="main-only"
   fi
   ATTENDED_OFFER=$offer
   [ -z "$ATTENDED_WHY" ]
+}
+
+# The watcher's downtime-recovery close (bin/fm-watch.sh
+# resurface_after_downtime), which the offer rule judges by its queued rows.
+RECOVERY_REASON='check: rearm-resurface'
+
+# An empty recovery close stays off main only while main's drain owner says
+# nothing else waits for main; any other answer leaves it main's.
+main_has_nothing_pending() {
+  local rc=0
+  "$SCRIPT_DIR/fm-wake-drain.sh" --pending-for-main >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 1 ]
 }
 
 # Ownership first: a host that does not own supervision leaves the owner's
@@ -1378,6 +1397,19 @@ while :; do
   # Handled: park on the successor.
   if ! fm_recovery_marker_handling_settled "$STATE/.watcher-down"; then
     log_line "handling-settle-failed	turn=$LAST_TURN	successor=$SUCCESSOR_PID"
+  fi
+  # An attended recovery close that held nothing for anyone ran no turn, so no
+  # drain acknowledgement retires its episode; retire it here while the queue
+  # is still empty, or the next downtime would announce it again. A newer
+  # generation (status 3) means a row arrived, and the successor announces it.
+  if [ -z "$LAST_TURN" ] && [ "$TURN_POSTURE" = attended ] && [ -n "$SUCCESSOR_GENERATION" ] \
+    && [ "$(printf '%s\n' "$REASON" | head -n 1)" = "$RECOVERY_REASON" ]; then
+    RETIRE_RC=0
+    fm_recovery_marker_retire_idle "$STATE/.watcher-down" "$SUCCESSOR_GENERATION" || RETIRE_RC=$?
+    case "$RETIRE_RC" in
+      0|3) ;;
+      *) log_line "recovery-retire-failed	generation=$SUCCESSOR_GENERATION	rc=$RETIRE_RC" ;;
+    esac
   fi
   ARM_PID=$SUCCESSOR_PID
   ARM_OUT=$SUCCESSOR_OUT

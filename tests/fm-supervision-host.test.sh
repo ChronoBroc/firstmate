@@ -126,6 +126,36 @@ test_engine_in_another_time_zone_handles_its_granted_rows() {
   pass "host: an engine in another time zone than the host drains, reports, and acknowledges its granted rows"
 }
 
+# A real engine's tools may be sandboxed from inspecting the host process: ps
+# fails and no proc root is readable. Its drain must still use the grant the
+# host published, or every routine turn end it takes is handed back to main
+# with its granted rows unacknowledged, one wasted main turn per worker.
+
+test_engine_that_cannot_inspect_the_host_handles_routine_turn_ends() {
+  local home task
+  home=$(make_home engine-no-ps attended)
+  mkdir -p "$home/engine-bin"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$home/engine-bin/ps"
+  chmod +x "$home/engine-bin/ps"
+  for task in alpha beta; do
+    printf 'project=demo\nwindow=fm-%s\nharness=claude\n' "$task" > "$home/state/$task.meta"
+  done
+  printf '#!/usr/bin/env bash\nPATH="%s:$PATH" FM_PROC_ROOT_OVERRIDE="%s" exec "%s" "$@"\n' \
+    "$home/engine-bin" "$home/no-proc" "$STUB" > "$home/engine-wrap"
+  chmod +x "$home/engine-wrap"
+  FM_SUPERVISION_ENGINE_CLAUDE_BIN="$home/engine-wrap" start_host "$home"
+  wait_until 150 watcher_live "$home" || fail "engine no ps: the host never started a watcher cycle"
+  for task in demo alpha beta; do
+    : > "$home/state/$task.turn-ended"
+    wait_until 250 grep -qs "	handled	.*$task.turn-ended" "$home/state/.supervision-host.log" \
+      || fail "engine no ps: the $task turn end was not handled: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
+  done
+  host_exited "$home" && fail "engine no ps: a routine turn end reached main: $(cat "$home/host.out")"
+  assert_no_re '	failed	' "$home/state/.supervision-host.log" "engine no ps: a turn failed to acknowledge its granted rows"
+  [ ! -s "$home/state/.wake-queue" ] || fail "engine no ps: granted rows were left queued: $(cat "$home/state/.wake-queue")"
+  pass "host: an engine that cannot inspect the host still handles routine turn ends off main"
+}
+
 test_attended_captain_outcome_reaches_main_through_branch_outcomes() {
   local home drained
   home=$(make_home attended-captain attended)
@@ -503,7 +533,7 @@ SH
   printf '{"hook_event_name":"UserPromptSubmit","prompt_id":"p2","prompt":"second ask, never handed over"}' > "$home/mirror-seed.2"
   : > "$home/slow-render"
   echo 0 > "$home/park-clock"
-  park_after_stop "$home"
+  park_after_stop "$home" empty
   append_status "$home" 'reaches the boundary'
   wait_until 400 host_exited "$home" || fail "mirror boundary: the host did not end its park"
   assert_re '^supervision-host: cycle boundary - ' "$home/host.out" "fixture: the second host did not exit at its boundary"
@@ -525,16 +555,17 @@ SH
   kill -TERM "$(awk -F '\t' '$1 == "host" { print $2 }' "$home/state/.supervision-host")"
   wait_until_deadline 60 host_exited "$home" || fail "mirror boundary: the second handling host did not stop on TERM"
   echo hang > "$home/stub-mode"
-  park_after_stop "$home"
+  park_after_stop "$home" empty
   append_status "$home" 'stopped mid-turn'
   wait_until 250 test -e "$home/engine-call.3" || fail "mirror boundary: the stopped turn never started"
   assert_re '^\[captain\] third ask, turn stopped$' "$home/engine-call.3" "fixture: the stopped turn did not carry the third dialog"
   kill -TERM "$(awk -F '\t' '$1 == "host" { print $2 }' "$home/state/.supervision-host")"
   wait_until_deadline 60 host_exited "$home" || fail "mirror boundary: the host did not stop mid-turn on TERM"
+  # The stopped turn's row stays queued, so the next park's downtime resurface
+  # holds only that routine row and is the turn that carries its dialog.
   echo handle > "$home/stub-mode"
-  park_after_stop "$home"
-  append_status "$home" 'handled after the stop'
-  wait_until 250 handled_at_least "$home" 3 || fail "mirror boundary: the wake after the stop was not handled: $(cat "$home/state/.supervision-host.log")"
+  park_after_stop "$home" engine
+  handled_at_least "$home" 3 || fail "mirror boundary: the wake after the stop was not handled: $(cat "$home/state/.supervision-host.log")"
   third="$home/engine-call.4"
   assert_re '^arg=--resume$' "$third" "fixture: the turn after the stop did not resume the conversation"
   assert_re '^\[captain\] third ask, turn stopped$' "$third" "dialog of a turn stopped before its report must reach the next turn"
@@ -544,7 +575,7 @@ SH
   kill -TERM "$(awk -F '\t' '$1 == "host" { print $2 }' "$home/state/.supervision-host")"
   wait_until_deadline 60 host_exited "$home" || fail "mirror boundary: the third handling host did not stop on TERM"
   echo noreport > "$home/stub-mode"
-  park_after_stop "$home"
+  park_after_stop "$home" empty
   append_status "$home" 'no report'
   wait_until_deadline 60 host_exited "$home" || fail "mirror boundary: the unreported turn did not hand its wake back"
   assert_re '^\[captain\] fourth ask, turn unreported$' "$home/engine-call.5" "fixture: the unreported turn did not carry the fourth dialog"
@@ -859,6 +890,121 @@ test_next_host_clears_a_turn_its_killed_predecessor_left() {
   pass "host: a killed predecessor's engine is reaped and the next host removes its turn files"
 }
 
+# Claude ends the async Stop hook that runs a parked host whenever main starts
+# a turn, so the next Stop's host finds watcher downtime and its first cycle
+# closes with the generic `check: rearm-resurface`. With nothing queued and
+# nothing waiting for main, that recovery is routine: the host retires the
+# episode and stays parked, so main is not woken for an empty drain. The
+# watcher may run its own cleanup (TERM) or die holding its lock (KILL).
+
+test_attended_recovery_with_nothing_for_main_stays_off_main() {
+  local home sig drained
+  for sig in KILL TERM; do
+    home=$(make_home "attended-empty-recovery-$sig" attended)
+    start_host "$home"
+    wait_until 150 watcher_live "$home" || fail "empty recovery ($sig): the host never started a watcher cycle"
+    append_status "$home" 'step one'
+    wait_until 250 handled_at_least "$home" 1 \
+      || fail "empty recovery ($sig): the routine wake was not handled: $(cat "$home/state/.supervision-host.log")"
+    tear_down_parked_host "$home" "$sig"
+    [ ! -s "$home/state/.wake-queue" ] || fail "fixture ($sig): the queue was not empty after the teardown"
+    start_host "$home"
+    wait_until 150 grep -qs '	no-op	' "$home/state/.supervision-host.log" \
+      || fail "empty recovery ($sig): the next host did not absorb its recovery close: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
+    sleep 1
+    host_exited "$home" && fail "empty recovery ($sig): an empty recovery woke main: $(cat "$home/host.out")"
+    assert_no_re 'pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
+      "empty recovery ($sig): the recovery close must not reach main"
+    [ "$(engine_calls "$home")" -eq 1 ] || fail "empty recovery ($sig): an empty recovery ran an engine turn"
+    watcher_live "$home" || fail "empty recovery ($sig): the host is not parked on a live watcher"
+    case "$(cat "$home/state/.watcher-down" 2>/dev/null)" in
+      acked:*) ;;
+      *) fail "empty recovery ($sig): the absorbed recovery episode was left open: $(cat "$home/state/.watcher-down" 2>/dev/null)" ;;
+    esac
+    drained=$(main_drain "$home")
+    assert_not_contains "$drained" "WAKE_ACK_REQUIRED" "empty recovery ($sig): main's next drain must owe no acknowledgement"
+    stop_home_processes "$home"
+  done
+  pass "host: an attended recovery with nothing queued and nothing waiting for main stays off main"
+}
+
+
+# The same teardown while an engine turn handles a worker's turn end leaves
+# only that routine row queued. The recovery close carries nothing main must
+# see, so the supervision session takes it like the routine wake it holds.
+
+test_attended_recovery_holding_only_routine_rows_is_handled_on_the_engine() {
+  local home
+  home=$(make_home attended-routine-recovery attended)
+  echo held > "$home/stub-mode"
+  mkfifo "$home/stub-release"
+  start_host "$home"
+  wait_until 150 watcher_live "$home" || fail "routine recovery: the host never started a watcher cycle"
+  : > "$home/state/demo.turn-ended"
+  wait_until 250 test -e "$home/stub-ready" || fail "routine recovery: the engine turn never started"
+  tear_down_parked_host "$home" KILL
+  assert_grep 'demo.turn-ended' "$home/state/.wake-queue" "fixture: the routine row was not left queued by the teardown"
+  echo handle > "$home/stub-mode"
+  start_host "$home"
+  wait_until 250 grep -qs '	handled	.*check: rearm-resurface' "$home/state/.supervision-host.log" \
+    || fail "routine recovery: the recovery close was not handled on the engine: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
+  sleep 1
+  host_exited "$home" && fail "routine recovery: a routine recovery woke main: $(cat "$home/host.out")"
+  assert_no_grep 'demo.turn-ended' "$home/state/.wake-queue" "routine recovery: the engine did not acknowledge the routine row"
+  watcher_live "$home" || fail "routine recovery: the host is not parked on a live watcher"
+  pass "host: an attended recovery holding only routine rows is handled on the engine and stays off main"
+}
+
+
+# A recovery is main's whenever main has something waiting: a queued
+# main-owned row (covered by the killed-at-the-turn-end case above), an open
+# decision, or a captain outcome it has not yet processed. Those stay
+# re-presented on the recovery, exactly as without the host.
+
+test_attended_recovery_with_work_waiting_for_main_reaches_main() {
+  local home kind drained
+  for kind in decision captain; do
+    home=$(make_home "attended-waiting-recovery-$kind" attended)
+    [ "$kind" = decision ] || echo captain > "$home/stub-mode"
+    start_host "$home"
+    wait_until 150 watcher_live "$home" || fail "waiting recovery ($kind): the host never started a watcher cycle"
+    if [ "$kind" = decision ]; then
+      append_status "$home" 'which export format?' needs-decision
+    else
+      append_status "$home" 'ready for review'
+    fi
+    wait_until_deadline 60 host_exited "$home" || fail "waiting recovery ($kind): the first close did not reach main"
+    # Main drains and acknowledges the close but leaves the decision open or
+    # the captain outcome unprocessed; the next Stop parks again and that park
+    # is torn down in turn.
+    main_drain "$home" >/dev/null
+    [ -n "$MAIN_ACK" ] || fail "waiting recovery ($kind): main's drain printed no acknowledgement"
+    # shellcheck disable=SC2086 # the printed acknowledgement arguments
+    FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" "$@"' "$ROOT/bin/fm-wake-drain.sh" $MAIN_ACK >/dev/null 2>&1 \
+      || fail "waiting recovery ($kind): main's acknowledgement was refused"
+    rm -f "$home/host.rc"
+    start_host "$home"
+    wait_until 150 watcher_live "$home" || fail "waiting recovery ($kind): the next park never started"
+    sleep 2
+    host_exited "$home" && fail "fixture ($kind): the next park did not stay parked: $(cat "$home/host.out")"
+    tear_down_parked_host "$home" KILL
+    start_host "$home"
+    wait_until_deadline 60 host_exited "$home" \
+      || fail "waiting recovery ($kind): the recovery did not reach main: $(cat "$home/state/.supervision-host.log")"
+    assert_re '^check: rearm-resurface$' "$home/host.out" "waiting recovery ($kind): main must get the recovery close"
+    assert_re '	pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
+      "waiting recovery ($kind): the ledger must record the recovery as main's"
+    drained=$(main_drain "$home")
+    if [ "$kind" = decision ]; then
+      assert_contains "$drained" "OPEN DECISIONS" "waiting recovery: main's drain must present the open decision"
+    else
+      assert_contains "$drained" "BRANCH OUTCOMES (captain outcomes" "waiting recovery: main's drain must present the captain outcome"
+    fi
+    stop_home_processes "$home"
+  done
+  pass "host: an attended recovery reaches main while an open decision or an unprocessed captain outcome waits"
+}
+
 test_report_without_acknowledgement_hands_the_wake_to_main() {
   local home
   home=$(make_home away-noack away)
@@ -921,6 +1067,7 @@ fm_test_run \
   test_attended_routine_wake_is_handled_on_the_engine_and_stays_off_main \
   test_host_stopped_right_after_a_handled_wake_exits_and_frees_the_queue \
   test_engine_in_another_time_zone_handles_its_granted_rows \
+  test_engine_that_cannot_inspect_the_host_handles_routine_turn_ends \
   test_attended_captain_outcome_reaches_main_through_branch_outcomes \
   test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return \
   test_quiet_record_without_its_daemon_is_a_present_captain \
@@ -943,6 +1090,9 @@ fm_test_run \
   test_outcome_lookup_failure_is_not_treated_as_silence \
   test_outcome_after_the_return_survives_a_host_killed_at_the_turn_end \
   test_next_host_clears_a_turn_its_killed_predecessor_left \
+  test_attended_recovery_with_nothing_for_main_stays_off_main \
+  test_attended_recovery_holding_only_routine_rows_is_handled_on_the_engine \
+  test_attended_recovery_with_work_waiting_for_main_reaches_main \
   test_report_without_acknowledgement_hands_the_wake_to_main \
   test_return_during_a_failed_turn_still_hands_its_outcomes_to_main \
   test_incomplete_engine_result_hands_the_wake_to_main
