@@ -168,9 +168,10 @@ test_engine_turn_is_bounded_and_its_descendants_reaped() {
   append_status "$home" 'slow one'
   wait_until 300 host_exited "$home" || fail "hang: the bounded turn did not end"
   assert_re '^supervision-host: .*the engine turn hit its 3s bound; this wake is yours$' "$home/host.out" "a bounded turn must hand its wake to main"
-  orphan=$(cat "$home/orphan-pid")
+  orphan=$(cut -f1 "$home/orphan-pid")
   wait_until 50 sh -c '! kill -0 "$1" 2>/dev/null' _ "$orphan" \
     || fail "an engine tool process in its own process group outlived the turn: $(ps -p "$orphan" -o pid=,pgid=,command=)"
+  rm -f "$home/orphan-pid"
   pass "host: an engine turn is bounded, and tool processes outside its process group are reaped"
 }
 

@@ -656,7 +656,7 @@ function queueNotYetCreated(state: string): boolean {
 export function branchOfferForWake(state: string, message: string, afk: boolean, attendedHost = false): BranchOfferVerdict {
   const heartbeat = /^heartbeat($|:)/.test(message);
   const recovery = attendedHost && !afk && message === RECOVERY_RESURFACE_REASON;
-  const isCheckTrigger = /^check:/.test(message) && !recovery;
+  const isCheckTrigger = /^check:/.test(message);
   const scope = scopeForUnreadWake(state, heartbeat, afk, attendedHost && !afk);
   if (recovery) {
     const judged = scope.status === "unsafe" && queueNotYetCreated(state) ? EMPTY_SCOPE : scope;

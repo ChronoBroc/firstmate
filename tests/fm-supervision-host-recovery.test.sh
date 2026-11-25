@@ -123,7 +123,6 @@ recovery_offer_eligible() {  # <home> <queue-bytes>; prints the offer's eligible
 
 test_recovery_offer_leaves_a_blank_queue_record_to_main() {
   local home row
-  command -v node >/dev/null 2>&1 || fail "node is required for the offer rule"
   home=$(make_home recovery-blank-record attended)
   : > "$home/state/demo.turn-ended"
   row="1\t1\tsignal\tdemo.turn-ended\tsignal: $home/state/demo.turn-ended"
@@ -180,8 +179,9 @@ test_attended_recovery_with_a_held_outcome_lock_reaches_main_within_the_bound() 
 # whose malformed key keeps it out of the decision fold reaches main only
 # through the drain's status outcome backstop
 # (tests/fm-wake-drain-outcome-backstop.test.sh), so it waits until a main drain
-# presents it once; a decision main has already been shown does not. It
-# answers for main only, and a status log or outcome store it cannot read is
+# presents it once. An open decision counts until main's drain has presented
+# it through OPEN DECISIONS, whatever routine progress follows it, and not
+# after. It answers for main only, and a status log or outcome store it cannot read is
 # unknown (2), never "nothing waiting". A readable log whose latest event the
 # backstop deliberately omits (one longer than its 64 KiB window, or only
 # blank lines) holds nothing for main, so it never wakes main on every
@@ -206,10 +206,15 @@ test_pending_for_main_query_counts_only_what_main_has_not_seen() {
   assert_contains "$drained" 'demo blocked [key=bad/value]: credential missing' \
     "fixture: main's drain did not present the blocker through its backstop"
   expect_code 1 "$(query_pending "$home")" "pending query: a blocker main's drain presented must no longer count"
-  append_status "$home" 'which export format?' needs-decision
+  printf 'needs-decision [key=format]: which export format?\n' >> "$home/state/demo.status"
+  expect_code 0 "$(query_pending "$home")" "pending query: an open decision main's drain has not yet presented must report something waiting"
+  append_status "$home" 'step two'
+  expect_code 0 "$(query_pending "$home")" "pending query: routine progress after an unpresented decision must not hide it"
   drained=$(main_drain "$home") || fail "pending query: main's drain failed: $drained"
-  assert_contains "$drained" 'OPEN DECISIONS' "fixture: main's drain did not present the open decision"
+  assert_contains "$drained" 'demo [key=format] needs-decision: which export format?' "fixture: main's drain did not present the open decision"
   expect_code 1 "$(query_pending "$home")" "pending query: an open decision main's drain presented must not count again"
+  append_status "$home" 'step three'
+  expect_code 1 "$(query_pending "$home")" "pending query: routine progress after a presented decision must not make it count again"
   mkdir "$home/state/branch-outcomes.jsonl"
   expect_code 2 "$(query_pending "$home")" "pending query: an outcome store that is not a file must report unknown"
   rmdir "$home/state/branch-outcomes.jsonl"

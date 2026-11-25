@@ -93,7 +93,7 @@ result() {
 }
 if [ "$mode" = hang ]; then
   perl -e 'setpgrp(0, 0); exec "sleep", $ARGV[0]' "$FM_TEST_STUB_MAX_BLOCK_SECONDS" &
-  printf '%s\n' "$!" > "$FM_HOME/orphan-pid"
+  printf '%s\t%s\n' "$!" "$(ps -o lstart= -p "$!" 2>/dev/null)" > "$FM_HOME/orphan-pid"
   sleep "$FM_TEST_STUB_MAX_BLOCK_SECONDS"
   exit 0
 fi
@@ -191,7 +191,7 @@ unset FM_SUPERVISION_ACTOR FM_BRANCH_REPORT_TURN FM_LEASE_HOLDER_PID PI_CODING_A
 HOMES_FILE="$TMP_ROOT/homes"
 # Stop whatever a case left running, by the exact pids its home recorded.
 stop_home_processes() {  # <home>
-  local home=$1 pid i
+  local home=$1 pid i started
   stop_home_supervision "$home"
   while IFS= read -r pid; do
     [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || continue
@@ -213,7 +213,9 @@ stop_home_processes() {  # <home>
     fi
   done < <(cat "$home/claude-pids" 2>/dev/null)
   [ ! -f "$home/claude-pids" ] || : > "$home/claude-pids"
-  while IFS= read -r pid; do
+  while IFS=$(printf '\t') read -r pid started; do
+    [ -n "$pid" ] && [ -n "$started" ] || continue
+    [ "$(ps -o lstart= -p "$pid" 2>/dev/null)" = "$started" ] || continue
     kill -TERM "$pid" 2>/dev/null || true
   done < <(cat "$home/orphan-pid" 2>/dev/null)
   rm -f "$home/orphan-pid"

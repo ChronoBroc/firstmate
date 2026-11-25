@@ -924,14 +924,46 @@ print_status_presentation() {  # [<deduped-raw-rows>]
   return "$rc"
 }
 
+# 0 when a task in <snapshot> holds an open decision the OPEN DECISIONS fold
+# has not yet presented: its key is open in the status log but absent from
+# the open set the fold's cursor recorded at its last presentation (read
+# through status_open_decisions_cursor_offset, which writes no cursor). 1 when
+# every open decision was presented, 2 when a log or cursor cannot be read.
+unpresented_open_decision() {  # <task-and-endpoint-snapshot>
+  local task endpoint ident f open presented tmp key
+  while IFS=$(printf '\t') read -r task endpoint ident; do
+    [ -n "$task" ] || continue
+    f="$STATE/$task.status"
+    open=$(status_open_decisions "$f") || return 2
+    [ -n "$open" ] || continue
+    tmp=$(mktemp "${TMPDIR:-/tmp}/fm-presented-decisions.XXXXXX") || return 2
+    if ! FM_STATUS_CURSOR_SNAPSHOT_FILE="$tmp" status_open_decisions_cursor_offset "$f" >/dev/null; then
+      rm -f -- "$tmp"
+      return 2
+    fi
+    presented=$(tail -n +4 "$tmp" | cut -f1) || { rm -f -- "$tmp"; return 2; }
+    rm -f -- "$tmp"
+    while IFS=$(printf '\t') read -r key _; do
+      [ -n "$key" ] || continue
+      printf '%s\n' "$presented" | grep -qxF -- "$key" || return 0
+    done <<EOF
+$open
+EOF
+  done <<EOF
+$snapshot
+EOF
+  return 1
+}
+
 # --pending-for-main: whether main's next drain would present something main
 # has not yet seen beyond the queue's own rows - a captain-facing status event
 # the STATUS OUTCOME BACKSTOP would print (print_status_outcome_backstop_section
 # decides, its receipt left uncommitted), or a captain outcome not yet
 # processed (BRANCH OUTCOMES), or a captain wait that has settled or can no
 # longer be confirmed (SETTLED WAITS, which presents each once and drops its
-# record), judged without consuming the record. An open decision or record
-# divergence main's drain already presented does not count. A status log the
+# record), judged without consuming the record, or an open decision the OPEN
+# DECISIONS fold has not yet presented (unpresented_open_decision). An open
+# decision or record divergence main's drain already presented does not count. A status log the
 # snapshot or the backstop's event read cannot read is unknown here, though
 # an ordinary drain skips it (_FM_STATUS_READS_STRICT). Moves no queue
 # row, cursor, or receipt. Main only. Prints nothing; exits 0 when something
@@ -947,6 +979,9 @@ pending_for_main() {
     'STATUS OUTCOME BACKSTOP SKIPPED'*) return 2 ;;
     *) return 0 ;;
   esac
+  rc=0
+  unpresented_open_decision "$snapshot" || rc=$?
+  [ "$rc" -eq 1 ] || return "$rc"
   ! fm_afk_contract_away_present "$STATE" || return 1
   while IFS= read -r path; do
     [ -n "$path" ] || continue
