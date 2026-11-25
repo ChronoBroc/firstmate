@@ -1630,7 +1630,10 @@ status_presentation_snapshot() {  # <state>
   for f in "$state"/*.status; do
     [ -e "$f" ] || continue
     [ "$f" = "$exclude" ] && continue
-    [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || continue
+    if ! { [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ]; }; then
+      [ -z "${_FM_STATUS_READS_STRICT:-}" ] || [ -L "$f" ] || return 1
+      continue
+    fi
     task=$(basename "$f"); task="${task%.status}"
     size=$(_fm_status_file_size "$f") || return 1
     size=${size//[[:space:]]/}

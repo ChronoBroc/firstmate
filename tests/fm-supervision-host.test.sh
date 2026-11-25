@@ -950,6 +950,39 @@ test_attended_first_park_recovery_without_a_queue_file_stays_off_main() {
   pass "host: an attended first-park recovery with no queue file yet stays off main"
 }
 
+# The host's idle retirement acknowledges only the handling episode it
+# absorbed. A watcher that stopped since then republishes downtime under the
+# same generation (bin/fm-wake-lib.sh cleanup), and that outage must stay
+# pending for the next park; a queued row also leaves the marker alone.
+
+retire_idle() {  # <home> <marker-token> [queue-row]; prints rc and resulting token
+  local home=$1
+  printf '%s\n' "$2" > "$home/state/.watcher-down"
+  if [ -n "${3:-}" ]; then printf '%s\n' "$3" > "$home/state/.wake-queue"; else rm -f "$home/state/.wake-queue"; fi
+  FM_HOME="$home" bash -c '
+    . "$1"
+    rc=0
+    fm_recovery_marker_retire_idle "$STATE/.watcher-down" "$2" || rc=$?
+    printf "%s %s\n" "$rc" "$(cat "$STATE/.watcher-down")"
+  ' _ "$ROOT/bin/fm-wake-lib.sh" g1
+}
+
+test_idle_retirement_acknowledges_only_its_handling_episode() {
+  local home
+  home=$(make_home idle-retirement attended)
+  [ "$(retire_idle "$home" pending:handling:g1)" = "0 acked:handling:g1" ] \
+    || fail "idle retirement: an absorbed handling episode was not retired"
+  [ "$(retire_idle "$home" announced:handling:g1)" = "0 acked:handling:g1" ] \
+    || fail "idle retirement: an announced handling episode was not retired"
+  [ "$(retire_idle "$home" pending:downtime:g1)" = "3 pending:downtime:g1" ] \
+    || fail "idle retirement: a later outage under the same generation was acknowledged"
+  [ "$(retire_idle "$home" pending:handling:g2)" = "3 pending:handling:g2" ] \
+    || fail "idle retirement: another generation's episode was touched"
+  [ "$(retire_idle "$home" pending:handling:g1 $'1\t1\tsignal\tdemo.status\tsignal: demo.status')" = "0 pending:handling:g1" ] \
+    || fail "idle retirement: an episode with a queued row was retired"
+  pass "wake lib: idle retirement acknowledges only the handling episode it absorbed, never a later outage"
+}
+
 # Asking whether anything waits for main reads the outcome store under its
 # lock. A lock held elsewhere must not hold the successor watcher's start past
 # the host's fixed 5-second bound (docs/supervision-host.md): the unanswered
@@ -976,7 +1009,7 @@ test_attended_recovery_with_a_held_outcome_lock_reaches_main_within_the_bound() 
   wait_until 50 test -e "$home/state/.branch-outcomes.lock" \
     || { kill "$holder" 2>/dev/null || true; fail "fixture: the lock holder did not take the outcome lock"; }
   started=$SECONDS
-  start_host "$home"
+  FM_STATUS_PRESENTATION_LOCK_TIMEOUT=60 start_host "$home"
   wait_until_deadline 30 host_exited "$home" \
     || { kill "$holder" 2>/dev/null || true; fail "locked recovery: a held outcome lock kept the recovery close from main: $(cat "$home/state/.supervision-host.log")"; }
   elapsed=$((SECONDS - started))
@@ -1024,6 +1057,10 @@ test_pending_for_main_query_counts_only_what_main_has_not_seen() {
   mkdir "$home/state/branch-outcomes.jsonl"
   expect_code 2 "$(query_pending "$home")" "pending query: an outcome store that is not a file must report unknown"
   rmdir "$home/state/branch-outcomes.jsonl"
+  mkdir "$home/state/other.status"
+  expect_code 2 "$(query_pending "$home")" "pending query: a worker status log that is not a file must report unknown"
+  main_drain "$home" >/dev/null || fail "pending query: an ordinary drain must still skip a status log it cannot read"
+  rmdir "$home/state/other.status"
   expect_code 2 "$(query_pending "$home" FM_SUPERVISION_ACTOR=branch)" "pending query: a branch actor must be refused"
   pass "drain: the pending-for-main query counts only what main has not seen, and unreadable sources as unknown"
 }
@@ -1250,6 +1287,7 @@ fm_test_run \
   test_next_host_clears_a_turn_its_killed_predecessor_left \
   test_attended_recovery_with_nothing_for_main_stays_off_main \
   test_attended_first_park_recovery_without_a_queue_file_stays_off_main \
+  test_idle_retirement_acknowledges_only_its_handling_episode \
   test_attended_recovery_with_a_held_outcome_lock_reaches_main_within_the_bound \
   test_attended_recovery_holding_only_routine_rows_is_handled_on_the_engine \
   test_attended_recovery_reaches_main_only_for_work_main_has_not_seen \

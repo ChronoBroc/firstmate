@@ -376,7 +376,10 @@ print_status_outcome_backstop_section() {  # <task-and-endpoint-snapshot>
     [ -n "$task" ] || continue
     receipt=$(status_outcome_backstop_cursor_offset "$STATE/$task.status") || { rc=1; break; }
     [ "$receipt" -lt "$endpoint" ] || continue
-    status_snapshot_latest_event "$STATE/$task.status" "$endpoint" "$ident" || continue
+    if ! status_snapshot_latest_event "$STATE/$task.status" "$endpoint" "$ident"; then
+      [ -z "${_FM_STATUS_READS_STRICT:-}" ] || { rc=1; break; }
+      continue
+    fi
     event=$FM_STATUS_SNAPSHOT_EVENT_LINE
     event_endpoint=$FM_STATUS_SNAPSHOT_EVENT_ENDPOINT
     [ "$receipt" -lt "$event_endpoint" ] || continue
@@ -538,21 +541,6 @@ EOF
   printf 'OPEN DECISIONS: <key> is the [key=...] printed before the verb; a token inside a note is prose, not a key.\n' || return 1
 }
 
-# The diverged pairs bin/fm-captain-hold.sh reports, empty when the guard
-# cannot run.
-record_divergence_pairs() {
-  local bound diverged
-  # Apply bin/fm-timeout-lib.sh's bound contract, defaulting a bad override.
-  bound=${FM_DIVERGENCE_TIMEOUT:-20}
-  case "$bound" in ''|*[!0-9]*|0) bound=20 ;; esac
-
-  # Bounded, because this runs at the top of every supervision turn: a backlog
-  # tool having a bad day must cost the drain a few seconds at worst, never the
-  # presentation of the wakes it exists to deliver.
-  diverged=$(fm_run_timed "$bound" "$SCRIPT_DIR/fm-captain-hold.sh" diverged 2>/dev/null) || return 0
-  printf '%s' "$diverged"
-}
-
 # Print the RECORD DIVERGENCE section: every captain call whose two records
 # contradict each other - the status log says a key was resolved outright while
 # the task held for the captain is still open. Nothing here closes anything; the
@@ -567,10 +555,17 @@ record_divergence_pairs() {
 # never changes the drain's exit status - a supervision turn must still present
 # its wakes when the backlog tool is having a bad day.
 print_record_divergence_section() {
-  local diverged task origin key title line shown=0 omitted=0
+  local diverged task origin key title line shown=0 omitted=0 bound
   local output='' used=0 bytes item_bytes=220 global_bytes=2000
 
-  diverged=$(record_divergence_pairs)
+  # Apply bin/fm-timeout-lib.sh's bound contract, defaulting a bad override.
+  bound=${FM_DIVERGENCE_TIMEOUT:-20}
+  case "$bound" in ''|*[!0-9]*|0) bound=20 ;; esac
+
+  # Bounded, because this runs at the top of every supervision turn: a backlog
+  # tool having a bad day must cost the drain a few seconds at worst, never the
+  # presentation of the wakes it exists to deliver.
+  diverged=$(fm_run_timed "$bound" "$SCRIPT_DIR/fm-captain-hold.sh" diverged 2>/dev/null) || return 0
   [ -n "$diverged" ] || return 0
 
   while IFS=$(printf '\t') read -r task origin key title; do
@@ -932,13 +927,15 @@ print_status_presentation() {  # [<deduped-raw-rows>]
 # the STATUS OUTCOME BACKSTOP would print (print_status_outcome_backstop_section
 # decides, its receipt left uncommitted), or a captain outcome not yet
 # processed (BRANCH OUTCOMES). An open decision, settled wait, or record
-# divergence main's drain already presented does not count. Moves no queue
+# divergence main's drain already presented does not count. A status log the
+# snapshot or the backstop's event read cannot read is unknown here, though
+# an ordinary drain skips it (_FM_STATUS_READS_STRICT). Moves no queue
 # row, cursor, or receipt. Main only. Prints nothing; exits 0 when something
 # waits, 1 when nothing does, and 2 when a source cannot be read, which callers
 # treat as something waiting. The supervision host asks it before keeping a
 # recovery close off main (bin/fm-supervision-host.sh).
 pending_for_main() {
-  local snapshot backstop rows jq_rc config
+  local snapshot backstop rows jq_rc config _FM_STATUS_READS_STRICT=1
   snapshot=$(status_presentation_snapshot "$STATE") || return 2
   backstop=$(print_status_outcome_backstop_section "$snapshot") || return 2
   case "$backstop" in
