@@ -147,9 +147,10 @@ export interface UnreadWakeScope {
    */
   heartbeatSeqs: string[];
   /**
-   * How many rows the queue held when this scan read it, eligible or not.
-   * Zero for an empty or unsafe scan. A scan whose eligibleSeqs covers every
-   * queued row holds nothing for main.
+   * How many records the queue held when this scan read it, eligible or not,
+   * blank records included (only the file's final newline ends no record).
+   * Zero for an unsafe scan or a queue with no records. A scan whose
+   * eligibleSeqs covers every queued record holds nothing for main.
    */
   queuedRows: number;
   taskByWakeKey: Record<string, string>;
@@ -390,8 +391,10 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
     return UNSAFE_SCOPE;
   }
 
-  const rows = queue.split(/\r?\n/).filter((line) => line.length > 0);
-  if (rows.length === 0) return EMPTY_SCOPE;
+  const records = queue.split(/\r?\n/);
+  if (records[records.length - 1] === "") records.pop();
+  const rows = records.filter((line) => line.length > 0);
+  if (rows.length === 0) return records.length === 0 ? EMPTY_SCOPE : { ...EMPTY_SCOPE, queuedRows: records.length };
 
   const projects = new Set<string>();
   const metadata = new Map<string, string>();
@@ -581,7 +584,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
     needsDecisionKeys,
     checkSeqs,
     heartbeatSeqs,
-    queuedRows: rows.length,
+    queuedRows: records.length,
     taskByWakeKey: Object.fromEntries(taskByKey),
   };
 }
@@ -657,7 +660,7 @@ export function branchOfferForWake(state: string, message: string, afk: boolean,
   const scope = scopeForUnreadWake(state, heartbeat, afk, attendedHost && !afk);
   if (recovery) {
     const judged = scope.status === "unsafe" && queueNotYetCreated(state) ? EMPTY_SCOPE : scope;
-    const eligible = judged.status === "empty"
+    const eligible = (judged.status === "empty" && judged.queuedRows === 0)
       || (judged.eligible && judged.eligibleSeqs.length === judged.queuedRows);
     return { scope: judged, heartbeat, eligible, awayOnly: false, recovery: true };
   }

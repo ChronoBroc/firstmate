@@ -194,6 +194,8 @@ stop_home_processes() {  # <home>
   local home=$1 pid i
   stop_home_supervision "$home"
   while IFS= read -r pid; do
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || continue
+    [ "$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')" = "$$" ] || continue
     if [ -e "$home/session.stop" ]; then
       # End the session's running Stop hook as Claude does when the session
       # ends. The hook restarts a host that dies by signal, and that host can
@@ -210,9 +212,11 @@ stop_home_processes() {  # <home>
       kill -TERM "$pid" 2>/dev/null || true
     fi
   done < <(cat "$home/claude-pids" 2>/dev/null)
+  [ ! -f "$home/claude-pids" ] || : > "$home/claude-pids"
   while IFS= read -r pid; do
     kill -TERM "$pid" 2>/dev/null || true
   done < <(cat "$home/orphan-pid" 2>/dev/null)
+  rm -f "$home/orphan-pid"
 }
 stop_home_supervision() {  # <home>
   local home=$1 pid arms='' i=0
@@ -558,11 +562,12 @@ hook_exited() { [ -s "$1/hook.rc" ]; }
 
 # Main's rewoken turn drains; the caller runs the printed acknowledgement
 # (MAIN_ACK) when that turn's handling is done.
-main_drain() {  # <home>; prints the drain and sets MAIN_ACK
-  local out
-  out=$(FM_HOME="$1" "$FAKE_CLAUDE" -c '"$0" 2>&1' "$ROOT/bin/fm-wake-drain.sh")
+main_drain() {  # <home>; prints the drain, sets MAIN_ACK, returns the drain's status
+  local out rc=0
+  out=$(FM_HOME="$1" "$FAKE_CLAUDE" -c '"$0" 2>&1' "$ROOT/bin/fm-wake-drain.sh") || rc=$?
   MAIN_ACK=$(printf '%s\n' "$out" | sed -n 's/^WAKE_ACK_REQUIRED: after handling completes run bin\/fm-wake-drain.sh //p' | tail -1)
   printf '%s\n' "$out"
+  return "$rc"
 }
 
 

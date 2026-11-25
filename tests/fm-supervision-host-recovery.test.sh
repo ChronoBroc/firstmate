@@ -49,7 +49,7 @@ test_attended_recovery_with_nothing_for_main_stays_off_main() {
       acked:*) ;;
       *) fail "empty recovery ($sig): the absorbed recovery episode was left open: $(cat "$home/state/.watcher-down" 2>/dev/null)" ;;
     esac
-    drained=$(main_drain "$home")
+    drained=$(main_drain "$home") || fail "main's drain failed: $drained"
     assert_not_contains "$drained" "WAKE_ACK_REQUIRED" "empty recovery ($sig): main's next drain must owe no acknowledgement"
     stop_home_processes "$home"
   done
@@ -109,6 +109,29 @@ test_idle_retirement_acknowledges_only_its_handling_episode() {
   [ "$(retire_idle "$home" pending:handling:g1 $'1\t1\tsignal\tdemo.status\tsignal: demo.status')" = "0 pending:handling:g1" ] \
     || fail "idle retirement: an episode with a queued row was retired"
   pass "wake lib: idle retirement acknowledges only the handling episode it absorbed, never a later outage"
+}
+
+# The offer judges a recovery close by every record its queue holds. A blank
+# record is malformed, and only main's drain retires it, so a queue holding
+# one stays main's even beside routine rows. A zero-byte queue and the final
+# newline of a well-formed one are not records.
+
+recovery_offer_eligible() {  # <home> <queue-bytes>; prints the offer's eligible value
+  printf '%b' "$2" > "$1/state/.wake-queue"
+  printf 'check: rearm-resurface\n' | FM_HOME="$1" node "$ROOT/bin/fm-branch-dispatch.mjs" offer | sed -n 's/^eligible=//p'
+}
+
+test_recovery_offer_leaves_a_blank_queue_record_to_main() {
+  local home row
+  command -v node >/dev/null 2>&1 || fail "node is required for the offer rule"
+  home=$(make_home recovery-blank-record attended)
+  : > "$home/state/demo.turn-ended"
+  row="1\t1\tsignal\tdemo.turn-ended\tsignal: $home/state/demo.turn-ended"
+  [ "$(recovery_offer_eligible "$home" '')" = 1 ] || fail "blank record: a zero-byte queue must be an empty one"
+  [ "$(recovery_offer_eligible "$home" "$row\n")" = 1 ] || fail "fixture: a routine turn-ended row was not branch-claimable"
+  [ "$(recovery_offer_eligible "$home" '\n')" = 0 ] || fail "blank record: a queue holding only a blank record was offered as empty"
+  [ "$(recovery_offer_eligible "$home" "$row\n\n")" = 0 ] || fail "blank record: a blank record beside a routine row was left behind"
+  pass "offer: a recovery close whose queue holds a blank record stays main's"
 }
 
 # Asking whether anything waits for main reads the outcome store under its
@@ -179,18 +202,20 @@ test_pending_for_main_query_counts_only_what_main_has_not_seen() {
   printf 'blocked [key=bad/value]: credential missing\n' >> "$home/state/demo.status"
   expect_code 0 "$(query_pending "$home")" "pending query: an unpresented captain-facing blocker must report something waiting"
   expect_code 0 "$(query_pending "$home")" "pending query: asking must not consume the blocker's presentation"
-  assert_contains "$(main_drain "$home")" 'demo blocked [key=bad/value]: credential missing' \
+  drained=$(main_drain "$home") || fail "pending query: main's drain failed: $drained"
+  assert_contains "$drained" 'demo blocked [key=bad/value]: credential missing' \
     "fixture: main's drain did not present the blocker through its backstop"
   expect_code 1 "$(query_pending "$home")" "pending query: a blocker main's drain presented must no longer count"
   append_status "$home" 'which export format?' needs-decision
-  assert_contains "$(main_drain "$home")" 'OPEN DECISIONS' "fixture: main's drain did not present the open decision"
+  drained=$(main_drain "$home") || fail "pending query: main's drain failed: $drained"
+  assert_contains "$drained" 'OPEN DECISIONS' "fixture: main's drain did not present the open decision"
   expect_code 1 "$(query_pending "$home")" "pending query: an open decision main's drain presented must not count again"
   mkdir "$home/state/branch-outcomes.jsonl"
   expect_code 2 "$(query_pending "$home")" "pending query: an outcome store that is not a file must report unknown"
   rmdir "$home/state/branch-outcomes.jsonl"
   mkdir "$home/state/other.status"
   expect_code 2 "$(query_pending "$home")" "pending query: a worker status log that is not a file must report unknown"
-  drained=$(main_drain "$home")
+  drained=$(main_drain "$home") || fail "main's drain failed: $drained"
   assert_contains "$drained" 'OPEN DECISIONS' "pending query: an ordinary drain must still present the healthy task beside an unreadable log"
   assert_not_contains "$drained" 'STATUS PRESENTATION INCOMPLETE' "pending query: an unreadable log must not break the ordinary drain's status presentation"
   rmdir "$home/state/other.status"
@@ -200,6 +225,13 @@ test_pending_for_main_query_counts_only_what_main_has_not_seen() {
   printf '  \n\n\t\n' > "$home/state/blank.status"
   expect_code 1 "$(query_pending "$home")" "pending query: a whitespace-only log must report nothing waiting"
   rm -f "$home/state/blank.status"
+  printf 'v=fm-captain-wait-v1\nseq=1\nendpoint=10\nident=replaced-log\nwait=needs-decision [key=fmt]: which export format?\nsummary=asked the captain\n' \
+    > "$home/state/.demo.captain-wait.1.fmt"
+  expect_code 0 "$(query_pending "$home")" "pending query: a captain wait its status log can no longer confirm must report something waiting"
+  expect_code 0 "$(query_pending "$home")" "pending query: asking must not consume the wait record"
+  drained=$(main_drain "$home") || fail "pending query: main's drain failed: $drained"
+  assert_contains "$drained" 'SETTLED WAITS' "fixture: main's drain did not present the unconfirmable wait"
+  expect_code 1 "$(query_pending "$home")" "pending query: a wait main's drain presented and dropped must no longer count"
   expect_code 2 "$(query_pending "$home" FM_SUPERVISION_ACTOR=branch)" "pending query: a branch actor must be refused"
   pass "drain: the pending-for-main query counts only what main has not seen, and unreadable sources as unknown"
 }
@@ -252,7 +284,7 @@ test_attended_recovery_reaches_main_only_for_work_main_has_not_seen() {
     # Main drains and acknowledges the close but leaves the decision open or
     # the captain outcome unprocessed; the next Stop parks again and that park
     # is torn down in turn.
-    main_drain "$home" >/dev/null
+    main_drain "$home" >/dev/null || fail "main's drain failed"
     [ -n "$MAIN_ACK" ] || fail "waiting recovery ($kind): main's drain printed no acknowledgement"
     # shellcheck disable=SC2086 # the printed acknowledgement arguments
     FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" "$@"' "$ROOT/bin/fm-wake-drain.sh" $MAIN_ACK >/dev/null 2>&1 \
@@ -269,7 +301,7 @@ test_attended_recovery_reaches_main_only_for_work_main_has_not_seen() {
         || fail "waiting recovery (decision): the host did not absorb a recovery whose decision main had seen: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
       sleep 1
       host_exited "$home" && fail "waiting recovery (decision): a decision main had seen woke main again: $(cat "$home/host.out")"
-      drained=$(main_drain "$home")
+      drained=$(main_drain "$home") || fail "main's drain failed: $drained"
       assert_contains "$drained" "OPEN DECISIONS" "waiting recovery: main's drain must keep listing the open decision"
     else
       wait_until_deadline 60 host_exited "$home" \
@@ -277,7 +309,7 @@ test_attended_recovery_reaches_main_only_for_work_main_has_not_seen() {
       assert_re '^check: rearm-resurface$' "$home/host.out" "waiting recovery (captain): main must get the recovery close"
       assert_re '	pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
         "waiting recovery (captain): the ledger must record the recovery as main's"
-      drained=$(main_drain "$home")
+      drained=$(main_drain "$home") || fail "main's drain failed: $drained"
       assert_contains "$drained" "BRANCH OUTCOMES (captain outcomes" "waiting recovery: main's drain must present the captain outcome"
     fi
     stop_home_processes "$home"
@@ -304,7 +336,7 @@ test_attended_recovery_with_a_routine_row_reaches_main_only_for_unseen_work() {
       append_status "$home" 'ready for review'
     fi
     wait_until_deadline 60 host_exited "$home" || fail "routine waiting recovery ($kind): the first close did not reach main"
-    main_drain "$home" >/dev/null
+    main_drain "$home" >/dev/null || fail "main's drain failed"
     [ -n "$MAIN_ACK" ] || fail "routine waiting recovery ($kind): main's drain printed no acknowledgement"
     # shellcheck disable=SC2086 # the printed acknowledgement arguments
     FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" "$@"' "$ROOT/bin/fm-wake-drain.sh" $MAIN_ACK >/dev/null 2>&1 \
@@ -331,7 +363,7 @@ test_attended_recovery_with_a_routine_row_reaches_main_only_for_unseen_work() {
       assert_re '^check: rearm-resurface$' "$home/host.out" "routine waiting recovery (captain): main must get the recovery close"
       assert_re '	pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
         "routine waiting recovery (captain): the ledger must record the recovery as main's"
-      drained=$(main_drain "$home")
+      drained=$(main_drain "$home") || fail "main's drain failed: $drained"
       assert_contains "$drained" "BRANCH OUTCOMES (captain outcomes" "routine waiting recovery: main's drain must present the captain outcome"
     fi
     stop_home_processes "$home"
@@ -343,6 +375,7 @@ fm_test_run \
   test_attended_recovery_with_nothing_for_main_stays_off_main \
   test_attended_first_park_recovery_without_a_queue_file_stays_off_main \
   test_idle_retirement_acknowledges_only_its_handling_episode \
+  test_recovery_offer_leaves_a_blank_queue_record_to_main \
   test_attended_recovery_with_a_held_outcome_lock_reaches_main_within_the_bound \
   test_pending_for_main_query_counts_only_what_main_has_not_seen \
   test_attended_recovery_holding_only_routine_rows_is_handled_on_the_engine \

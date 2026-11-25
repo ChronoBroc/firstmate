@@ -928,7 +928,9 @@ print_status_presentation() {  # [<deduped-raw-rows>]
 # has not yet seen beyond the queue's own rows - a captain-facing status event
 # the STATUS OUTCOME BACKSTOP would print (print_status_outcome_backstop_section
 # decides, its receipt left uncommitted), or a captain outcome not yet
-# processed (BRANCH OUTCOMES). An open decision, settled wait, or record
+# processed (BRANCH OUTCOMES), or a captain wait that has settled or can no
+# longer be confirmed (SETTLED WAITS, which presents each once and drops its
+# record), judged without consuming the record. An open decision or record
 # divergence main's drain already presented does not count. A status log the
 # snapshot or the backstop's event read cannot read is unknown here, though
 # an ordinary drain skips it (_FM_STATUS_READS_STRICT). Moves no queue
@@ -937,7 +939,7 @@ print_status_presentation() {  # [<deduped-raw-rows>]
 # treat as something waiting. The supervision host asks it before keeping a
 # recovery close off main (bin/fm-supervision-host.sh).
 pending_for_main() {
-  local snapshot backstop rows jq_rc config _FM_STATUS_READS_STRICT=1
+  local snapshot backstop rows jq_rc config path rc _FM_STATUS_READS_STRICT=1
   snapshot=$(status_presentation_snapshot "$STATE") || return 2
   backstop=$(print_status_outcome_backstop_section "$snapshot") || return 2
   case "$backstop" in
@@ -946,6 +948,18 @@ pending_for_main() {
     *) return 0 ;;
   esac
   ! fm_afk_contract_away_present "$STATE" || return 1
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    rc=0
+    fm_captain_wait_judge "$STATE" "$path" || rc=$?
+    case "$rc" in
+      0|3) return 0 ;;
+      1) ;;
+      *) return 2 ;;
+    esac
+  done <<EOF
+$(fm_captain_wait_records "$STATE")
+EOF
   config=${FM_CONFIG_OVERRIDE:-$FM_HOME/config}
   fm_supervision_host_outcomes_drained "$config" && [ -s "$STATE/branch-outcomes.jsonl" ] || return 1
   command -v jq >/dev/null 2>&1 || return 2
