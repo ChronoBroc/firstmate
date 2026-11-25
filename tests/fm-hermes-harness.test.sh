@@ -54,6 +54,7 @@ for test_bash in bash /bin/bash /opt/homebrew/bin/bash; do
   out=$("$test_bash" -uc ". '$ROOT/bin/fm-hermes-lib.sh'; fm_hermes_profile_home '$TMP_ROOT/default-bin/hermes' ''" 2>&1)
   [ "$out" = "$TMP_ROOT/default-profile" ] || fail "default profile under $test_bash -u: $out"
 done
+! fm_hermes_process_matches '' || fail 'empty args matched under set -u'
 # Use a real interpreter process so kernel-name loss and argv loss are
 # independent regressions, not expectations encoded into a fake harness.
 mkdir -p "$TMP_ROOT/process/tui_gateway"
