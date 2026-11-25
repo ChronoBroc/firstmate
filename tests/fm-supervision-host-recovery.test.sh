@@ -174,6 +174,8 @@ test_attended_recovery_with_a_held_outcome_lock_reaches_main_within_the_bound() 
     || { release_lock_holder "$home" "$holder"; fail "locked recovery: a held outcome lock kept the recovery close from main: $(cat "$home/state/.supervision-host.log")"; }
   elapsed=$((SECONDS - started))
   release_lock_holder "$home" "$holder"
+  ! wait_until 20 test -e "$home/state/.branch-outcomes.lock" \
+    || fail "locked recovery: a lock waiter outlived the abandoned query and took the outcome lock: $(cat "$home/state/.branch-outcomes.lock/pid" 2>/dev/null)"
   [ "$elapsed" -lt 20 ] || fail "locked recovery: the close took ${elapsed}s to reach main, past the 5s bound plus host start and successor verification, against a 120s lock hold"
   assert_re '^check: rearm-resurface$' "$home/host.out" "locked recovery: main must get the recovery close"
   assert_re '	pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \

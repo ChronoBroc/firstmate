@@ -346,6 +346,8 @@ EOF
 
 print_status_outcome_backstop_section() {  # <task-and-endpoint-snapshot>
   local snapshot=$1 task endpoint ident event event_endpoint event_rc line verb key receipt store lock ready
+  local acquire=fm_lock_acquire_wait_bounded
+  [ -z "${_FM_STATUS_READS_STRICT:-}" ] || acquire=fm_lock_acquire_wait_max
   local output='' used=0 shown=0 omitted=0 bytes item_bytes=220 global_bytes=4000 rc=0
   [ "$ACTOR" = main ] || return 0
 
@@ -356,7 +358,7 @@ print_status_outcome_backstop_section() {  # <task-and-endpoint-snapshot>
       printf 'STATUS OUTCOME BACKSTOP SKIPPED: branch outcome history could not be read safely; repair it before relying on drain recovery.\n'
       return 0
     fi
-    if ! fm_lock_acquire_wait_bounded "$lock" "$PRESENTATION_LOCK_TIMEOUT"; then
+    if ! "$acquire" "$lock" "$PRESENTATION_LOCK_TIMEOUT"; then
       printf 'STATUS OUTCOME BACKSTOP SKIPPED: branch outcome history is busy; retry on the next drain.\n'
       return 0
     fi
@@ -965,7 +967,9 @@ EOF
 # DECISIONS fold has not yet presented (unpresented_open_decision). An open
 # decision or record divergence main's drain already presented does not count. A status log the
 # snapshot or the backstop's event read cannot read is unknown here, though
-# an ordinary drain skips it (_FM_STATUS_READS_STRICT). Moves no queue
+# an ordinary drain skips it (_FM_STATUS_READS_STRICT), and the backstop waits
+# for the outcome lock in this process, so the caller's deadline ends the wait
+# with the query. Moves no queue
 # row, cursor, or receipt. Main only. Prints nothing; exits 0 when something
 # waits, 1 when nothing does, and 2 when a source cannot be read, which callers
 # treat as something waiting. The supervision host asks it before keeping a

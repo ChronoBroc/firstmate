@@ -145,14 +145,14 @@ test_engine_that_cannot_inspect_the_host_handles_routine_turn_ends() {
   printf '#!/usr/bin/env bash\nPATH="%s:$PATH" FM_PROC_ROOT_OVERRIDE="%s" exec "%s" "$@"\n' \
     "$home/engine-bin" "$home/no-proc" "$STUB" > "$home/engine-wrap"
   chmod +x "$home/engine-wrap"
-  FM_SUPERVISION_ENGINE_CLAUDE_BIN="$home/engine-wrap" start_host "$home"
-  wait_until 150 watcher_live "$home" || fail "engine no ps: the host never started a watcher cycle"
   touch "$home/state/demo.turn-ended" "$home/state/alpha.turn-ended" "$home/state/beta.turn-ended"
+  FM_SUPERVISION_ENGINE_CLAUDE_BIN="$home/engine-wrap" start_host "$home"
   for task in demo alpha beta; do
     wait_until 250 grep -qs "	handled	.*$task.turn-ended" "$home/state/.supervision-host.log" \
       || fail "engine no ps: the $task turn end was not handled: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
   done
-  grep -l 'alpha.turn-ended' "$home"/engine-drain.* 2>/dev/null | xargs grep -l 'beta.turn-ended' 2>/dev/null | grep -q . \
+  grep -l 'demo.turn-ended' "$home"/engine-drain.* 2>/dev/null | xargs grep -l 'alpha.turn-ended' 2>/dev/null \
+    | xargs grep -l 'beta.turn-ended' 2>/dev/null | grep -q . \
     || fail "engine no ps: no single engine drain was granted several workers' turn ends: $(cat "$home/state/.supervision-host.log")"
   host_exited "$home" && fail "engine no ps: a routine turn end reached main: $(cat "$home/host.out")"
   assert_no_re '	failed	' "$home/state/.supervision-host.log" "engine no ps: a turn failed to acknowledge its granted rows"
