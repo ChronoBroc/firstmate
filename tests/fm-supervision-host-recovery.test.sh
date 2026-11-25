@@ -142,6 +142,11 @@ test_recovery_offer_leaves_a_blank_queue_record_to_main() {
 # the host's fixed 5-second bound (docs/supervision-host.md): the unanswered
 # query leaves the empty recovery close main's instead of absorbing it.
 
+release_lock_holder() {  # <home> <holder-pid>
+  : > "$1/lock-release"
+  wait "$2" 2>/dev/null || true
+}
+
 test_attended_recovery_with_a_held_outcome_lock_reaches_main_within_the_bound() {
   local home holder started elapsed
   home=$(make_home attended-locked-recovery attended)
@@ -157,18 +162,18 @@ test_attended_recovery_with_a_held_outcome_lock_reaches_main_within_the_bound() 
     . "$1"
     fm_lock_try_acquire "$STATE/.branch-outcomes.lock" || exit 1
     trap "fm_lock_release \"$STATE/.branch-outcomes.lock\"" EXIT
-    sleep 120
-  ' _ "$ROOT/bin/fm-wake-lib.sh" &
+    i=0
+    while [ ! -e "$2" ] && [ "$i" -lt 1200 ]; do sleep 0.1; i=$((i + 1)); done
+  ' _ "$ROOT/bin/fm-wake-lib.sh" "$home/lock-release" &
   holder=$!
   wait_until 50 test -e "$home/state/.branch-outcomes.lock" \
-    || { kill "$holder" 2>/dev/null || true; fail "fixture: the lock holder did not take the outcome lock"; }
+    || { release_lock_holder "$home" "$holder"; fail "fixture: the lock holder did not take the outcome lock"; }
   started=$SECONDS
   FM_STATUS_PRESENTATION_LOCK_TIMEOUT=60 start_host "$home"
   wait_until_deadline 30 host_exited "$home" \
-    || { kill "$holder" 2>/dev/null || true; fail "locked recovery: a held outcome lock kept the recovery close from main: $(cat "$home/state/.supervision-host.log")"; }
+    || { release_lock_holder "$home" "$holder"; fail "locked recovery: a held outcome lock kept the recovery close from main: $(cat "$home/state/.supervision-host.log")"; }
   elapsed=$((SECONDS - started))
-  kill "$holder" 2>/dev/null || true
-  wait "$holder" 2>/dev/null || true
+  release_lock_holder "$home" "$holder"
   [ "$elapsed" -lt 20 ] || fail "locked recovery: the close took ${elapsed}s to reach main, past the 5s bound plus host start and successor verification, against a 120s lock hold"
   assert_re '^check: rearm-resurface$' "$home/host.out" "locked recovery: main must get the recovery close"
   assert_re '	pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
