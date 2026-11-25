@@ -7,8 +7,8 @@
 # a supervision-host home the supervision session's new and unprocessed
 # outcomes (BRANCH OUTCOMES), and captain outcomes whose reported wait has
 # since ended (SETTLED WAITS), then assert liveness.
-# --pending-for-main instead answers, read-only, whether such a section holds
-# something for main (pending_for_main below owns that contract).
+# --pending-for-main instead answers whether such a section holds something
+# main has not yet seen (pending_for_main below owns that contract).
 #
 # Keep sequence-bound row consumption independent from generation-bound episode
 # retirement; docs/watcher-continuity.md owns the recovery contract.
@@ -927,60 +927,38 @@ print_status_presentation() {  # [<deduped-raw-rows>]
   return "$rc"
 }
 
-# --pending-for-main: whether main's next drain would present something for
-# main to act on beyond the queue's own rows - an open decision (OPEN
-# DECISIONS), a captain-call record divergence (RECORD DIVERGENCE), a captain
-# outcome not yet processed (BRANCH OUTCOMES), or a captain wait that ended or
-# can no longer be confirmed (SETTLED WAITS) - using those sections' own
-# sources and gates. Unread informational status lines are not counted: the
-# watcher's own signal scan owns status changes. Read-only: it takes no queue
-# lock and moves no cursor or receipt. Main only. Prints nothing; exits 0 at
-# the first source that holds something, 1 when none does, and 2 when a source
-# cannot be read, which callers treat as something waiting. The supervision
-# host asks it before keeping a recovery close off main
-# (bin/fm-supervision-host.sh).
+# --pending-for-main: whether main's next drain would present something main
+# has not yet seen beyond the queue's own rows - a captain-facing status event
+# the STATUS OUTCOME BACKSTOP would print (print_status_outcome_backstop_section
+# decides, its receipt left uncommitted), or a captain outcome not yet
+# processed (BRANCH OUTCOMES). An open decision, settled wait, or record
+# divergence main's drain already presented does not count. Moves no queue
+# row, cursor, or receipt. Main only. Prints nothing; exits 0 when something
+# waits, 1 when nothing does, and 2 when a source cannot be read, which callers
+# treat as something waiting. The supervision host asks it before keeping a
+# recovery close off main (bin/fm-supervision-host.sh).
 pending_for_main() {
-  local f exclude open bound diverged rows jq_rc path rc config
-  exclude=$(status_scan_parent_channel_exclude "$STATE")
-  for f in "$STATE"/*.status; do
-    [ -e "$f" ] || [ -L "$f" ] || continue
-    [ ! -L "$f" ] && [ "$f" != "$exclude" ] || continue
-    [ -f "$f" ] && [ -r "$f" ] || return 2
-    open=$(status_open_decisions "$f") || return 2
-    [ -z "$open" ] || return 0
-  done
-  bound=${FM_DIVERGENCE_TIMEOUT:-20}
-  case "$bound" in ''|*[!0-9]*|0) bound=20 ;; esac
-  diverged=$(fm_run_timed "$bound" "$SCRIPT_DIR/fm-captain-hold.sh" diverged 2>/dev/null) || return 2
-  [ -z "$diverged" ] || return 0
+  local snapshot backstop rows jq_rc config
+  snapshot=$(status_presentation_snapshot "$STATE") || return 2
+  backstop=$(print_status_outcome_backstop_section "$snapshot") || return 2
+  case "$backstop" in
+    '') ;;
+    'STATUS OUTCOME BACKSTOP SKIPPED'*) return 2 ;;
+    *) return 0 ;;
+  esac
   ! fm_afk_contract_away_present "$STATE" || return 1
   config=${FM_CONFIG_OVERRIDE:-$FM_HOME/config}
-  if fm_supervision_host_outcomes_drained "$config" && [ -s "$STATE/branch-outcomes.jsonl" ]; then
-    command -v jq >/dev/null 2>&1 || return 2
-    rows=$("$SCRIPT_DIR/fm-branch-outcome.sh" present 2>/dev/null) || return 2
-    if [ -n "$rows" ]; then
-      jq_rc=0
-      printf '%s\n' "$rows" | jq -e -s 'any(.[]; .verdict == "captain")' >/dev/null 2>&1 || jq_rc=$?
-      case "$jq_rc" in
-        0) return 0 ;;
-        1) ;;
-        *) return 2 ;;
-      esac
-    fi
-  fi
-  while IFS= read -r path; do
-    [ -n "$path" ] || continue
-    rc=0
-    fm_captain_wait_judge "$STATE" "$path" || rc=$?
-    case "$rc" in
-      0|3) return 0 ;;
-      1) ;;
-      *) return 2 ;;
-    esac
-  done <<EOF
-$(fm_captain_wait_records "$STATE")
-EOF
-  return 1
+  fm_supervision_host_outcomes_drained "$config" && [ -s "$STATE/branch-outcomes.jsonl" ] || return 1
+  command -v jq >/dev/null 2>&1 || return 2
+  rows=$("$SCRIPT_DIR/fm-branch-outcome.sh" present 2>/dev/null) || return 2
+  [ -n "$rows" ] || return 1
+  jq_rc=0
+  printf '%s\n' "$rows" | jq -e -s 'any(.[]; .verdict == "captain")' >/dev/null 2>&1 || jq_rc=$?
+  case "$jq_rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) return 2 ;;
+  esac
 }
 
 if [ "$PENDING_QUERY" = true ]; then

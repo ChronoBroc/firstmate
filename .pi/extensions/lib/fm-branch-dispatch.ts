@@ -626,19 +626,35 @@ export interface BranchOfferVerdict {
 // supervision host off Pi: the watcher's generic downtime recovery
 // (RECOVERY_RESURFACE_REASON). It names no event of its own; it only says the
 // queue may hold rows no watcher announced. So the host may take it when the
-// queue is empty or every queued row is one the branch may claim, and it stays
-// main's whenever any queued row is main's. An empty queue is offered with
-// status "empty": the host still asks main's drain owner whether anything else
-// waits for main (bin/fm-wake-drain.sh --pending-for-main) before keeping it.
+// queue is empty (a state directory holding no queue file yet included) or
+// every queued row is one the branch may claim, and it stays main's whenever
+// any queued row is main's or the queue cannot be read. The host still asks
+// main's drain owner whether anything main has not yet seen waits
+// (bin/fm-wake-drain.sh --pending-for-main) before keeping it.
+function queueNotYetCreated(state: string): boolean {
+  try {
+    lstatSync(`${state}/.wake-queue`);
+    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+  }
+  try {
+    return lstatSync(state).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 export function branchOfferForWake(state: string, message: string, afk: boolean, attendedHost = false): BranchOfferVerdict {
   const heartbeat = /^heartbeat($|:)/.test(message);
   const recovery = attendedHost && !afk && message === RECOVERY_RESURFACE_REASON;
   const isCheckTrigger = /^check:/.test(message) && !recovery;
   const scope = scopeForUnreadWake(state, heartbeat, afk, attendedHost && !afk);
   if (recovery) {
-    const eligible = scope.status === "empty"
-      || (scope.eligible && scope.eligibleSeqs.length === scope.queuedRows);
-    return { scope, heartbeat, eligible, awayOnly: false };
+    const judged = scope.status === "unsafe" && queueNotYetCreated(state) ? EMPTY_SCOPE : scope;
+    const eligible = judged.status === "empty"
+      || (judged.eligible && judged.eligibleSeqs.length === judged.queuedRows);
+    return { scope: judged, heartbeat, eligible, awayOnly: false };
   }
   const triggerKeys = /^signal:/.test(message)
     ? message

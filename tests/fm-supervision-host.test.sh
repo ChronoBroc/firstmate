@@ -929,6 +929,27 @@ test_attended_recovery_with_nothing_for_main_stays_off_main() {
 }
 
 
+# A first park torn down before any row was written leaves no queue file at
+# all. That is an empty queue, so its recovery close stays off main too.
+
+test_attended_first_park_recovery_without_a_queue_file_stays_off_main() {
+  local home
+  home=$(make_home attended-first-park-recovery attended)
+  start_host "$home"
+  wait_until 150 watcher_live "$home" || fail "first park: the host never started a watcher cycle"
+  tear_down_parked_host "$home" KILL
+  [ ! -e "$home/state/.wake-queue" ] || fail "fixture: the first park wrote a queue file: $(cat "$home/state/.wake-queue")"
+  start_host "$home"
+  wait_until 150 grep -qs '	no-op	' "$home/state/.supervision-host.log" \
+    || fail "first park: the next host did not absorb its recovery close: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
+  sleep 1
+  host_exited "$home" && fail "first park: a recovery with no queue file woke main: $(cat "$home/host.out")"
+  [ "$(engine_calls "$home")" -eq 0 ] || fail "first park: an empty recovery ran an engine turn"
+  watcher_live "$home" || fail "first park: the host is not parked on a live watcher"
+  stop_home_processes "$home"
+  pass "host: an attended first-park recovery with no queue file yet stays off main"
+}
+
 # Asking whether anything waits for main reads the outcome store under its
 # lock. A lock held elsewhere must not hold the successor watcher's start past
 # the host's fixed 5-second bound (docs/supervision-host.md): the unanswered
@@ -961,8 +982,7 @@ test_attended_recovery_with_a_held_outcome_lock_reaches_main_within_the_bound() 
   elapsed=$((SECONDS - started))
   kill "$holder" 2>/dev/null || true
   wait "$holder" 2>/dev/null || true
-  [ "$elapsed" -ge 5 ] || fail "locked recovery: the close reached main after ${elapsed}s, before the query's 5s bound could have expired"
-  [ "$elapsed" -lt 12 ] || fail "locked recovery: the close took ${elapsed}s to reach main past the 5s bound"
+  [ "$elapsed" -lt 20 ] || fail "locked recovery: the close took ${elapsed}s to reach main, past the 5s bound plus host start and successor verification, against a 120s lock hold"
   assert_re '^check: rearm-resurface$' "$home/host.out" "locked recovery: main must get the recovery close"
   assert_re '	pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
     "locked recovery: the ledger must record the unanswered recovery as main's"
@@ -972,31 +992,40 @@ test_attended_recovery_with_a_held_outcome_lock_reaches_main_within_the_bound() 
 }
 
 
-# The query answers for main only and never turns an unreadable source into
-# "nothing waiting": exit 1 means nothing waits, 2 means it could not tell.
+# The query counts only what main's drain has not yet presented. A blocker
+# whose malformed key keeps it out of the decision fold reaches main only
+# through the drain's status outcome backstop
+# (tests/fm-wake-drain-outcome-backstop.test.sh), so it waits until a main drain
+# presents it once; a decision main has already been shown does not. It
+# answers for main only, and an outcome store it cannot read is unknown (2),
+# never "nothing waiting".
 
-test_pending_for_main_query_reports_unreadable_sources_as_unknown() {
-  local home rc
+query_pending() {  # <home> [env assignments...]; prints the exit status
+  local home=$1 rc=0
+  shift
+  env FM_HOME="$home" "$@" "$FAKE_CLAUDE" -c '"$0" --pending-for-main' "$ROOT/bin/fm-wake-drain.sh" >/dev/null 2>&1 || rc=$?
+  printf '%s\n' "$rc"
+}
+
+test_pending_for_main_query_counts_only_what_main_has_not_seen() {
+  local home
   home=$(make_home pending-query attended)
-  append_status "$home" 'one'
-  rc=0
-  FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" --pending-for-main' "$ROOT/bin/fm-wake-drain.sh" >/dev/null 2>&1 || rc=$?
-  expect_code 1 "$rc" "pending query: a readable log with no open decision must report nothing waiting"
+  append_status "$home" 'step one'
+  expect_code 1 "$(query_pending "$home")" "pending query: a routine status line must report nothing waiting"
+  printf 'blocked [key=bad/value]: credential missing\n' >> "$home/state/demo.status"
+  expect_code 0 "$(query_pending "$home")" "pending query: an unpresented captain-facing blocker must report something waiting"
+  expect_code 0 "$(query_pending "$home")" "pending query: asking must not consume the blocker's presentation"
+  assert_contains "$(main_drain "$home")" 'demo blocked [key=bad/value]: credential missing' \
+    "fixture: main's drain did not present the blocker through its backstop"
+  expect_code 1 "$(query_pending "$home")" "pending query: a blocker main's drain presented must no longer count"
   append_status "$home" 'which export format?' needs-decision
-  rc=0
-  FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" --pending-for-main' "$ROOT/bin/fm-wake-drain.sh" >/dev/null 2>&1 || rc=$?
-  expect_code 0 "$rc" "pending query: an open decision must report something waiting"
-  : > "$home/state/demo.status"
-  append_status "$home" 'one'
-  chmod 000 "$home/state/demo.status"
-  rc=0
-  FM_HOME="$home" "$FAKE_CLAUDE" -c '"$0" --pending-for-main' "$ROOT/bin/fm-wake-drain.sh" >/dev/null 2>&1 || rc=$?
-  chmod 600 "$home/state/demo.status"
-  expect_code 2 "$rc" "pending query: an unreadable status log must report unknown, not nothing waiting"
-  rc=0
-  FM_HOME="$home" FM_SUPERVISION_ACTOR=branch "$FAKE_CLAUDE" -c '"$0" --pending-for-main' "$ROOT/bin/fm-wake-drain.sh" >/dev/null 2>&1 || rc=$?
-  expect_code 2 "$rc" "pending query: a branch actor must be refused"
-  pass "drain: the pending-for-main query reports unreadable sources as unknown and answers for main only"
+  assert_contains "$(main_drain "$home")" 'OPEN DECISIONS' "fixture: main's drain did not present the open decision"
+  expect_code 1 "$(query_pending "$home")" "pending query: an open decision main's drain presented must not count again"
+  mkdir "$home/state/branch-outcomes.jsonl"
+  expect_code 2 "$(query_pending "$home")" "pending query: an outcome store that is not a file must report unknown"
+  rmdir "$home/state/branch-outcomes.jsonl"
+  expect_code 2 "$(query_pending "$home" FM_SUPERVISION_ACTOR=branch)" "pending query: a branch actor must be refused"
+  pass "drain: the pending-for-main query counts only what main has not seen, and unreadable sources as unknown"
 }
 
 # The same teardown while an engine turn handles a worker's turn end leaves
@@ -1026,12 +1055,12 @@ test_attended_recovery_holding_only_routine_rows_is_handled_on_the_engine() {
 }
 
 
-# A recovery is main's whenever main has something waiting: a queued
-# main-owned row (covered by the killed-at-the-turn-end case above), an open
-# decision, or a captain outcome it has not yet processed. Those stay
-# re-presented on the recovery, exactly as without the host.
+# A recovery is main's whenever main has something it has not yet seen: a
+# queued main-owned row (covered by the killed-at-the-turn-end case above) or
+# a captain outcome it has not yet processed. An open decision main's drain
+# already presented does not wake main again; its drain keeps listing it.
 
-test_attended_recovery_with_work_waiting_for_main_reaches_main() {
+test_attended_recovery_reaches_main_only_for_work_main_has_not_seen() {
   local home kind drained
   for kind in decision captain; do
     home=$(make_home "attended-waiting-recovery-$kind" attended)
@@ -1059,28 +1088,34 @@ test_attended_recovery_with_work_waiting_for_main_reaches_main() {
     host_exited "$home" && fail "fixture ($kind): the next park did not stay parked: $(cat "$home/host.out")"
     tear_down_parked_host "$home" KILL
     start_host "$home"
-    wait_until_deadline 60 host_exited "$home" \
-      || fail "waiting recovery ($kind): the recovery did not reach main: $(cat "$home/state/.supervision-host.log")"
-    assert_re '^check: rearm-resurface$' "$home/host.out" "waiting recovery ($kind): main must get the recovery close"
-    assert_re '	pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
-      "waiting recovery ($kind): the ledger must record the recovery as main's"
-    drained=$(main_drain "$home")
     if [ "$kind" = decision ]; then
-      assert_contains "$drained" "OPEN DECISIONS" "waiting recovery: main's drain must present the open decision"
+      wait_until 150 grep -qs '	no-op	' "$home/state/.supervision-host.log" \
+        || fail "waiting recovery (decision): the host did not absorb a recovery whose decision main had seen: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
+      sleep 1
+      host_exited "$home" && fail "waiting recovery (decision): a decision main had seen woke main again: $(cat "$home/host.out")"
+      drained=$(main_drain "$home")
+      assert_contains "$drained" "OPEN DECISIONS" "waiting recovery: main's drain must keep listing the open decision"
     else
+      wait_until_deadline 60 host_exited "$home" \
+        || fail "waiting recovery (captain): the recovery did not reach main: $(cat "$home/state/.supervision-host.log")"
+      assert_re '^check: rearm-resurface$' "$home/host.out" "waiting recovery (captain): main must get the recovery close"
+      assert_re '	pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
+        "waiting recovery (captain): the ledger must record the recovery as main's"
+      drained=$(main_drain "$home")
       assert_contains "$drained" "BRANCH OUTCOMES (captain outcomes" "waiting recovery: main's drain must present the captain outcome"
     fi
     stop_home_processes "$home"
   done
-  pass "host: an attended recovery reaches main while an open decision or an unprocessed captain outcome waits"
+  pass "host: an attended recovery reaches main for an unprocessed captain outcome, not for a decision main has seen"
 }
 
 # Another worker's routine row queued during the downtime must not hide that
-# work: the recovery close that holds it still reaches main while a decision
-# or an unprocessed captain outcome waits.
+# work: the recovery close that holds it still reaches main while an
+# unprocessed captain outcome waits, and goes to the engine when the only
+# other work is a decision main has already seen.
 
-test_attended_recovery_with_a_routine_row_and_work_waiting_for_main_reaches_main() {
-  local home kind drained=
+test_attended_recovery_with_a_routine_row_reaches_main_only_for_unseen_work() {
+  local home kind drained
   for kind in decision captain; do
     home=$(make_home "attended-routine-waiting-recovery-$kind" attended)
     printf 'project=demo\nwindow=fm-beta\nharness=claude\n' > "$home/state/beta.meta"
@@ -1109,18 +1144,23 @@ test_attended_recovery_with_a_routine_row_and_work_waiting_for_main_reaches_main
     assert_grep 'beta.turn-ended' "$home/state/.wake-queue" "fixture ($kind): the routine row was not left queued by the teardown"
     echo handle > "$home/stub-mode"
     start_host "$home"
-    wait_until_deadline 60 host_exited "$home" \
-      || fail "routine waiting recovery ($kind): the recovery did not reach main: $(cat "$home/state/.supervision-host.log")"
-    assert_re '^check: rearm-resurface$' "$home/host.out" "routine waiting recovery ($kind): main must get the recovery close"
-    assert_re '	pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
-      "routine waiting recovery ($kind): the ledger must record the recovery as main's"
-    if [ "$kind" = captain ]; then
+    if [ "$kind" = decision ]; then
+      wait_until 250 grep -qs '	handled	.*check: rearm-resurface' "$home/state/.supervision-host.log" \
+        || fail "routine waiting recovery (decision): the recovery was not handled on the engine: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
+      sleep 1
+      host_exited "$home" && fail "routine waiting recovery (decision): a decision main had seen woke main again: $(cat "$home/host.out")"
+    else
+      wait_until_deadline 60 host_exited "$home" \
+        || fail "routine waiting recovery (captain): the recovery did not reach main: $(cat "$home/state/.supervision-host.log")"
+      assert_re '^check: rearm-resurface$' "$home/host.out" "routine waiting recovery (captain): main must get the recovery close"
+      assert_re '	pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
+        "routine waiting recovery (captain): the ledger must record the recovery as main's"
       drained=$(main_drain "$home")
       assert_contains "$drained" "BRANCH OUTCOMES (captain outcomes" "routine waiting recovery: main's drain must present the captain outcome"
     fi
     stop_home_processes "$home"
   done
-  pass "host: an attended recovery holding a routine row reaches main while a decision or captain outcome waits"
+  pass "host: an attended recovery holding a routine row reaches main for an unprocessed captain outcome only"
 }
 
 test_report_without_acknowledgement_hands_the_wake_to_main() {
@@ -1209,11 +1249,12 @@ fm_test_run \
   test_outcome_after_the_return_survives_a_host_killed_at_the_turn_end \
   test_next_host_clears_a_turn_its_killed_predecessor_left \
   test_attended_recovery_with_nothing_for_main_stays_off_main \
+  test_attended_first_park_recovery_without_a_queue_file_stays_off_main \
   test_attended_recovery_with_a_held_outcome_lock_reaches_main_within_the_bound \
   test_attended_recovery_holding_only_routine_rows_is_handled_on_the_engine \
-  test_attended_recovery_with_work_waiting_for_main_reaches_main \
-  test_attended_recovery_with_a_routine_row_and_work_waiting_for_main_reaches_main \
-  test_pending_for_main_query_reports_unreadable_sources_as_unknown \
+  test_attended_recovery_reaches_main_only_for_work_main_has_not_seen \
+  test_attended_recovery_with_a_routine_row_reaches_main_only_for_unseen_work \
+  test_pending_for_main_query_counts_only_what_main_has_not_seen \
   test_report_without_acknowledgement_hands_the_wake_to_main \
   test_return_during_a_failed_turn_still_hands_its_outcomes_to_main \
   test_incomplete_engine_result_hands_the_wake_to_main

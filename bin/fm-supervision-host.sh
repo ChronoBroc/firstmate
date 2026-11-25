@@ -53,8 +53,8 @@
 #     that is unsafe or holds nothing for the branch) stay main's. The one
 #     check close the offer judges by its rows is the watcher's downtime
 #     recovery (`check: rearm-resurface`), which the host also keeps only
-#     while bin/fm-wake-drain.sh --pending-for-main finds nothing waiting for
-#     main within a fixed 5-second bound; an empty one it retires after
+#     while bin/fm-wake-drain.sh --pending-for-main finds nothing main has not
+#     yet seen within a fixed 5-second bound; an empty one it retires after
 #     parking. That
 #     pass-through starts the successor watcher cycle and leaves it running
 #     before the close is printed, so supervision continues when the session
@@ -1242,8 +1242,8 @@ attended_acceptor() {  # <first-reason-line>
 RECOVERY_REASON='check: rearm-resurface'
 
 # A recovery close stays off main only while main's drain owner says, within
-# PENDING_TIMEOUT seconds, that nothing beyond the queued rows waits for main;
-# any other answer, the bound included, leaves it main's.
+# PENDING_TIMEOUT seconds, that nothing main has not yet seen waits beyond the
+# queued rows; any other answer, the bound included, leaves it main's.
 main_has_nothing_pending() {
   local rc=0
   fm_run_timed "$PENDING_TIMEOUT" "$SCRIPT_DIR/fm-wake-drain.sh" --pending-for-main >/dev/null 2>&1 || rc=$?
