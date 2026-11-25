@@ -18,6 +18,12 @@ set -u
 # shellcheck source=tests/supervision-host-helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/supervision-host-helpers.sh"
 
+# The absorbed recovery episode is retired: the marker the host acknowledges
+# after parking reads acked.
+recovery_retired() {  # <home>
+  case "$(cat "$1/state/.watcher-down" 2>/dev/null)" in acked:*) return 0 ;; *) return 1 ;; esac
+}
+
 # Claude ends the async Stop hook that runs a parked host whenever main starts
 # a turn, so the next Stop's host finds watcher downtime and its first cycle
 # closes with the generic `check: rearm-resurface`. With nothing queued and
@@ -39,16 +45,13 @@ test_attended_recovery_with_nothing_for_main_stays_off_main() {
     start_host "$home"
     wait_until 150 grep -qs '	no-op	' "$home/state/.supervision-host.log" \
       || fail "empty recovery ($sig): the next host did not absorb its recovery close: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
-    sleep 1
+    wait_until_deadline 30 recovery_retired "$home" \
+      || fail "empty recovery ($sig): the absorbed recovery episode was left open: $(cat "$home/state/.watcher-down" 2>/dev/null)"
     host_exited "$home" && fail "empty recovery ($sig): an empty recovery woke main: $(cat "$home/host.out")"
     assert_no_re 'pass-through	attended	main-only	check: rearm-resurface' "$home/state/.supervision-host.log" \
       "empty recovery ($sig): the recovery close must not reach main"
     [ "$(engine_calls "$home")" -eq 1 ] || fail "empty recovery ($sig): an empty recovery ran an engine turn"
     watcher_live "$home" || fail "empty recovery ($sig): the host is not parked on a live watcher"
-    case "$(cat "$home/state/.watcher-down" 2>/dev/null)" in
-      acked:*) ;;
-      *) fail "empty recovery ($sig): the absorbed recovery episode was left open: $(cat "$home/state/.watcher-down" 2>/dev/null)" ;;
-    esac
     drained=$(main_drain "$home") || fail "main's drain failed: $drained"
     assert_not_contains "$drained" "WAKE_ACK_REQUIRED" "empty recovery ($sig): main's next drain must owe no acknowledgement"
     stop_home_processes "$home"
@@ -70,7 +73,8 @@ test_attended_first_park_recovery_without_a_queue_file_stays_off_main() {
   start_host "$home"
   wait_until 150 grep -qs '	no-op	' "$home/state/.supervision-host.log" \
     || fail "first park: the next host did not absorb its recovery close: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
-  sleep 1
+  wait_until_deadline 30 recovery_retired "$home" \
+    || fail "first park: the absorbed recovery episode was left open: $(cat "$home/state/.watcher-down" 2>/dev/null)"
   host_exited "$home" && fail "first park: a recovery with no queue file woke main: $(cat "$home/host.out")"
   [ "$(engine_calls "$home")" -eq 0 ] || fail "first park: an empty recovery ran an engine turn"
   watcher_live "$home" || fail "first park: the host is not parked on a live watcher"
@@ -304,8 +308,10 @@ test_attended_recovery_reaches_main_only_for_work_main_has_not_seen() {
     if [ "$kind" = decision ]; then
       wait_until 150 grep -qs '	no-op	' "$home/state/.supervision-host.log" \
         || fail "waiting recovery (decision): the host did not absorb a recovery whose decision main had seen: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
-      sleep 1
+      wait_until_deadline 30 recovery_retired "$home" \
+        || fail "waiting recovery (decision): the absorbed recovery episode was left open: $(cat "$home/state/.watcher-down" 2>/dev/null)"
       host_exited "$home" && fail "waiting recovery (decision): a decision main had seen woke main again: $(cat "$home/host.out")"
+      watcher_live "$home" || fail "waiting recovery (decision): the host is not parked on a live watcher"
       drained=$(main_drain "$home") || fail "main's drain failed: $drained"
       assert_contains "$drained" "OPEN DECISIONS" "waiting recovery: main's drain must keep listing the open decision"
     else
