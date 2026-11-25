@@ -968,6 +968,20 @@ test_land_requires_opt_in_but_always_cleans_parked() {
   pass "merge-time cleanup requires opt-in for unparked lanes and always cleans parked lanes"
 }
 
+test_auto_land_skips_adopted_pr_records() {
+  local w out
+  w=$(make_world land-adopted "$GH_URL")
+  fm_write_meta "$w/state/lane.meta" "kind=adopted-pr" "project=$w/project" "pr=$GH_URL"
+  : > "$w/config/auto-land"
+  out=$(run_park "$w" land lane --if-eligible --queue 2>&1)
+  [ -z "$out" ] && [ ! -e "$w/state/lane.review-park-land" ] \
+    || fail "auto-land: queued cleanup of an adopted PR record: $out"
+  out=$(run_park "$w" land lane --if-eligible 2>&1)
+  [ -z "$out" ] && [ ! -e "$w/teardown.log" ] || fail "auto-land: tore down an adopted PR record: $out"
+  [ -f "$w/state/lane.meta" ] || fail "auto-land: adopted PR record was removed"
+  pass "config/auto-land never queues or starts cleanup of a non-ship adopted PR record"
+}
+
 test_land_queue_fails_when_cleanup_request_cannot_be_written() {
   local w out rc=0
   w=$(make_world land-queue-write-fail "$GH_URL")
@@ -1227,6 +1241,7 @@ fm_test_run \
   test_closed_pr_is_reported_once \
   test_tick_parks_clean_idle_lanes_only_when_opted_in \
   test_land_requires_opt_in_but_always_cleans_parked \
+  test_auto_land_skips_adopted_pr_records \
   test_land_queue_fails_when_cleanup_request_cannot_be_written \
   test_land_report_keeps_lost_pool_slot_details \
   test_detached_land_returns_at_once_and_the_tick_reports_it \

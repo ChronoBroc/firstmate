@@ -688,6 +688,9 @@ cmd_resume() {
 
 # Parked lanes always clean up; other lanes require explicit home opt-in.
 land_eligible() {  # <id>
+  local kind
+  kind=$(fm_meta_get "$STATE/$1.meta" kind)
+  [ "${kind:-ship}" = ship ] || return 1
   [ -e "$(record_path "$1")" ] || [ -e "$CONFIG/auto-land" ]
 }
 
@@ -801,7 +804,9 @@ watch_parked() {  # <id>
 watch_unparked() {  # <id>
   local id=$1 meta pr snap state result
   meta="$STATE/$id.meta"
-  [ "$(fm_meta_get "$meta" kind)" != secondmate ] || return 0
+  local kind
+  kind=$(fm_meta_get "$meta" kind)
+  [ "${kind:-ship}" = ship ] || return 0
   pr=$(fm_meta_get "$meta" pr)
   [ -n "$pr" ] && [ -f "$STATE/$id.check.sh" ] || return 0
   [ ! -e "$(record_path "$id")" ] || return 0
