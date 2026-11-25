@@ -66,7 +66,9 @@ record_hygiene_report() {
     id=${id%.meta}
     [ "$(fm_meta_get "$file" kind)" = secondmate ] && continue
     [ -n "$(fm_meta_get "$file" remote_host)" ] && continue
-    if [ -z "$(fm_meta_get "$file" window)" ]; then
+    # shellcheck source=bin/fm-pr-lib.sh
+    command -v fm_pr_adopted_record >/dev/null 2>&1 || . "$SCRIPT_DIR/fm-pr-lib.sh"
+    if [ -z "$(fm_meta_get "$file" window)" ] && ! fm_pr_adopted_record "$file"; then
       echo "RECORD_HYGIENE: metadata has no tab: $id"
     fi
     pr=$(sed -n 's/^pr=//p' "$file" | head -1)

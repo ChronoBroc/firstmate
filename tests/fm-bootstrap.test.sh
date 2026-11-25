@@ -291,6 +291,7 @@ SH
   printf '%s\n' 'pr=https://example.test/pull/99' > "$case_dir/home/state/middle.meta"
   printf '%s\n' 'pr=https://example.test/pull/42' > "$case_dir/home/state/second.meta"
   printf 'kind=ship\nbackend=tmux\n' > "$case_dir/home/state/no-window.meta"
+  printf 'kind=adopted-pr\nproject=/tmp/adopted\npr=https://example.test/pull/42\n' > "$case_dir/home/state/zadopted.meta"
   printf 'backend=tmux\nwindow=outside:window\npr=https://example.test/pull/42\n' > "$case_dir/outside.meta"
   ln -s "$case_dir/outside.meta" "$case_dir/home/state/linked.meta"
   printf '%s\n' "$fakebin"
@@ -316,6 +317,10 @@ test_record_hygiene_archives_old_orphan_status() {
   assert_contains "$out" 'RECORD_HYGIENE: duplicate PR https://example.test/pull/42 in records: first, second' \
     "bootstrap did not report duplicate PR references"
   assert_not_contains "$out" 'linked' "bootstrap read symlinked metadata"
+  assert_not_contains "$out" 'RECORD_HYGIENE: metadata has no tab: zadopted' \
+    "bootstrap reported a worker-less adopted PR record as missing its tab"
+  assert_contains "$out" 'RECORD_HYGIENE: duplicate PR https://example.test/pull/42 in records: first, zadopted' \
+    "bootstrap dropped duplicate PR detection for an adopted PR record"
   [ -f "$case_dir/home/data/orphan/status.log" ] || fail "bootstrap did not archive the orphan status log"
   [ ! -e "$case_dir/home/state/orphan.status" ] || fail "archived orphan status log remained in state"
   [ ! -e "$case_dir/home/state/.meta-orphan.lock" ] && [ ! -L "$case_dir/home/state/.meta-orphan.lock" ] \
