@@ -194,7 +194,7 @@ stop_home_processes() {  # <home>
   local home=$1 pid i started
   stop_home_supervision "$home"
   while IFS= read -r pid; do
-    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || continue
+    { [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; } || continue
     [ "$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')" = "$$" ] || continue
     if [ -e "$home/session.stop" ]; then
       # End the session's running Stop hook as Claude does when the session
