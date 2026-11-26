@@ -347,6 +347,7 @@ try:
     print("single owner, no autoarm firing", "rc=" + str(sole_owner.returncode), "stdout=" + repr(sole_owner.stdout), "stderr=" + repr(sole_owner.stderr), flush=True)
     require("single_owner_guard_rc=2" in sole_owner.stdout, "a sole owner without supervision must retain the guard")
     stop(owner)
+    beat_before = beat.stat().st_mtime
     replacement = start(
         env,
         '{ printf \'%s\\n\' \'{"session_id":"replacement","stop_hook_active":true}\' | "$FM_ROOT_OVERRIDE/bin/fm-claude-stop-autoarm.sh"; printf "replacement_rc=%s\\n" "$?"; } & '
@@ -361,6 +362,25 @@ try:
         message=lambda: "replacement owner did not publish state/.watch.lock/pid: " + (OUT / "replacement.txt").read_text(),
     )
     watcher_pid = (root / "state/.watch.lock/pid").read_text().strip()
+
+    def replacement_watcher_healthy():
+        try:
+            os.kill(int(watcher_pid), 0)
+            recorded = (root / "state/.watch.lock/pid-identity").read_text().strip()
+        except (OSError, ValueError):
+            return False
+        current = subprocess.run(
+            ["bash", "-c", '. "$1"; fm_pid_identity "$2"', "_", str(REPO / "bin/fm-wake-lib.sh"), watcher_pid],
+            env=env,
+            text=True,
+            capture_output=True,
+        ).stdout.strip()
+        return bool(recorded) and current == recorded and beat.stat().st_mtime > beat_before
+
+    until(
+        replacement_watcher_healthy,
+        message=lambda: "replacement watcher " + watcher_pid + " never became live, identity-matched, and beating: " + (OUT / "replacement.txt").read_text(),
+    )
     print("COUNTERFACTUAL dead original owner: watcher=", watcher_pid, flush=True)
     (root / "state/replacement-guard-go").touch()
     replacement_out = OUT / "replacement.txt"
