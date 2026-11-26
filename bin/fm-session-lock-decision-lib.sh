@@ -10,11 +10,17 @@
 # symlinked, unreadable, or empty sidecar, or one whose first line contains a
 # newline or carriage return, is simply no recorded id.
 fm_session_lock_recorded_session_id() {  # <state>
-  local state=$1 recorded
-  [ -f "$state/.lock-session" ] && [ ! -L "$state/.lock-session" ] || return 1
-  recorded=$(head -n 1 "$state/.lock-session" 2>/dev/null) || return 1
+  local text
+  text=$(_fm_session_lock_sidecar_text "$1") || return 1
+  _fm_session_lock_session_id_in "$text"
+}
+
+# Print the session id on line 1 of sidecar text $1, or return 1.
+_fm_session_lock_session_id_in() {  # <sidecar-text>
+  local recorded
+  recorded=$(printf '%s\n' "$1" | sed -n '1p')
   [ -n "$recorded" ] || return 1
-  case "$recorded" in *$'\n'*|*$'\r'*) return 1 ;; esac
+  case "$recorded" in *$'\r'*) return 1 ;; esac
   printf '%s\n' "$recorded"
 }
 

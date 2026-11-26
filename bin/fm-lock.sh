@@ -204,13 +204,14 @@ remember_lock_session() {
 # walk lists it tagged (fm_session_lock_recorded_anchor), and a third line
 # `anchor-start=<start>` its process start time (fm_pid_start_time) when that is
 # readable (fm_session_lock_recorded_anchor_start); when it is not, a start
-# time already recorded beside this same anchor is kept, across a re-key too. Called only
-# while the claim lock is held. A sidecar that already has exactly this content
+# time already recorded beside this same anchor is kept, across a re-key too.
+# An existing sidecar is read once, and a failed read fails the publication and
+# leaves it as it was. Called only while the claim lock is held. A sidecar that already has exactly this content
 # is left untouched, so a same-session confirmation keeps it byte-identical; one
 # rewritten under the same recorded id keeps its modification time, which marks
 # when that session id was recorded, or the rewrite fails.
 publish_lock_session() {
-  local pids trusted='' rc anchor current content start recorded tmp
+  local pids trusted='' rc anchor existing='' content start recorded tmp
   if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ -n "${CLAUDE_PID:-}" ] && [ -z "${CLAUDE_PID//[0-9]/}" ]; then
     pids=$(fm_harness_ancestry_pids) || return 1
     rc=0
@@ -227,27 +228,27 @@ publish_lock_session() {
     anchor=$CLAUDE_PID
     fm_harness_pid_listed "$anchor" "$pids" || anchor="$FM_WIN_PID_PREFIX$CLAUDE_PID"
     content="$trusted"$'\n'"anchor=$anchor"
+    if [ -f "$LOCK_SESSION" ] && [ ! -L "$LOCK_SESSION" ]; then
+      existing=$(_fm_session_lock_sidecar_text "$STATE") || return 1
+    fi
     if ! { start=$(fm_pid_start_time "$anchor" 2>/dev/null) && [ -n "$start" ]; }; then
       start=
-      if [ "$(fm_session_lock_recorded_anchor "$STATE" 2>/dev/null)" = "$anchor" ]; then
-        start=$(fm_session_lock_recorded_anchor_start "$STATE" 2>/dev/null) || start=
+      if [ "$(_fm_session_lock_anchor_in "$existing")" = "$anchor" ]; then
+        start=$(_fm_session_lock_anchor_start_in "$existing") || start=
       fi
     fi
     case "$start" in
       ''|*$'\n'*|*$'\r'*) ;;
       *) content="$content"$'\n'"anchor-start=$start" ;;
     esac
-    if [ -f "$LOCK_SESSION" ] && [ ! -L "$LOCK_SESSION" ] \
-      && current=$(cat "$LOCK_SESSION" 2>/dev/null) && [ "$current" = "$content" ]; then
-      return 0
-    fi
+    [ "$existing" != "$content" ] || return 0
     remember_lock_session || return 1
     tmp=$(mktemp "$STATE/.lock-session.XXXXXX" 2>/dev/null) || return 1
     if ! printf '%s\n' "$content" > "$tmp" 2>/dev/null; then
       rm -f "$tmp" 2>/dev/null
       return 1
     fi
-    if recorded=$(fm_session_lock_recorded_session_id "$STATE") && [ "$recorded" = "$trusted" ]; then
+    if recorded=$(_fm_session_lock_session_id_in "$existing") && [ "$recorded" = "$trusted" ]; then
       if ! touch -r "$LOCK_SESSION" "$tmp" 2>/dev/null; then
         rm -f "$tmp" 2>/dev/null
         return 1

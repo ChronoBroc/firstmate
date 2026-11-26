@@ -105,11 +105,7 @@ The hook handles the session lock as follows:
 - An absent lock keeps the competing hook inert: with no recorded owner there is nothing stale to recover.
 - A malformed, empty, or otherwise unusable record is not an identity, so it never reaches that verdict: the competing hook stays inert, and a later `bin/fm-lock.sh` acquisition replaces the record.
 
-Whether the session owns that lock is the shared `fm_session_lock_owned_by_self` verdict in `bin/fm-session-lock-lib.sh`.
-That verdict accepts either of two cases:
-
-- A recorded pid inside the current harness ancestry.
-- A live lock recorded under this same trusted Claude session id.
+Whether the session owns that lock is the shared `fm_session_lock_owned_by_self` verdict in `bin/fm-session-lock-lib.sh`, one ordered rule that [`turnend-guard.md`](turnend-guard.md#foreign-session-lock-owner) states in full: a recorded model-loop anchor still running outside the current harness ancestry refuses ownership first, and only then does a recorded pid inside that ancestry, or a live lock recorded under this same trusted Claude session id whose recorded anchor is in that ancestry, grant it.
 
 With that verdict, a background session keeps arming after its transient helper chain is recycled.
 [`turnend-guard.md`](turnend-guard.md#guard-predicates) owns the Claude guard's behavior when that live owner is genuinely another session.

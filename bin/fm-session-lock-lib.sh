@@ -12,7 +12,9 @@
 # of that ancestry owns, or the trusted Claude session id below matching the
 # id recorded beside a live lock whose live recorded anchor is in that
 # ancestry. No signal ever fails open: no id, no sidecar, an untrusted id, or a
-# different recorded id leaves the ancestry verdict exactly as it was.
+# different recorded id grants no ownership beyond the ancestry verdict, and a
+# live recorded anchor outside the ancestry still refuses whatever id it was
+# recorded under (docs/turnend-guard.md "Foreign session-lock owner").
 # A second decision is owned here too: fm_session_lock_pid_blocks_reclaim
 # answers whether a recorded owner may be reclaimed, so recovery callers
 # delegate that question instead of re-deriving liveness from the fields.

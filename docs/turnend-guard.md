@@ -120,7 +120,7 @@ The exception has these limits:
 
 - Malformed or absent lock records, and a dead line 1 whose recorded anchor is not a holder that may still be running, do not satisfy this Claude-specific exception and retain the ordinary guard behavior.
 - The exception is decided before the guard reads or writes anything else, so a refused session never touches the owner's continuation budget, failure records, or watcher state on any path, and when the holder cannot be verified - an unreadable sidecar, an unreadable ancestry, or a legacy shared front-end - its diagnostic says why. The same holds for an unreadable lock, a lock that is a symlink or not a regular file, a line 1 whose identity cannot be read, and an ancestry walk that stopped on a failed read: each is refused, and the diagnostic names only what the probes established rather than a definite live owner.
-- A missing or mismatched sidecar or an untrusted id adds nothing to the verdict, so a live owner outside the ancestry still takes this exit exactly as before.
+- A missing or mismatched sidecar or an untrusted id grants no ownership, so a live owner outside the ancestry still takes this exit exactly as before; a recorded model-loop anchor in any sidecar still applies the live-holder rule above, so a hook whose ancestry contains line 1 is refused while that anchor runs outside it.
 
 ### Pull-warning verdict by supervision model
 
