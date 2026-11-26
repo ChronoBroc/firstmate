@@ -3474,17 +3474,25 @@ test_herdr_rebind_failure_from_a_plain_shell_names_the_real_cause() {
 }
 
 test_herdr_reclaim_of_a_secondmate_names_its_own_owner() {
-  local dir out rc
+  local dir out rc agent agent_pid=
   herdr_case_or_skip gone-herdr-secondmate rl76 fmlab '%none' || {
     echo "skip - herdr reclaim needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
   dir=$HERDR_CASE_DIR
   printf '%s\n' "kind=secondmate" "home=$dir/wt" >> "$dir/home/state/rl76.meta"
+  if agent=$(agent_standin_named "$dir" claude); then
+    start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+    wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the secondmate home"
+  fi
 
   out=$(run_spawn "$dir" rl76 --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "a secondmate reclaim belongs to the secondmate respawn path"
   assert_contains "$out" "--secondmate" "the refusal should name the path that owns this recovery"
+  if [ -n "$agent_pid" ]; then
+    assert_contains "$out" "pid $agent_pid (claude)" "the refusal must also name the agent still working in the home"
+    stop_dir_process "$agent_pid"
+  fi
   assert_not_contains "$(cat "$dir/fake/herdr-log")" "tab create" \
     "the refusal must happen before any endpoint is created"
   pass "reclaim: a herdr secondmate whose endpoint is gone is sent to its own respawn owner"
@@ -3943,6 +3951,58 @@ test_worktree_agent_probe_finds_only_agents_working_there() {
   pass "worktree agent probe: finds the agent working in the directory and nothing else"
 }
 
+test_worktree_agent_probe_names_an_agent_beside_an_unreadable_process() {
+  local dir agent out rc agent_pid other_pid ngrok_pid real_python
+  if [ -e /proc/self/cwd ]; then
+    pass "worktree agent probe beside an unreadable process: skipped - this host reads argv from /proc"
+    return 0
+  fi
+  dir="$TMP_ROOT/probe-unreadable-$RANDOM"
+  mkdir -p "$dir/wt" "$dir/fakebin"
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "worktree agent probe beside an unreadable process: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  real_python=$(command -v python3) || { pass "worktree agent probe beside an unreadable process: skipped - no python3"; return 0; }
+  start_dir_process "$dir/wt" /bin/sleep 600; other_pid=$STARTED_PID
+  # The argv provider fails for that one process, as a protected process does.
+  printf '#!/bin/sh\n[ "$3" = "%s" ] && exit 1\nexec "%s" "$@"\n' "$other_pid" "$real_python" > "$dir/fakebin/python3"
+  chmod +x "$dir/fakebin/python3"
+  rc=0; out=$(PATH="$dir/fakebin:$PATH" fm_agent_process_live_in_dir "$dir/wt") || rc=$?
+  expect_code 2 "$rc" "an unreadable process alone leaves the probe undecided"$'\n'"$out"
+  assert_contains "$out" "$other_pid" "the undecided answer should name the unreadable process"
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  rc=0; out=$(PATH="$dir/fakebin:$PATH" fm_agent_process_live_in_dir "$dir/wt") || rc=$?
+  expect_code 0 "$rc" "a verified agent proves presence even beside an unreadable process"$'\n'"$out"
+  [ "$(printf '%s\n' "$out" | cut -f1)" = "$agent_pid" ] || fail "the probe must name the verified agent ($agent_pid), got: $out"
+  stop_dir_process "$agent_pid"
+  stop_dir_process "$other_pid"
+  # ngrok is not grok: its name only contains the harness's.
+  ln -sf "$dir/standin/standin" "$dir/agentbin/ngrok"
+  start_dir_process "$dir/wt" "$dir/agentbin/ngrok" http 8080; ngrok_pid=$STARTED_PID
+  sleep 0.3
+  rc=0; out=$(fm_agent_process_live_in_dir "$dir/wt") || rc=$?
+  expect_code 1 "$rc" "an ngrok tunnel left in the worktree is not a live agent"$'\n'"$out"
+  stop_dir_process "$ngrok_pid"
+  pass "worktree agent probe: names a verified agent beside an unreadable process, and never counts ngrok"
+}
+
+test_relaunch_refuses_a_brief_backup_it_cannot_take() {
+  local dir out rc
+  dir=$(new_case unusablebackup rl97)
+  add_ship_task "$dir" rl97 claude
+  cp -p "$dir/home/data/rl97/brief.md" "$dir/brief.orig"
+  mkdir -p "$dir/home/state/rl97.control-relaunch.brief-prior"
+  out=$(run_control "$dir" rl97 relaunch --note "the backup path is a directory"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch whose instructions cannot be preserved must refuse"$'\n'"$out"
+  assert_contains "$out" "could not preserve task rl97's instructions" "the refusal should say the instructions could not be preserved"
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl97/brief.md" \
+    || fail "instructions that could not be preserved must never receive the progress note"
+  ! grep -Fqx /exit "$dir/fake/literal" || fail "the agent must not be stopped"
+  pass "fm-control relaunch: a brief backup that cannot be taken refuses before the note is appended"
+}
+
 test_relaunch_refuses_an_agent_still_working_in_the_worktree() {
   local dir agent out rc agent_pid
   dir=$(new_case beside rl90)
@@ -4164,8 +4224,11 @@ test_secondmate_respawn_refuses_an_agent_still_working_in_its_home() {
   ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no second secondmate may be launched"
   stop_dir_process "$agent_pid"
   wait_probe_rc "$dir/smhome" 1 || fail "the stand-in agent should be gone"
+  : > "$dir/fake/literal"
+  : > "$dir/fake/windows"
   out=$(run_spawn "$dir" sm90 "$dir/smhome" --secondmate claude); rc=$?
-  assert_not_contains "$out" "refusing to start an agent" "an empty home must not be refused by the probe"
+  expect_code 0 "$rc" "once its agent has exited, the secondmate respawn must succeed"$'\n'"$out"
+  assert_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "the respawn should deliver the replacement launch"
   pass "fm-spawn --secondmate: refuses and names the pid of an agent still working in the home"
 }
 test_relaunch_off_opencode_removes_tracked_wiring
@@ -4282,6 +4345,8 @@ test_away_direct_spawn_relaunch_of_a_dead_worker_at_a_full_cap_defers
 test_away_relaunch_defers_while_another_launch_takes_the_last_slot
 test_away_direct_spawn_relaunch_defers_while_another_launch_takes_the_last_slot
 test_worktree_agent_probe_finds_only_agents_working_there
+test_worktree_agent_probe_names_an_agent_beside_an_unreadable_process
+test_relaunch_refuses_a_brief_backup_it_cannot_take
 test_relaunch_refuses_an_agent_still_working_in_the_worktree
 test_relaunch_waits_for_a_stopping_agent_to_finish_exiting
 test_relaunch_waits_only_for_the_agent_it_stopped

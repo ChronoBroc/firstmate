@@ -11,28 +11,32 @@
 #     `ps -o args=` reports `bun <path>/omp` (verified on macOS).
 # Match the exact compiled name, or bun whose argv0 is bun and whose very next
 # argument is a script named exactly `omp`.
-# ps prints argv space-joined, so a script path containing spaces is rebuilt by
-# extending that word until it names an existing file; with no such file the
-# word alone is judged.
+# A flattened command line is first turned back into an argument vector by
+# fm_process_argv_from_args below.
 # Anchored throughout, so ompd, comp, and similar names are never this harness.
 fm_omp_process_matches() {  # <comm> <args>
-  local comm=${1:-} args=${2:-} i n script
-  local words=()
-  case "${comm##*/}" in
-    omp) return 0 ;;
-    bun) ;;
-    *) return 1 ;;
-  esac
-  read -r -a words <<< "$args"
-  n=${#words[@]}
-  [ "$n" -ge 2 ] && [ "${words[0]##*/}" = bun ] || return 1
-  script=${words[1]}
+  fm_process_argv_from_args "${2:-}"
+  fm_omp_argv_matches "${1:-}" ${FM_PROCESS_ARGV[@]+"${FM_PROCESS_ARGV[@]}"}
+}
+
+# fm_process_argv_from_args <args>: FM_PROCESS_ARGV rebuilt from a ps-style
+# space-joined command line. ps cannot represent argument boundaries, so a
+# script argument containing spaces is rebuilt by extending argv[1] word by
+# word until it names an existing file; with no such file argv[1] is the word
+# alone, and every later word stays its own argument.
+fm_process_argv_from_args() {  # <args>
+  local i n script
+  FM_PROCESS_ARGV=()
+  read -r -a FM_PROCESS_ARGV <<< "${1:-}"
+  n=${#FM_PROCESS_ARGV[@]}
+  [ "$n" -ge 3 ] || return 0
+  script=${FM_PROCESS_ARGV[1]}
   for ((i = 2; i < n; i++)); do
     [ -f "$script" ] && break
-    script+=" ${words[i]}"
+    script+=" ${FM_PROCESS_ARGV[i]}"
   done
-  [ -f "$script" ] || script=${words[1]}
-  fm_omp_argv_matches "$comm" "${words[0]}" "$script"
+  [ -f "$script" ] || return 0
+  FM_PROCESS_ARGV=("${FM_PROCESS_ARGV[0]}" "$script" ${FM_PROCESS_ARGV[@]+"${FM_PROCESS_ARGV[@]:i}"})
 }
 
 # fm_omp_argv_matches <comm> <argv...>: the same rule over an argument vector

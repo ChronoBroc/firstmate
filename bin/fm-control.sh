@@ -489,22 +489,33 @@ wait_agent_state() {  # <timeout> <wanted>...
 }
 
 # endpoint_agent_pids: the agent processes working in the task's worktree
-# that belong to its recorded endpoint - the endpoint's own process (the tmux
-# pane process, the Herdr pane shell, the Rex block's foreground process) or
-# one of its descendants - one pid per line; nothing where the endpoint's
-# process cannot be read or the worktree probe finds none.
+# that belong to its recorded endpoint, one pid per line: a descendant of the
+# tmux pane process or the Herdr pane shell (or that process itself), a member
+# of the Rex block's live pid set (fm_backend_rex_live_pids), or the Polytoken
+# session daemon bound to this task's own sessions root, which outlives its
+# pane. Nothing where none of those can be read or the worktree probe finds
+# no agent.
 endpoint_agent_pids() {
-  local root out pid p
-  fm_backend_source "$BACKEND" >/dev/null 2>&1 || return 0
-  case "$BACKEND" in
-    tmux) root=$(fm_backend_tmux_pane_pid "$T") || return 0 ;;
-    herdr) root=$(fm_backend_herdr_pane_shell_pid "$T") || return 0 ;;
-    rex) root=$(fm_backend_rex_foreground_pid "$T") || return 0 ;;
-    *) return 0 ;;
-  esac
-  case "$root" in ''|*[!0-9]*) return 0 ;; esac
+  local root='' exact=' ' out pid p polytoken_bin polytoken_state
+  if fm_backend_source "$BACKEND" >/dev/null 2>&1; then
+    case "$BACKEND" in
+      tmux) root=$(fm_backend_tmux_pane_pid "$T") || root= ;;
+      herdr) root=$(fm_backend_herdr_pane_shell_pid "$T") || root= ;;
+      rex) exact="$exact$(fm_backend_rex_live_pids "$T" 2>/dev/null | jq -r '.[]?' 2>/dev/null | tr '\n' ' ')" ;;
+    esac
+  fi
+  case "$root" in *[!0-9]*) root= ;; esac
+  if [ "$HARNESS" = polytoken ] && polytoken_bin=$(fm_polytoken_binary 2>/dev/null) \
+     && polytoken_state=$(cd "$STATE" 2>/dev/null && pwd -P); then
+    exact="$exact$(fm_polytoken_session_for_project "$polytoken_bin" \
+      "$(fm_polytoken_config_dir "$polytoken_state" "$ID")" \
+      "$(fm_polytoken_sessions_root "$polytoken_state" "$ID")" "$WT" | cut -f4 | tr '\n' ' ')"
+  fi
+  [ -n "$root" ] || [ "$exact" != ' ' ] || return 0
   out=$(fm_agent_process_live_in_dir "$WT") || return 0
   for pid in $(printf '%s\n' "$out" | cut -f1); do
+    case "$exact" in *" $pid "*) printf '%s\n' "$pid"; continue ;; esac
+    [ -n "$root" ] || continue
     p=$pid
     while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null; do
       if [ "$p" = "$root" ]; then
@@ -809,7 +820,7 @@ retire_busy_incarnation() {
 # do_exit: stop the running agent, preserving endpoint and worktree. Prints
 # `already-stopped`, `endpoint-gone`, or `stopped`.
 do_exit() {
-  local state cmd hazard verdict composer_state cancel absence interrupt_result=not-needed dialog
+  local state cmd hazard verdict composer_state cancel absence interrupt_result=not-needed dialog stopping_pids=
   require_state_verified_backend exit
   fm_control_backend_exit_supported "$BACKEND" \
     || die "task $ID runs on the $BACKEND backend, whose T3 Orchestrator V2 tools have no session stop, so 'exit' cannot stop its agent; 'interrupt' ends the running turn and teardown archives the thread"
@@ -857,6 +868,9 @@ do_exit() {
       esac
       ;;
   esac
+  # The endpoint is proven alive here: name what this stop owns before it is
+  # sent, so a relaunch can wait for exactly those processes to exit.
+  [ "$RELAUNCH_ACTIVE" != 1 ] || stopping_pids=$(endpoint_agent_pids) || stopping_pids=
   # A busy agent is interrupted first before the exit command is submitted,
   # unless the caller asked for an idle-only stop, which refuses instead.
   if [ "$ONLY_IF_IDLE" = 1 ]; then
@@ -880,6 +894,8 @@ do_exit() {
       case "$state" in
         dead)
           retire_busy_incarnation
+          # shellcheck disable=SC2086
+          wait_pids_gone "$EXIT_WAIT" $stopping_pids || true
           printf 'stopped'
           return 0
           ;;
@@ -965,6 +981,8 @@ do_exit() {
   # The incarnation is over: retire its busy wiring so no stale record or
   # orphaned generation survives the agent that produced it.
   retire_busy_incarnation
+  # shellcheck disable=SC2086
+  wait_pids_gone "$EXIT_WAIT" $stopping_pids || true
   printf 'stopped'
 }
 
@@ -1033,8 +1051,8 @@ journal_write() {  # <phase> [extra-line]...
 # failure before this transaction's own backup was taken).
 relaunch_restore_brief() {
   RELAUNCH_RESTORE=untouched
-  [ "$RELAUNCH_BRIEF_SAVED" = 1 ] && [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ] || return 0
-  if cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null; then
+  [ "$RELAUNCH_BRIEF_SAVED" = 1 ] && [ -n "$RELAUNCH_BRIEF" ] || return 0
+  if [ -f "$BRIEF_PRIOR" ] && cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null; then
     RELAUNCH_RESTORE=restored
   else
     RELAUNCH_RESTORE=failed
@@ -1350,7 +1368,7 @@ record_note() {
   printf '%s\n' "$NOTE" > "$NOTE_FILE"
   case "$KIND" in
     ship|scout)
-      cp -p "$RELAUNCH_BRIEF" "$BRIEF_PRIOR" \
+      { [ ! -d "$BRIEF_PRIOR" ] && cp -p "$RELAUNCH_BRIEF" "$BRIEF_PRIOR" && [ -f "$BRIEF_PRIOR" ]; } \
         || die "could not preserve task $ID's instructions before recording the progress note"
       RELAUNCH_BRIEF_SAVED=1
       {
@@ -1427,13 +1445,8 @@ do_relaunch() {
   journal_write noted "${CHECKPOINT_LINES[@]}" "$note_line"
 
   journal_write stopping "${CHECKPOINT_LINES[@]}" "$note_line"
-  stopping_pids=$(endpoint_agent_pids) || stopping_pids=
   exit_result=$(do_exit)
   journal_write exited "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
-  if [ "$exit_result" = stopped ]; then
-    # shellcheck disable=SC2086
-    wait_pids_gone "$EXIT_WAIT" $stopping_pids || true
-  fi
 
   # The launch owner (fm-spawn --relaunch) clears the previous incarnation's
   # per-task harness wiring before arming the new one, so nothing to do here.

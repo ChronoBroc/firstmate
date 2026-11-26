@@ -48,7 +48,10 @@ fm_agent_process_classify_name() {  # <path> [argv0] -> agent|shell|other
     # omp (Oh My Pi) is anchored for the same reason as muse: its live process
     # name is the bare word `omp` (verified, omp 18.1.11) and a glob would claim
     # unrelated commands such as ompd or comp.
-    *claude*|*codex*|*opencode*|*grok*|*kimi*|*rovo*|pi|pi-signed|pi-launcher|Pi|omp) printf 'agent' ;;
+    # grok is anchored on its verified identities - process name `grok`, pane
+    # title `grok-<version>-...` (docs/verification/runtime-backends.md) - so
+    # an unrelated command such as ngrok is never this harness.
+    *claude*|*codex*|*opencode*|grok|grok-*|*kimi*|*rovo*|pi|pi-signed|pi-launcher|Pi|omp) printf 'agent' ;;
     # agy (Antigravity CLI) is anchored for the same reason as muse and omp: its
     # live process name is the bare word `agy` (verified, agy 1.2.0: a Go-compiled
     # single binary, comm=agy with argv[0]=agy), and a glob would claim
@@ -101,12 +104,33 @@ fm_agent_process_classify_name() {  # <path> [argv0] -> agent|shell|other
 #            on Linux the exec name, on macOS argv[0] truncated to 16 bytes.
 #   <argv0>  argv[0] as the process reports it - a bare name or an install
 #            path, whichever the launcher used (empty when unknown).
-#   <args>   the flattened command line, read only for the node-bundle
-#            harnesses whose identity sits in argv[1] (bin/fm-gemini-lib.sh).
-#   [pid]    when given, lets the Gemini rule read argv boundaries from the
-#            live process instead of the flattened line.
+#   <args>   the flattened command line, rebuilt into an argument vector
+#            (fm_process_argv_from_args) for the interpreter-hosted harnesses
+#            whose identity sits in their script argument.
+#   [pid]    when given and /proc exposes it, the live process's own argv
+#            replaces the flattened line, keeping its boundaries.
 fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|other
-  local name=${1:-} argv0=${2:-} args=${3:-} pid=${4:-} by_name by_argv0
+  local name=${1:-} argv0=${2:-} args=${3:-} pid=${4:-} word
+  local argv=()
+  if [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ]; then
+    while IFS= read -r -d '' word; do argv+=("$word"); done < "/proc/$pid/cmdline"
+  else
+    fm_process_argv_from_args "$args"
+    argv=(${FM_PROCESS_ARGV[@]+"${FM_PROCESS_ARGV[@]}"})
+  fi
+  _fm_agent_process_verdict "$name" "$argv0" ${argv[@]+"${argv[@]}"}
+}
+
+# _fm_agent_process_verdict <name> <argv0> <argv...>: the one agent|shell|other
+# decision, over the kernel name, argv[0] (empty when unknown), and an
+# argument vector with its boundaries intact for the interpreter-hosted
+# harnesses whose identity sits in their script argument. Every caller reaches
+# it through an input adapter: fm_agent_process_classify for a backend's name,
+# argv[0], and flattened command line, _fm_agent_process_identify for a live
+# pid's kernel argv.
+_fm_agent_process_verdict() {  # <name> <argv0> <argv...> -> agent|shell|other
+  local name=${1:-} argv0=${2:-} by_name by_argv0
+  shift 2
   by_name=$(fm_agent_process_classify_name "$name" "$argv0")
   [ "$by_name" != agent ] || { printf 'agent'; return 0; }
   if [ -n "$argv0" ]; then
@@ -117,23 +141,9 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
   else
     by_argv0=$by_name
   fi
-  if fm_hermes_process_matches "$args" "$pid"; then
+  if fm_hermes_argv_matches "$@" || fm_omp_argv_matches "$name" "$@" || fm_gemini_argv_is_gemini "$@"; then
     printf 'agent'
-    return 0
-  fi
-  if fm_omp_process_matches "$name" "$args"; then
-    printf 'agent'
-    return 0
-  fi
-  if [ -n "$pid" ] && fm_gemini_pid_is_gemini "$pid"; then
-    printf 'agent'
-    return 0
-  fi
-  if [ -n "$args" ] && fm_gemini_args_are_gemini "$args"; then
-    printf 'agent'
-    return 0
-  fi
-  if [ "$by_name" = shell ] && [ "$by_argv0" = shell ]; then
+  elif [ "$by_name" = shell ] && [ "$by_argv0" = shell ]; then
     printf 'shell'
   else
     printf 'other'
@@ -153,15 +163,17 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
 # and inode because lsof escapes bytes in the names it prints.
 #
 # Prints and returns:
-#   0  one `<pid>\t<process name>` line per live agent process found.
+#   0  one `<pid>\t<process name>` line per live agent process found; a
+#      verified agent is reported even when another process could not be read.
 #   1  nothing: no agent process of this user works in <dir>.
-#   2  one line naming why the probe could not decide: <dir> does not
-#      resolve, no working-directory source is usable or it failed, or a
-#      running candidate's identity (name and command line) could not be read.
+#   2  one line naming why the probe could not decide, when no agent was
+#      verified: <dir> does not resolve, no working-directory source is usable
+#      or it failed, or a running candidate's identity (name and argv) could
+#      not be read.
 #      Callers that would start an agent in <dir> must treat this as a
 #      refusal, never as 1.
 fm_agent_process_live_in_dir() {  # <dir>
-  local dir=${1:-} dir_real dir_id uid pid cwd self selves found='' lsof_out lsof_rc p candidates=''
+  local dir=${1:-} dir_real dir_id uid pid cwd self selves found='' undecided='' lsof_out lsof_rc p candidates=''
   dir_real=$(cd "$dir" 2>/dev/null && pwd -P) || {
     printf 'the directory %s does not resolve\n' "${dir:-<empty>}"
     return 2
@@ -187,14 +199,13 @@ fm_agent_process_live_in_dir() {  # <dir>
         Z|X|'') continue ;;
       esac
       case "$selves" in *" $pid "*) continue ;; esac
-      _fm_agent_process_identify "$pid" || {
+      if ! _fm_agent_process_identify "$pid"; then
         kill -0 "$pid" 2>/dev/null || continue
-        printf 'the working directory and identity of running process %s could not be read\n' "$pid"
-        return 2
-      }
+        [ -n "$undecided" ] || undecided="the working directory and identity of running process $pid could not be read"
+        continue
+      fi
       [ "$FM_AGENT_PROCESS_KIND" = agent ] || continue
-      printf 'the working directory of running agent process %s could not be read\n' "$pid"
-      return 2
+      [ -n "$undecided" ] || undecided="the working directory of running agent process $pid could not be read"
     done
   else
     command -v lsof >/dev/null 2>&1 || {
@@ -219,36 +230,23 @@ fm_agent_process_live_in_dir() {  # <dir>
   fi
   for pid in $candidates; do
     case "$selves" in *" $pid "*) continue ;; esac
-    _fm_agent_process_identify "$pid" || {
+    if ! _fm_agent_process_identify "$pid"; then
       kill -0 "$pid" 2>/dev/null || continue
-      printf 'the identity of running process %s working in %s could not be read\n' "$pid" "$dir_real"
-      return 2
-    }
+      [ -n "$undecided" ] || undecided="the identity of running process $pid working in $dir_real could not be read"
+      continue
+    fi
     [ "$FM_AGENT_PROCESS_KIND" = agent ] || continue
     found="$found$pid"$'\t'"${FM_AGENT_PROCESS_NAME##*/}"$'\n'
   done
-  [ -n "$found" ] || return 1
-  printf '%s' "$found"
-  return 0
-}
-
-# fm_agent_process_classify_argv: fm_agent_process_classify for a process
-# whose argument vector is known with its boundaries intact, so no rule ever
-# re-splits a flattened command line.
-fm_agent_process_classify_argv() {  # <name> <argv...> -> agent|shell|other
-  local name=${1:-} by_name by_argv0
-  shift
-  by_name=$(fm_agent_process_classify_name "$name" "${1:-}")
-  [ "$by_name" != agent ] || { printf 'agent'; return 0; }
-  by_argv0=$(fm_agent_process_classify_name "${1:-}" "${1:-}")
-  [ "$by_argv0" != agent ] || { printf 'agent'; return 0; }
-  if fm_hermes_argv_matches "$@" || fm_gemini_argv_is_gemini "$@" || fm_omp_argv_matches "$name" "$@"; then
-    printf 'agent'
-  elif [ "$by_name" = shell ] && [ "$by_argv0" = shell ]; then
-    printf 'shell'
-  else
-    printf 'other'
+  if [ -n "$found" ]; then
+    printf '%s' "$found"
+    return 0
   fi
+  if [ -n "$undecided" ]; then
+    printf '%s\n' "$undecided"
+    return 2
+  fi
+  return 1
 }
 
 # _fm_agent_process_identify <pid>: classify a live process from its kernel
@@ -257,7 +255,7 @@ fm_agent_process_classify_argv() {  # <name> <argv...> -> agent|shell|other
 # (agent|shell|other) and FM_AGENT_PROCESS_NAME; returns 1 when either could
 # not be read.
 _fm_agent_process_identify() {  # <pid>
-  local pid=$1 name word argv_file rc=0
+  local pid=$1 name word
   local argv=()
   FM_AGENT_PROCESS_KIND=
   FM_AGENT_PROCESS_NAME=
@@ -267,14 +265,18 @@ _fm_agent_process_identify() {  # <pid>
   if [ -r "/proc/$pid/cmdline" ]; then
     while IFS= read -r -d '' word; do argv+=("$word"); done < "/proc/$pid/cmdline"
   else
-    argv_file=$(mktemp "${TMPDIR:-/tmp}/fm-agent-argv.XXXXXX") || return 1
-    python3 "$_FM_AGENT_PROCESS_PROCINFO" --argv "$pid" > "$argv_file" 2>/dev/null || rc=$?
-    [ "$rc" -eq 0 ] && while IFS= read -r -d '' word; do argv+=("$word"); done < "$argv_file"
-    rm -f "$argv_file"
+    # The provider's own exit status follows its records as one final record,
+    # so a read cut short can never pass for a complete argv.
+    while IFS= read -r -d '' word; do argv+=("$word"); done < <(
+      python3 "$_FM_AGENT_PROCESS_PROCINFO" --argv "$pid" 2>/dev/null
+      printf '%s\0' "$?"
+    )
+    [ "${#argv[@]}" -gt 0 ] && [ "${argv[${#argv[@]}-1]}" = 0 ] || return 1
+    unset 'argv[${#argv[@]}-1]'
   fi
   [ "${#argv[@]}" -gt 0 ] && [ -n "${argv[0]}" ] || return 1
   FM_AGENT_PROCESS_NAME=$name
-  FM_AGENT_PROCESS_KIND=$(fm_agent_process_classify_argv "$name" "${argv[@]}")
+  FM_AGENT_PROCESS_KIND=$(_fm_agent_process_verdict "$name" "${argv[0]}" "${argv[@]}")
 }
 
 # fm_agent_process_format_live <probe-output>: fm_agent_process_live_in_dir's

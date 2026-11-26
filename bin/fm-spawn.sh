@@ -2297,6 +2297,11 @@ fi
 if [ "$RELAUNCH" -ne 1 ]; then
   fm_lease_forbid_branch "new-task spawn (fm-spawn)" --away-relocated
 fi
+# spawn_relaunch_live_note: fm_agent_process_live_note for the relaunch
+# record's worktree, appended to every relaunch refusal.
+spawn_relaunch_live_note() {
+  fm_agent_process_live_note "$(fm_meta_get "$RELAUNCH_META" worktree)"
+}
 # spawn_refuse_if_live_agent_in <dir> <what>: exit 1 naming the pid when a
 # live agent process works in <dir>; an inconclusive probe also exits 1.
 spawn_refuse_if_live_agent_in() {
@@ -2572,14 +2577,14 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # one into the same endpoint, and only a backend with a recovery-grade
   # classifier can (bin/fm-control-lib.sh owns that capability table).
   fm_control_backend_state_verified "$BACKEND" || {
-    echo "error: backend '$BACKEND' has no recovery-grade agent-state classifier, so a relaunch cannot prove the previous agent exited; refusing rather than risking two agents in one endpoint" >&2
+    echo "error: backend '$BACKEND' has no recovery-grade agent-state classifier, so a relaunch cannot prove the previous agent exited; refusing rather than risking two agents in one endpoint.$(spawn_relaunch_live_note)" >&2
     exit 1
   }
   # The same table refuses a backend that cannot host a REPLACEMENT at all:
   # a T3 thread keeps its conversation, so a turn or a provider change on it
   # continues the same agent instead of launching a new one.
   fm_control_backend_relaunch_supported "$BACKEND" || {
-    echo "error: backend '$BACKEND' cannot launch a replacement agent into an existing endpoint (a T3 thread keeps its conversation, so a turn or a provider change on it continues the same agent); refusing to relaunch $ID" >&2
+    echo "error: backend '$BACKEND' cannot launch a replacement agent into an existing endpoint (a T3 thread keeps its conversation, so a turn or a provider change on it continues the same agent); refusing to relaunch $ID.$(spawn_relaunch_live_note)" >&2
     exit 1
   }
   # Two states are agent-free, and both license a relaunch:
@@ -2625,7 +2630,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
       dead) RELAUNCH_STATE=dead ;;
       alive) RELAUNCH_STATE=alive ;;
       *)
-        echo "error: task $ID's recorded endpoint $RELAUNCH_TARGET reads '$RELAUNCH_STATE', but ${RELAUNCH_ABSENCE#*$'\t'}. An endpoint that cannot be proven absent may still hold a live agent on this task's worktree; refusing rather than launching a second agent into it.$(fm_agent_process_live_note "$(fm_meta_get "$RELAUNCH_META" worktree)")" >&2
+        echo "error: task $ID's recorded endpoint $RELAUNCH_TARGET reads '$RELAUNCH_STATE', but ${RELAUNCH_ABSENCE#*$'\t'}. An endpoint that cannot be proven absent may still hold a live agent on this task's worktree; refusing rather than launching a second agent into it.$(spawn_relaunch_live_note)" >&2
         exit 1
         ;;
     esac
@@ -2634,7 +2639,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     dead) ;;
     missing) RELAUNCH_REBIND=1 ;;
     *)
-      echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit).$(fm_agent_process_live_note "$(fm_meta_get "$RELAUNCH_META" worktree)")" >&2
+      echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit).$(spawn_relaunch_live_note)" >&2
       exit 1
       ;;
   esac
@@ -2648,7 +2653,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # here as well would be a second path to the same outcome, so this refuses
   # and names the one that owns it.
   if [ "$RELAUNCH_REBIND" -eq 1 ] && [ "$KIND" = secondmate ]; then
-    echo "error: secondmate $ID's recorded endpoint is gone; its recovery is owned by the secondmate respawn path, not by relaunch (run bin/fm-spawn.sh $ID --secondmate, or let the session-start liveness sweep do it)" >&2
+    echo "error: secondmate $ID's recorded endpoint is gone; its recovery is owned by the secondmate respawn path, not by relaunch (run bin/fm-spawn.sh $ID --secondmate, or let the session-start liveness sweep do it).$(spawn_relaunch_live_note)" >&2
     exit 1
   fi
   spawn_refuse_if_away_spend_cap
@@ -2659,7 +2664,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     BRANCH=$(fm_meta_get "$RELAUNCH_META" branch)
     [ -n "$BRANCH" ] || BRANCH="fm/$ID"
     if ! git check-ref-format --branch "$BRANCH" >/dev/null 2>&1; then
-      echo "error: task $ID has an invalid recorded ship branch '$BRANCH'" >&2
+      echo "error: task $ID has an invalid recorded ship branch '$BRANCH'.$(spawn_relaunch_live_note)" >&2
       exit 1
     fi
   fi
