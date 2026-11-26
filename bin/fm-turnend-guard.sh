@@ -231,6 +231,7 @@ if [ "$CLAUDE_MODE" -eq 1 ] && fm_session_lock_foreign_owner_live "$STATE"; then
     printf '{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION OR ITS OWNER CANNOT BE VERIFIED: this read-only session cannot and should not arm or repair the watcher (%s%s). Allowing this turn to end safely; the owning session must restore supervision."}\n' \
       "${FM_SESSION_LOCK_FOREIGN_OWNER_PID:+lock owner pid $FM_SESSION_LOCK_FOREIGN_OWNER_PID; }" "$(fm_session_lock_decision_reason_text)"
   fi
+  trap - EXIT
   exit 0
 fi
 

@@ -2493,7 +2493,7 @@ stop_refusal_helper() {  # <dir>
 }
 
 test_hook_claude_refused_caller_never_touches_owner_records() {
-  local path dir home claude holder before out status nojq tool tool_path variant
+  local path dir home claude holder before out status nojq tool tool_path variant failcat
   claude="$TMP_ROOT/refusal-harness/claude"
   mkdir -p "${claude%/*}"
   ln -sf /bin/bash "$claude"
@@ -2528,34 +2528,61 @@ test_hook_claude_refused_caller_never_touches_owner_records() {
     tool_path=$(command -v "$tool" 2>/dev/null) || continue
     case "$tool_path" in /*) ln -sf "$tool_path" "$nojq/$tool" ;; esac
   done
-  for variant in nojq unreadable-lock; do
+  failcat="$TMP_ROOT/refusal-failcat-bin"
+  mkdir -p "$failcat"
+  cat > "$failcat/cat" <<SH
+#!/bin/sh
+for arg in "\$@"; do
+  case "\$arg" in */state/.lock) exit 1 ;; esac
+done
+exec $(command -v cat) "\$@"
+SH
+  chmod +x "$failcat/cat"
+  for variant in nojq unreadable-lock lock-directory lock-dangling-symlink; do
     dir=$(make_refusal_path_home "$TMP_ROOT/refused-$variant" stale)
     home=$(cd "$dir" && pwd)
     "$claude" -c 'while :; do sleep 1; done' &
     holder=$!
-    printf '%s\n' "$holder" > "$dir/state/.lock"
+    case "$variant" in
+      lock-directory) mkdir "$dir/state/.lock" ;;
+      lock-dangling-symlink) ln -s "$dir/state/no-such-lock" "$dir/state/.lock" ;;
+      *) printf '%s\n' "$holder" > "$dir/state/.lock" ;;
+    esac
     before=$(refusal_records "$dir")
     cp "$dir/parent-state/sm.busy-state" "$dir/parent-busy-before"
     status=0
-    if [ "$variant" = nojq ]; then
-      out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
-        | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID PATH="$nojq" CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
-          "$nojq/bash" "$dir/bin/fm-turnend-guard.sh" --claude 2>&1) || status=$?
-    else
-      chmod 000 "$dir/state/.lock"
-      out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
-        | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
-          bash "$dir/bin/fm-turnend-guard.sh" --claude 2>&1) || status=$?
-      chmod 644 "$dir/state/.lock"
-    fi
+    case "$variant" in
+      nojq)
+        out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
+          | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID PATH="$nojq" CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+            "$nojq/bash" "$dir/bin/fm-turnend-guard.sh" --claude 2>&1) || status=$?
+        ;;
+      unreadable-lock)
+        out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
+          | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID PATH="$failcat:$PATH" CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+            bash "$dir/bin/fm-turnend-guard.sh" --claude 2>&1) || status=$?
+        ;;
+      *)
+        out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
+          | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+            bash "$dir/bin/fm-turnend-guard.sh" --claude 2>&1) || status=$?
+        ;;
+    esac
     kill "$holder" 2>/dev/null || true
     wait "$holder" 2>/dev/null || true
     expect_code 0 "$status" "$variant: a refused caller's Stop did not end: $out"
-    if [ "$variant" = unreadable-lock ]; then
-      assert_contains "$out" "OWNER CANNOT BE VERIFIED: this read-only session cannot and should not arm or repair the watcher (the session lock cannot be read)" \
-        "unreadable-lock: the Stop did not take the read-only exit with the unreadable-lock reason"
-      assert_not_contains "$out" "lock owner pid" "unreadable-lock: the diagnostic named a holder pid it could not read"
-    fi
+    case "$variant" in
+      unreadable-lock)
+        assert_contains "$out" "OWNER CANNOT BE VERIFIED: this read-only session cannot and should not arm or repair the watcher (the session lock cannot be read)" \
+          "unreadable-lock: the Stop did not take the read-only exit with the unreadable-lock reason"
+        assert_not_contains "$out" "lock owner pid" "unreadable-lock: the diagnostic named a holder pid it could not read"
+        ;;
+      lock-directory|lock-dangling-symlink)
+        assert_contains "$out" "OWNER CANNOT BE VERIFIED: this read-only session cannot and should not arm or repair the watcher (the session lock is not a regular file)" \
+          "$variant: the Stop did not take the read-only exit with the nonregular-lock reason"
+        assert_not_contains "$out" "lock owner pid" "$variant: the diagnostic named a holder pid it could not read"
+        ;;
+    esac
     [ "$(refusal_records "$dir")" = "$before" ] \
       || fail "$variant: a refused caller changed the owner's records: $(refusal_records "$dir")"
     cmp -s "$dir/parent-busy-before" "$dir/parent-state/sm.busy-state" \

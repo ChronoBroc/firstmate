@@ -178,8 +178,9 @@ fm_session_lock_anchor_pid() {
 #      reason holder-unverified when line 1's identity could not be read, else
 #      ancestry-incomplete. Otherwise none, and bin/fm-lock.sh reclaims.
 #
-# A lock that exists but cannot be read is unknown naming no pid (reason
-# lock-unreadable). A missing or malformed line 1 is none. A sidecar that exists but cannot be
+# A lock that is a symlink or not a regular file is unknown naming no pid
+# (reason lock-nonregular), and one that exists but cannot be read likewise
+# (reason lock-unreadable). A missing or malformed line 1 is none. A sidecar that exists but cannot be
 # read is unknown naming line 1, before any other row (reason
 # sidecar-unreadable). An ancestry that cannot be resolved is unknown, naming
 # the holder that may be live - a recorded anchor that is not gone, else a line
@@ -198,6 +199,11 @@ fm_session_lock_decide() {  # <state>
   FM_SESSION_LOCK_DECISION=none
   FM_SESSION_LOCK_DECISION_REASON=
   FM_SESSION_LOCK_FOREIGN_OWNER_PID=
+  if [ -L "$state/.lock" ] || { [ -e "$state/.lock" ] && [ ! -f "$state/.lock" ]; }; then
+    FM_SESSION_LOCK_DECISION=unknown
+    FM_SESSION_LOCK_DECISION_REASON='lock-nonregular'
+    return 0
+  fi
   if ! lock_pid=$(cat "$state/.lock" 2>/dev/null); then
     if [ -e "$state/.lock" ]; then
       FM_SESSION_LOCK_DECISION=unknown
@@ -266,6 +272,7 @@ fm_session_lock_decide() {  # <state>
     return 0
   fi
   if fm_session_lock_pid_blocks_reclaim "$lock_pid"; then
+    # shellcheck disable=SC2034 # Output global, read by sourcing callers.
     FM_SESSION_LOCK_FOREIGN_OWNER_PID=$lock_pid
     if [ "$FM_SESSION_LOCK_PID_VERDICT" != readable ]; then
       FM_SESSION_LOCK_DECISION=unknown
@@ -291,12 +298,8 @@ fm_session_lock_owned_by_self() {  # <state>
 # $1, as bin/fm-lock.sh does: a live holder that is not this process's session
 # (foreign), or a holder that may be live but cannot be verified (unknown, with
 # FM_SESSION_LOCK_DECISION_REASON). Names the holder in
-# FM_SESSION_LOCK_FOREIGN_OWNER_PID for a diagnostic caller. A lock that is not
-# a regular file is no foreign-owner evidence.
+# FM_SESSION_LOCK_FOREIGN_OWNER_PID for a diagnostic caller.
 fm_session_lock_foreign_owner_live() {  # <state>
-  # shellcheck disable=SC2034 # Output global, read by the sourcing guard caller.
-  FM_SESSION_LOCK_FOREIGN_OWNER_PID=
-  [ -f "$1/.lock" ] && [ ! -L "$1/.lock" ] || return 1
   fm_session_lock_decide "$1"
   case "$FM_SESSION_LOCK_DECISION" in
     foreign|unknown) return 0 ;;
@@ -312,6 +315,7 @@ fm_session_lock_decision_reason_text() {
     sidecar-unreadable) printf '%s\n' "the session sidecar beside the lock cannot be read" ;;
     ancestry-unresolved) printf '%s\n' "this session's harness ancestry cannot be read" ;;
     lock-unreadable) printf '%s\n' "the session lock cannot be read" ;;
+    lock-nonregular) printf '%s\n' "the session lock is not a regular file" ;;
     ancestry-incomplete) printf '%s\n' "this session's harness ancestry could not be read to its end, so the recorded holder may be this session's own" ;;
     anchor-unverified) printf '%s\n' "the recorded model-loop anchor has not been shown to have exited, but its identity cannot be confirmed by its recorded start time" ;;
     holder-unverified) printf '%s\n' "the lock holder has not been shown to have exited, but its identity cannot be read" ;;
@@ -359,7 +363,7 @@ fm_session_lock_inspect() {  # <state>
   # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
   FM_LOCK_INSPECT_DETAIL=
   lock="$state/.lock"
-  if [ ! -e "$lock" ]; then
+  if [ ! -e "$lock" ] && [ ! -L "$lock" ]; then
     FM_LOCK_INSPECT_STATE=free
     FM_LOCK_INSPECT_LIVE_HARNESS=false
     return 0
