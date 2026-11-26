@@ -2300,13 +2300,14 @@ fi
 # spawn_relaunch_live_note: fm_agent_process_live_note for the relaunch
 # record's worktree, appended to every relaunch refusal.
 spawn_relaunch_live_note() {
-  fm_agent_process_live_note "$(fm_meta_get "$RELAUNCH_META" worktree)"
+  fm_agent_process_live_note "$(fm_meta_get "$RELAUNCH_META" worktree)" "$(fm_meta_get "$RELAUNCH_META" harness)"
 }
-# spawn_refuse_if_live_agent_in <dir> <what>: exit 1 naming the pid when a
-# live agent process works in <dir>; an inconclusive probe also exits 1.
+# spawn_refuse_if_live_agent_in <dir> <what> [launch-exe]: exit 1 naming the
+# pid when a live agent process - or one running the task's recorded raw
+# launch executable - works in <dir>; an inconclusive probe also exits 1.
 spawn_refuse_if_live_agent_in() {
-  local dir=$1 what=$2 out rc=0
-  out=$(fm_agent_process_live_in_dir "$dir") || rc=$?
+  local dir=$1 what=$2 exe=${3:-} out rc=0
+  out=$(fm_agent_process_live_in_dir "$dir" "$exe") || rc=$?
   case "$rc" in
     1) return 0 ;;
     0)
@@ -2673,7 +2674,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: task $ID's recorded worktree '${RELAUNCH_WT:-none}' is missing; refusing to relaunch without the local copy its work lives in" >&2
     exit 1
   }
-  spawn_refuse_if_live_agent_in "$RELAUNCH_WT" "the recorded worktree"
+  spawn_refuse_if_live_agent_in "$RELAUNCH_WT" "the recorded worktree" "$RELAUNCH_PRIOR_HARNESS"
   if [ "$KIND" = secondmate ]; then
     FIRSTMATE_HOME=$(fm_meta_get "$RELAUNCH_META" home)
     [ -n "$FIRSTMATE_HOME" ] || FIRSTMATE_HOME=$RELAUNCH_WT
@@ -4263,7 +4264,10 @@ if [ "$KIND" = secondmate ]; then
     exit 1
   }
   PROJ_ABS=$(validate_firstmate_home_for_spawn "$ID" "$FIRSTMATE_HOME")
-  [ "$RELAUNCH" -eq 1 ] || spawn_refuse_if_live_agent_in "$PROJ_ABS" "the secondmate home"
+  if [ "$RELAUNCH" -ne 1 ]; then
+    spawn_refuse_if_live_agent_in "$PROJ_ABS" "the secondmate home" \
+      "$( { [ -f "$STATE/$ID.meta" ] && fm_meta_get "$STATE/$ID.meta" harness; } || true)"
+  fi
   if [ -e "$DATA/secondmates.md" ] || [ -L "$DATA/secondmates.md" ]; then
     if ! secondmate_registry_validate_bindings "$DATA/secondmates.md" resolve_path "$ID" "$FIRSTMATE_HOME"; then
       echo "error: $SECONDMATE_REGISTRY_ERROR" >&2

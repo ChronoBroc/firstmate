@@ -512,7 +512,7 @@ endpoint_agent_pids() {
       "$(fm_polytoken_sessions_root "$polytoken_state" "$ID")" "$WT" | cut -f4 | tr '\n' ' ')"
   fi
   [ -n "$root" ] || [ "$exact" != ' ' ] || return 0
-  out=$(fm_agent_process_live_in_dir "$WT") || return 0
+  out=$(fm_agent_process_live_in_dir "$WT" "$RECORDED_HARNESS") || return 0
   for pid in $(printf '%s\n' "$out" | cut -f1); do
     case "$exact" in *" $pid "*) printf '%s\n' "$pid"; continue ;; esac
     [ -n "$root" ] || continue
@@ -833,7 +833,7 @@ do_exit() {
     alive) ;;
     *)
       fm_control_absence_recheck_applies "$BACKEND" "$state" \
-        || die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint.$(fm_agent_process_live_note "$WT")"
+        || die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
       # `missing` on its own is not a finding about the endpoint: it conflates
       # "destroyed" with "unreachable from this seat". Route it through the
       # control plane's one absence proof - the same one the relaunch gate uses
@@ -863,7 +863,7 @@ do_exit() {
           # alive path: interrupt if busy, then the harness's exit command.
           ;;
         *)
-          die "task $ID's endpoint $T reads '$state', but ${absence#*$'\t'}; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one.$(fm_agent_process_live_note "$WT")"
+          die "task $ID's endpoint $T reads '$state', but ${absence#*$'\t'}; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
           ;;
       esac
       ;;
@@ -1074,7 +1074,7 @@ relaunch_restore_text() {
 # restored and is reported.
 relaunch_rollback_endpoint_agent_free() {  # <tag> <message>
   local live_rc=0 live_out
-  live_out=$(fm_agent_process_live_in_dir "$WT") || live_rc=$?
+  live_out=$(fm_agent_process_live_in_dir "$WT" "$RECORDED_HARNESS") || live_rc=$?
   if [ "$live_rc" -eq 1 ]; then
     journal_write "failed:$RELAUNCH_PHASE" "rollback=$1" || true
     echo "$2" >&2

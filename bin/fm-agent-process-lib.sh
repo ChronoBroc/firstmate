@@ -104,9 +104,10 @@ fm_agent_process_classify_name() {  # <path> [argv0] -> agent|shell|other
 #            on Linux the exec name, on macOS argv[0] truncated to 16 bytes.
 #   <argv0>  argv[0] as the process reports it - a bare name or an install
 #            path, whichever the launcher used (empty when unknown).
-#   <args>   the flattened command line, rebuilt into an argument vector
-#            (fm_process_argv_from_args) for the interpreter-hosted harnesses
-#            whose identity sits in their script argument.
+#   <args>   the flattened command line, split into an argument vector for
+#            the interpreter-hosted harnesses whose identity sits in their
+#            script argument (a Bun-hosted omp's spaced script path is rebuilt
+#            by fm_omp_argv_from_args).
 #   [pid]    when given and /proc exposes it, the live process's own argv
 #            replaces the flattened line, keeping its boundaries.
 fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|other
@@ -115,7 +116,7 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
   if [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ]; then
     while IFS= read -r -d '' word; do argv+=("$word"); done < "/proc/$pid/cmdline"
   else
-    fm_process_argv_from_args "$args"
+    fm_omp_argv_from_args "$name" "$args"
     argv=(${FM_PROCESS_ARGV[@]+"${FM_PROCESS_ARGV[@]}"})
   fi
   _fm_agent_process_verdict "$name" "$argv0" ${argv[@]+"${argv[@]}"}
@@ -153,14 +154,20 @@ _fm_agent_process_verdict() {  # <name> <argv0> <argv...> -> agent|shell|other
 # fm_agent_process_live_in_dir: the verified-harness agent processes owned by
 # this user whose working directory is exactly <dir> (a subdirectory does not
 # match), read from the kernel's per-process working directory rather than
-# from any terminal endpoint. Each process is classified through
-# fm_agent_process_classify, so only agents count; only the checking process
-# itself (this shell and its subshells) is excluded, so an agent that is an
-# ancestor of the caller still counts.
+# from any terminal endpoint. Each process is classified through the shared
+# harness verdict, so only agents count - plus, when [launch-exe] names the
+# executable a task was launched with as a raw command, a process running that
+# executable (never a shell). Only the checking process itself (this shell and
+# its subshells) is excluded, so an agent that is an ancestor of the caller
+# still counts.
 #
 # Working directories come from /proc/<pid>/cwd where the kernel exposes it
 # (Linux) and otherwise from lsof (macOS), matched by the directory's device
-# and inode because lsof escapes bytes in the names it prints.
+# and inode because lsof escapes bytes in the names it prints. A failed lsof
+# listing still has its complete records checked. Under a Cygwin-family
+# userspace (Git for Windows) a native Windows harness lives outside the
+# process table this reads, and this probe does not enumerate Windows
+# processes, so there it can name an agent it sees but never proves absence.
 #
 # Prints and returns:
 #   0  one `<pid>\t<process name>` line per live agent process found; a
@@ -172,8 +179,13 @@ _fm_agent_process_verdict() {  # <name> <argv0> <argv...> -> agent|shell|other
 #      not be read.
 #      Callers that would start an agent in <dir> must treat this as a
 #      refusal, never as 1.
-fm_agent_process_live_in_dir() {  # <dir>
-  local dir=${1:-} dir_real dir_id uid pid cwd self selves found='' undecided='' lsof_out lsof_rc p candidates=''
+fm_agent_process_live_in_dir() {  # <dir> [launch-exe]
+  local dir=${1:-} exe=${2:-} dir_real dir_id uid pid cwd self selves found='' undecided='' lsof_out lsof_rc p candidates=''
+  exe=${exe##*/}
+  [ "$(fm_agent_process_classify_name "$exe")" != shell ] || exe=
+  if fm_win_boundary_applies; then
+    undecided='native Windows processes are outside the process table this probe reads, so their absence cannot be proven'
+  fi
   dir_real=$(cd "$dir" 2>/dev/null && pwd -P) || {
     printf 'the directory %s does not resolve\n' "${dir:-<empty>}"
     return 2
@@ -204,7 +216,7 @@ fm_agent_process_live_in_dir() {  # <dir>
         [ -n "$undecided" ] || undecided="the working directory and identity of running process $pid could not be read"
         continue
       fi
-      [ "$FM_AGENT_PROCESS_KIND" = agent ] || continue
+      _fm_agent_process_counts "$exe" || continue
       [ -n "$undecided" ] || undecided="the working directory of running agent process $pid could not be read"
     done
   else
@@ -219,10 +231,12 @@ fm_agent_process_live_in_dir() {  # <dir>
     esac
     lsof_rc=0
     lsof_out=$(LC_ALL=C lsof -w -a -u "$uid" -d cwd -FpDi 2>/dev/null) || lsof_rc=$?
-    if [ "$lsof_rc" -ne 0 ] || [ -z "$lsof_out" ]; then
+    if [ -z "$lsof_out" ]; then
       printf 'lsof could not list the working directories of this user'"'"'s processes (exit %s)\n' "$lsof_rc"
       return 2
     fi
+    [ "$lsof_rc" -eq 0 ] || [ -n "$undecided" ] \
+      || undecided="lsof could not list every working directory of this user's processes (exit $lsof_rc)"
     candidates=$(printf '%s\n' "$lsof_out" | awk -v dev="$(printf '0x%x' "${dir_id%% *}")" -v ino="${dir_id##* }" '
       /^p/ { pid = substr($0, 2); d = ""; next }
       /^D/ { d = substr($0, 2); next }
@@ -235,7 +249,7 @@ fm_agent_process_live_in_dir() {  # <dir>
       [ -n "$undecided" ] || undecided="the identity of running process $pid working in $dir_real could not be read"
       continue
     fi
-    [ "$FM_AGENT_PROCESS_KIND" = agent ] || continue
+    _fm_agent_process_counts "$exe" || continue
     found="$found$pid"$'\t'"${FM_AGENT_PROCESS_NAME##*/}"$'\n'
   done
   if [ -n "$found" ]; then
@@ -250,19 +264,19 @@ fm_agent_process_live_in_dir() {  # <dir>
 }
 
 # _fm_agent_process_identify <pid>: classify a live process from its kernel
-# name and its argument vector (/proc/<pid>/cmdline on Linux, the kernel argv
-# through bin/fm-procinfo.py elsewhere) into FM_AGENT_PROCESS_KIND
-# (agent|shell|other) and FM_AGENT_PROCESS_NAME; returns 1 when either could
-# not be read.
+# name and its argument vector into FM_AGENT_PROCESS_KIND (agent|shell|other),
+# FM_AGENT_PROCESS_NAME, and FM_AGENT_PROCESS_ARGV0; returns 1 when they could
+# not be read. On Linux both come from /proc (comm and cmdline); elsewhere
+# from the kernel argv through bin/fm-procinfo.py, whose argv[0] is the name
+# ps itself reports there, so a host that denies ps still identifies it.
 _fm_agent_process_identify() {  # <pid>
   local pid=$1 name word
   local argv=()
   FM_AGENT_PROCESS_KIND=
   FM_AGENT_PROCESS_NAME=
-  name=$(LC_ALL=C ps -o comm= -p "$pid" 2>/dev/null) || return 1
-  name=${name#"${name%%[![:space:]]*}"}
-  [ -n "$name" ] || return 1
+  FM_AGENT_PROCESS_ARGV0=
   if [ -r "/proc/$pid/cmdline" ]; then
+    IFS= read -r name < "/proc/$pid/comm" 2>/dev/null || return 1
     while IFS= read -r -d '' word; do argv+=("$word"); done < "/proc/$pid/cmdline"
   else
     # The provider's own exit status follows its records as one final record,
@@ -273,10 +287,21 @@ _fm_agent_process_identify() {  # <pid>
     )
     [ "${#argv[@]}" -gt 0 ] && [ "${argv[${#argv[@]}-1]}" = 0 ] || return 1
     unset 'argv[${#argv[@]}-1]'
+    name=${argv[0]:-}
   fi
-  [ "${#argv[@]}" -gt 0 ] && [ -n "${argv[0]}" ] || return 1
+  [ -n "$name" ] && [ "${#argv[@]}" -gt 0 ] && [ -n "${argv[0]}" ] || return 1
   FM_AGENT_PROCESS_NAME=$name
+  FM_AGENT_PROCESS_ARGV0=${argv[0]}
   FM_AGENT_PROCESS_KIND=$(_fm_agent_process_verdict "$name" "${argv[0]}" "${argv[@]}")
+}
+
+# _fm_agent_process_counts [launch-exe]: after _fm_agent_process_identify,
+# whether that process counts as an agent: a verified harness, or a process
+# running the task's own raw launch executable.
+_fm_agent_process_counts() {  # [launch-exe]
+  [ "$FM_AGENT_PROCESS_KIND" != agent ] || return 0
+  [ -n "${1:-}" ] || return 1
+  [ "${FM_AGENT_PROCESS_NAME##*/}" = "$1" ] || [ "${FM_AGENT_PROCESS_ARGV0##*/}" = "$1" ]
 }
 
 # fm_agent_process_format_live <probe-output>: fm_agent_process_live_in_dir's
@@ -285,13 +310,13 @@ fm_agent_process_format_live() {  # <probe-output>
   printf '%s\n' "$1" | awk -F'\t' 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }'
 }
 
-# fm_agent_process_live_note <dir>: a sentence naming the agent processes
-# still working in <dir>, for appending to a refusal; prints nothing when none
-# was found or the probe could not decide, and always succeeds.
-fm_agent_process_live_note() {  # <dir>
+# fm_agent_process_live_note <dir> [launch-exe]: a sentence naming the agent
+# processes still working in <dir>, for appending to a refusal; prints nothing
+# when none was found or the probe could not decide, and always succeeds.
+fm_agent_process_live_note() {  # <dir> [launch-exe]
   local out
   [ -n "${1:-}" ] || return 0
-  out=$(fm_agent_process_live_in_dir "$1") || return 0
+  out=$(fm_agent_process_live_in_dir "$1" "${2:-}") || return 0
   printf ' An agent process is still working in its worktree %s: pid %s.' "$1" "$(fm_agent_process_format_live "$out")"
   return 0
 }
