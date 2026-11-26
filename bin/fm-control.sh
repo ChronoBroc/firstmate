@@ -488,6 +488,43 @@ wait_agent_state() {  # <timeout> <wanted>...
   return 1
 }
 
+# control_format_live_agents <probe-output>: fm_agent_process_live_in_dir's
+# `<pid>\t<name>` lines as `<pid> (<name>)[, ...]`.
+control_format_live_agents() {
+  printf '%s\n' "$1" | awk -F'\t' 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }'
+}
+
+# control_live_agent_note: a sentence naming the agent processes still working
+# in the task's worktree, or nothing when none was found or the probe could
+# not decide.
+control_live_agent_note() {
+  local out
+  [ -n "$WT" ] || return 0
+  out=$(fm_agent_process_live_in_dir "$WT") || return 0
+  printf ' An agent process is still working in its worktree %s: pid %s.' "$WT" "$(control_format_live_agents "$out")"
+}
+
+# wait_agent_pids_gone <timeout> <pid>...: wait until none of <pid> is still
+# found working in the task's worktree; nonzero on timeout.
+wait_agent_pids_gone() {  # <timeout> <pid>...
+  local timeout=$1 elapsed=0 out rc pid live
+  shift
+  [ "$#" -gt 0 ] || return 0
+  while :; do
+    rc=0
+    out=$(fm_agent_process_live_in_dir "$WT") || rc=$?
+    [ "$rc" -eq 0 ] || return 0
+    live=0
+    for pid in "$@"; do
+      printf '%s\n' "$out" | cut -f1 | grep -Fqx "$pid" && live=1
+    done
+    [ "$live" = 1 ] || return 0
+    awk -v e="$elapsed" -v t="$timeout" 'BEGIN{exit !(e < t)}' || return 1
+    sleep "$POLL"
+    elapsed=$(awk -v e="$elapsed" -v p="$POLL" 'BEGIN{printf "%.3f", e + p}')
+  done
+}
+
 require_state_verified_backend() {  # <verb>
   fm_control_backend_state_verified "$BACKEND" && return 0
   die "task $ID runs on the $BACKEND backend, which has no recovery-grade agent-state classifier, so '$1' cannot prove the agent actually stopped; refusing rather than reporting an unproven transition as done"
@@ -801,7 +838,7 @@ do_exit() {
           # alive path: interrupt if busy, then the harness's exit command.
           ;;
         *)
-          die "task $ID's endpoint $T reads '$state', but ${absence#*$'\t'}; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one"
+          die "task $ID's endpoint $T reads '$state', but ${absence#*$'\t'}; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one.$(control_live_agent_note)"
           ;;
       esac
       ;;
@@ -975,6 +1012,27 @@ journal_write() {  # <phase> [extra-line]...
   return 1
 }
 
+# relaunch_restore_brief: put the preserved instructions back byte-exact and
+# record the outcome in RELAUNCH_RESTORE: restored, failed, or untouched when
+# this relaunch never rewrote them (a secondmate's charter).
+relaunch_restore_brief() {
+  RELAUNCH_RESTORE=untouched
+  [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ] || return 0
+  if cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null; then
+    RELAUNCH_RESTORE=restored
+  else
+    RELAUNCH_RESTORE=failed
+  fi
+}
+
+relaunch_restore_text() {
+  case "$RELAUNCH_RESTORE" in
+    restored) printf 'its original instructions were restored' ;;
+    failed) printf 'its original instructions could NOT be restored to %s; restore them from the saved copy %s' "$RELAUNCH_BRIEF" "$BRIEF_PRIOR" ;;
+    *) printf 'its instructions were never rewritten' ;;
+  esac
+}
+
 relaunch_rollback() {
   local state
   [ "$RELAUNCH_ACTIVE" = 1 ] || return 0
@@ -984,21 +1042,21 @@ relaunch_rollback() {
     checkpoint|noted)
       # The old agent was never touched. Restore the instructions byte-exact so
       # a refused relaunch leaves nothing behind.
-      if [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ]; then
-        cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null || true
+      relaunch_restore_brief
+      journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE" || true
+      if [ "$RELAUNCH_RESTORE" = failed ]; then
+        echo "error: relaunch of $ID was refused before its agent was touched; $(relaunch_restore_text)" >&2
+      else
+        echo "error: relaunch of $ID was refused before its agent was touched; nothing changed" >&2
       fi
-      journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-restored" || true
-      echo "error: relaunch of $ID was refused before its agent was touched; nothing changed" >&2
       ;;
     stopping)
       state=$(agent_state 2>/dev/null || printf unknown)
       case "$state" in
         alive)
-          if [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ]; then
-            cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null || true
-          fi
-          journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-restored-agent-alive" || true
-          echo "error: relaunch of $ID failed while stopping the old agent, which is still running; its original instructions were restored" >&2
+          relaunch_restore_brief
+          journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-alive" || true
+          echo "error: relaunch of $ID failed while stopping the old agent, which is still running; $(relaunch_restore_text)" >&2
           ;;
         dead)
           journal_write "failed:$RELAUNCH_PHASE" "rollback=prior-record-kept-agent-dead" || true
@@ -1010,11 +1068,9 @@ relaunch_rollback() {
           # original one. The note exists to brief a replacement; leaving it in
           # a possibly-live agent's brief would be an unrequested edit to a
           # running task. Restore byte-exact, exactly as the alive case does.
-          if [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ]; then
-            cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null || true
-          fi
-          journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-restored-agent-state-$state" || true
-          echo "error: relaunch of $ID failed while stopping the old agent and its state is '$state', so it was not proven stopped; its original instructions were restored and the durable record was retained for recovery" >&2
+          relaunch_restore_brief
+          journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-state-$state" || true
+          echo "error: relaunch of $ID failed while stopping the old agent and its state is '$state', so it was not proven stopped; $(relaunch_restore_text) and the durable record was retained for recovery" >&2
           ;;
       esac
       ;;
@@ -1039,17 +1095,13 @@ relaunch_rollback() {
           journal_write "failed:$RELAUNCH_PHASE" "rollback=prior-record-kept" || true
           echo "error: $ID's agent was stopped but the replacement did not launch; no agent is running, and its work plus the recorded progress note are preserved at $WT" >&2
         else
-          # An agent outside the endpoint may still be working in the local
-          # copy: restore its instructions as the still-running cases do.
-          if [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ]; then
-            cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null || true
-          fi
+          relaunch_restore_brief
           if [ "$live_rc" -eq 0 ]; then
-            journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-restored-agent-in-worktree" || true
-            echo "error: $ID's recorded endpoint holds no agent now, but no replacement was launched because an agent is still working in its local copy $WT (pid $(printf '%s\n' "$live_out" | awk -F'\t' 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }')); its original instructions were restored and the durable record was retained" >&2
+            journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-in-worktree" || true
+            echo "error: $ID's recorded endpoint holds no agent now, but no replacement was launched because an agent is still working in its local copy $WT (pid $(control_format_live_agents "$live_out")); $(relaunch_restore_text) and the durable record was retained" >&2
           else
-            journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-restored-agent-in-worktree-unproven" || true
-            echo "error: $ID's recorded endpoint holds no agent now, but the replacement did not launch and whether an agent still works in its local copy $WT could not be established ($live_out); its original instructions were restored and the durable record was retained" >&2
+            journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-in-worktree-unproven" || true
+            echo "error: $ID's recorded endpoint holds no agent now, but the replacement did not launch and whether an agent still works in its local copy $WT could not be established ($live_out); $(relaunch_restore_text) and the durable record was retained" >&2
           fi
         fi
       fi
@@ -1348,8 +1400,13 @@ do_relaunch() {
   journal_write noted "${CHECKPOINT_LINES[@]}" "$note_line"
 
   journal_write stopping "${CHECKPOINT_LINES[@]}" "$note_line"
+  stopping_pids=$(fm_agent_process_live_in_dir "$WT" 2>/dev/null | cut -f1) || stopping_pids=
   exit_result=$(do_exit)
   journal_write exited "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
+  if [ "$exit_result" = stopped ]; then
+    # shellcheck disable=SC2086
+    wait_agent_pids_gone "$EXIT_WAIT" $stopping_pids || true
+  fi
 
   # The launch owner (fm-spawn --relaunch) clears the previous incarnation's
   # per-task harness wiring before arming the new one, so nothing to do here.

@@ -999,6 +999,8 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-polytoken-lib.sh"
 # shellcheck source=bin/fm-cursor-lib.sh
 . "$SCRIPT_DIR/fm-cursor-lib.sh"
+# shellcheck source=bin/fm-agent-process-lib.sh
+. "$SCRIPT_DIR/fm-agent-process-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
 # shellcheck source=bin/fm-dod-lib.sh
@@ -2295,34 +2297,35 @@ fi
 if [ "$RELAUNCH" -ne 1 ]; then
   fm_lease_forbid_branch "new-task spawn (fm-spawn)" --away-relocated
 fi
+# spawn_live_agents_in <dir>: the live agent processes working in <dir>
+# (fm_agent_process_live_in_dir) as `<pid> (<name>)[, ...]`, returning the
+# probe's own status: 1 none found, 2 undecided with its reason printed.
+spawn_live_agents_in() {
+  local out rc=0
+  out=$(fm_agent_process_live_in_dir "$1") || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    printf '%s\n' "$out" | awk -F'\t' 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }'
+  else
+    printf '%s' "$out"
+  fi
+  return "$rc"
+}
 # spawn_refuse_if_live_agent_in <dir> <what>: exit 1 naming the pid when a
-# live agent process works in <dir> (fm_agent_process_live_in_dir), after
-# giving one that is exiting FM_SPAWN_LIVE_AGENT_SETTLE_SECS (default 5) to
-# finish; an inconclusive probe also exits 1.
+# live agent process works in <dir>; an inconclusive probe also exits 1.
 spawn_refuse_if_live_agent_in() {
-  local dir=$1 what=$2 out rc settle=${FM_SPAWN_LIVE_AGENT_SETTLE_SECS:-5} deadline pids
-  case "$settle" in ''|*[!0-9]*) settle=5 ;; esac
-  deadline=$(($(date +%s) + settle))
-  while :; do
-    rc=0
-    out=$(fm_agent_process_live_in_dir "$dir") || rc=$?
-    case "$rc" in
-      1) return 0 ;;
-      0)
-        if [ "$(date +%s)" -lt "$deadline" ]; then
-          sleep 0.5
-          continue
-        fi
-        pids=$(printf '%s\n' "$out" | awk -F'\t' 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }')
-        echo "error: refusing to start an agent for $ID: $what $dir already has a live agent process working in it, pid $pids, whatever its recorded endpoint reads from here; stop that agent, or confirm it is not this task's, before launching another" >&2
-        exit 1
-        ;;
-      *)
-        echo "error: refusing to start an agent for $ID: could not establish whether an agent process is still working in $what $dir (${out:-probe failed}); an unproven answer is treated as a live agent" >&2
-        exit 1
-        ;;
-    esac
-  done
+  local dir=$1 what=$2 out rc=0
+  out=$(spawn_live_agents_in "$dir") || rc=$?
+  case "$rc" in
+    1) return 0 ;;
+    0)
+      echo "error: refusing to start an agent for $ID: $what $dir already has a live agent process working in it, pid $out, whatever its recorded endpoint reads from here; stop that agent, or confirm it is not this task's, before launching another" >&2
+      exit 1
+      ;;
+    *)
+      echo "error: refusing to start an agent for $ID: could not establish whether an agent process is still working in $what $dir (${out:-probe failed}); an unproven answer is treated as a live agent" >&2
+      exit 1
+      ;;
+  esac
 }
 spawn_refuse_if_away_spend_cap() {
   [ "$KIND" != secondmate ] || return 0
@@ -2635,7 +2638,12 @@ if [ "$RELAUNCH" -eq 1 ]; then
       dead) RELAUNCH_STATE=dead ;;
       alive) RELAUNCH_STATE=alive ;;
       *)
-        echo "error: task $ID's recorded endpoint $RELAUNCH_TARGET reads '$RELAUNCH_STATE', but ${RELAUNCH_ABSENCE#*$'\t'}. An endpoint that cannot be proven absent may still hold a live agent on this task's worktree; refusing rather than launching a second agent into it" >&2
+        relaunch_live_note=
+        relaunch_live_wt=$(fm_meta_get "$RELAUNCH_META" worktree)
+        if [ -n "$relaunch_live_wt" ] && relaunch_live_pids=$(spawn_live_agents_in "$relaunch_live_wt"); then
+          relaunch_live_note=" An agent process is still working in its worktree $relaunch_live_wt: pid $relaunch_live_pids."
+        fi
+        echo "error: task $ID's recorded endpoint $RELAUNCH_TARGET reads '$RELAUNCH_STATE', but ${RELAUNCH_ABSENCE#*$'\t'}. An endpoint that cannot be proven absent may still hold a live agent on this task's worktree; refusing rather than launching a second agent into it.$relaunch_live_note" >&2
         exit 1
         ;;
     esac
