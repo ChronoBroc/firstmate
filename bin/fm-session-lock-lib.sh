@@ -29,6 +29,7 @@ _FM_SESSION_LOCK_LIB_DIR=${BASH_SOURCE[0]%/*}
 . "${_FM_SESSION_LOCK_LIB_DIR:-/}/fm-cursor-lib.sh"
 # shellcheck source=bin/fm-omp-process-lib.sh
 . "${_FM_SESSION_LOCK_LIB_DIR:-/}/fm-omp-process-lib.sh"
+FM_SESSION_LOCK_LIB_DIR=$(cd "${_FM_SESSION_LOCK_LIB_DIR:-/}" && pwd)
 unset _FM_SESSION_LOCK_LIB_DIR
 
 # Known harness command names; extend when a new adapter is verified. omp and
@@ -853,15 +854,35 @@ fm_session_lock_recorded_anchor() {  # <state>
   printf '%s\n' "$line"
 }
 
+# Print the anchor's process start identity recorded in state dir $1's sidecar,
+# or return 1. bin/fm-lock.sh writes it as the third line
+# `anchor-identity=<identity>` (fm_session_pid_identity of the anchor) whenever
+# that identity is readable; a sidecar without it records none.
+fm_session_lock_recorded_anchor_identity() {  # <state>
+  local state=$1 line
+  [ -f "$state/.lock-session" ] && [ ! -L "$state/.lock-session" ] || return 1
+  line=$(sed -n '3p' "$state/.lock-session" 2>/dev/null) || return 1
+  case "$line" in anchor-identity=?*) ;; *) return 1 ;; esac
+  printf '%s\n' "${line#anchor-identity=}"
+}
+
 # True when this process continues the session that recorded state dir $1's
-# sidecar: the recorded model-loop anchor is a member of ancestry $2. A missing
-# anchor, or one outside this ancestry - live, exited, or unreadable - is no
-# proof of continuity, because a second running copy of the session carries
-# the same id.
+# sidecar: the recorded model-loop anchor is a member of ancestry $2 and is
+# still the very process that was recorded, by its start identity. A missing
+# anchor or identity, an anchor outside this ancestry - live, exited, or
+# unreadable - or a reused anchor pid is no proof of continuity, because a
+# second running copy of the session carries the same id.
 fm_session_lock_anchor_continues() {  # <state> <ancestry-pids>
-  local anchor
+  local anchor recorded current
   anchor=$(fm_session_lock_recorded_anchor "$1") || return 1
-  fm_harness_pid_listed "$anchor" "$2"
+  fm_harness_pid_listed "$anchor" "$2" || return 1
+  recorded=$(fm_session_lock_recorded_anchor_identity "$1") || return 1
+  if ! command -v fm_pid_identity >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "$FM_SESSION_LOCK_LIB_DIR/fm-wake-lib.sh"
+  fi
+  current=$(fm_session_pid_identity "$anchor" 2>/dev/null) || return 1
+  [ -n "$current" ] && [ "$current" = "$recorded" ]
 }
 
 # True when the lock in state dir $1 was recorded by this same Claude session:

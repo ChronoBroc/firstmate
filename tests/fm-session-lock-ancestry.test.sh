@@ -319,6 +319,7 @@ case "$pid:$field:${FM_TEST_DAEMON_PRESENT:-0}" in
   710:comm=:*) printf '%s\n' 'claude bg-spare' ;;
   710:args=:*) printf '%s\n' 'claude bg-spare /tmp/claim.sock' ;;
   710:ppid=:*) printf '%s\n' 720 ;;
+  710:command=:*) printf '%s\n' "${FM_TEST_SPARE_START:-Thu Jan  1 00:00:00 2026} claude bg-spare /tmp/claim.sock" ;;
   *:comm=:*) printf '%s\n' bash ;;
   *:args=:*) printf '%s\n' 'bash /repo/bin/fm-claude-stop-autoarm.sh' ;;
   *:ppid=:*) printf '%s\n' 710 ;;
@@ -336,14 +337,16 @@ foreign_owner() {  # <fakebin> <state>  -> prints the foreign pid
 }
 
 test_same_session_id_owns_a_recycled_background_chain() {
-  local dir fakebin state got
+  local dir fakebin state got spare_identity
   dir="$TMP_ROOT/background-session"
+  spare_identity='Thu Jan  1 00:00:00 2026 claude bg-spare /tmp/claim.sock'
+  export FM_PROC_ROOT_OVERRIDE="$dir/no-proc"
   fakebin=$(fm_fakebin "$dir")
   state="$dir/state"
   mkdir -p "$state"
   write_background_session_ps "$fakebin"
   printf '700\n' > "$state/.lock"
-  printf 'S1\nanchor=710\n' > "$state/.lock-session"
+  printf 'S1\nanchor=710\nanchor-identity=%s\n' "$spare_identity" > "$state/.lock-session"
 
   # The divergence itself, so none of the verdicts below can be vacuous: with
   # the daemon gone the front-end is not an ancestor, with it back it is.
@@ -360,9 +363,9 @@ test_same_session_id_owns_a_recycled_background_chain() {
     fail "the session's own live front-end was reported as a foreign owner despite the matching id"
   fi
   # 1b. The same id without positive continuity: a sidecar recording the id
-  # alone, and one whose recorded anchor is another live harness outside this
-  # run, are a second running copy of the session, so the live owner is
-  # foreign.
+  # alone, an anchor without its start identity, a reused anchor pid, and an
+  # anchor that is another live harness outside this run prove nothing, so the
+  # live owner is foreign.
   printf 'S1\n' > "$state/.lock-session"
   if FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
     fail "an id-only sidecar let the same id own a live lock outside its ancestry"
@@ -370,13 +373,28 @@ test_same_session_id_owns_a_recycled_background_chain() {
   got=$(FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 foreign_owner "$fakebin" "$state") \
     || fail "an id-only sidecar suppressed the foreign-owner verdict"
   [ "$got" = 700 ] || fail "the id-only foreign owner pid was '$got', expected 700"
-  printf 'S1\nanchor=730\n' > "$state/.lock-session"
+  printf 'S1\nanchor=710\n' > "$state/.lock-session"
+  if FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
+    fail "an anchor recorded without its start identity let the same id own a live lock"
+  fi
+  FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 foreign_owner "$fakebin" "$state" >/dev/null \
+    || fail "an anchor recorded without its start identity suppressed the foreign-owner verdict"
+  # The recorded anchor pid reused by a later process of the same id: its start
+  # identity differs from the one recorded, so it proves no continuity.
+  printf 'S1\nanchor=710\nanchor-identity=%s\n' "$spare_identity" > "$state/.lock-session"
+  if FM_TEST_SPARE_START='Fri Jan  2 00:00:00 2026' FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
+    fail "a reused anchor pid let the same id own a live lock outside its ancestry"
+  fi
+  got=$(FM_TEST_SPARE_START='Fri Jan  2 00:00:00 2026' FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 foreign_owner "$fakebin" "$state") \
+    || fail "a reused anchor pid suppressed the foreign-owner verdict"
+  [ "$got" = 700 ] || fail "the reused-anchor foreign owner pid was '$got', expected 700"
+  printf 'S1\nanchor=730\nanchor-identity=%s\n' "$spare_identity" > "$state/.lock-session"
   if FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
     fail "a live recorded anchor outside the run let the same id own the lock"
   fi
   FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 foreign_owner "$fakebin" "$state" >/dev/null \
     || fail "a live recorded anchor outside the run suppressed the foreign-owner verdict"
-  printf 'S1\nanchor=710\n' > "$state/.lock-session"
+  printf 'S1\nanchor=710\nanchor-identity=%s\n' "$spare_identity" > "$state/.lock-session"
   # 2. A different id: the existing refusal, naming the live owner.
   if FM_TEST_SESSION_ID=S2 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
     fail "a different session id claimed a live owner's lock"
@@ -390,7 +408,7 @@ test_same_session_id_owns_a_recycled_background_chain() {
   fi
   FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=700 foreign_owner "$fakebin" "$state" >/dev/null \
     || fail "an untrusted id suppressed the foreign-owner verdict"
-  printf 'S1:x\nanchor=710\n' > "$state/.lock-session"
+  printf 'S1:x\nanchor=710\nanchor-identity=%s\n' "$spare_identity" > "$state/.lock-session"
   FM_TEST_SESSION_ID='S1:x' FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state" \
     || fail "a trusted id containing a colon did not own the lock"
   if FM_TEST_SESSION_ID='S1:x' FM_TEST_CLAUDE_PID=710 foreign_owner "$fakebin" "$state" >/dev/null; then
@@ -402,7 +420,7 @@ test_same_session_id_owns_a_recycled_background_chain() {
   fi
   FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 foreign_owner "$fakebin" "$state" >/dev/null \
     || fail "a carriage-return sidecar suppressed the foreign-owner verdict"
-  printf 'S1\nanchor=710\n' > "$state/.lock-session"
+  printf 'S1\nanchor=710\nanchor-identity=%s\n' "$spare_identity" > "$state/.lock-session"
   # 4. No id at all: the legacy ancestry verdict, unchanged.
   if owned "$fakebin" "$state"; then
     fail "with no session id the recycled chain claimed the lock"
@@ -423,16 +441,17 @@ test_same_session_id_owns_a_recycled_background_chain() {
   if FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
     fail "a lock with no recorded session id was owned through the environment id"
   fi
-  printf 'S1\nanchor=710\n' > "$dir/elsewhere"
+  printf 'S1\nanchor=710\nanchor-identity=%s\n' "$spare_identity" > "$dir/elsewhere"
   ln -s "$dir/elsewhere" "$state/.lock-session"
   if FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
     fail "a symlinked sidecar was trusted"
   fi
   rm -f "$state/.lock-session"
-  printf 'S1\nanchor=710\n' > "$state/.lock-session"
+  printf 'S1\nanchor=710\nanchor-identity=%s\n' "$spare_identity" > "$state/.lock-session"
   if FM_TEST_KILL_RC=1 FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
     fail "a same-session lock whose recorded pid is dead was owned instead of left for reclaim"
   fi
+  unset FM_PROC_ROOT_OVERRIDE
   pass "session-lock: a trusted same-session id keeps owning a recycled background chain, and nothing weaker does"
 }
 
@@ -1349,13 +1368,22 @@ twin_value() {  # <dir> <role> <n> <file>
   tr -d '[:space:]' < "$1/state/$2-$3/$4"
 }
 
-# The twin's step <n> was refused as a duplicate naming the live holder <orig>
+# The sidecar <file> records session <id> with anchor <pid> and a non-empty
+# anchor start identity on its third line, as bin/fm-lock.sh's sidecar contract
+# states.
+anchored_sidecar() {  # <file> <id> <pid>
+  [ "$(sed -n 1,2p "$1" 2>/dev/null)" = "$(printf '%s\nanchor=%s' "$2" "$3")" ] \
+    && sed -n 3p "$1" | grep -q '^anchor-identity=.' \
+    && [ "$(wc -l < "$1" | tr -d ' ')" = 3 ]
+}
+
+# The twin's step <n> was refused naming the live holder <orig>
 # and left both the lock and the sidecar exactly as they were.
 expect_twin_refused() {  # <dir> <n> <orig> <label>
   local dir=$1 n=$2 orig=$3 label=$4
   expect_code 1 "$(twin_value "$dir" twin "$n" lock.rc)" "$label: the twin took the lock from the live original: $(cat "$dir/state/twin-$n/lock.out")"
-  grep -q "another live process of this same session holds the lock (pid $orig, session S1)" "$dir/state/twin-$n/lock.out" \
-    || fail "$label: the twin's refusal is not the duplicate diagnostic naming pid $orig: $(cat "$dir/state/twin-$n/lock.out")"
+  grep -qF "another live process holds the lock under this same session id (pid $orig, session S1) and this session's continuity with that holder could not be verified" "$dir/state/twin-$n/lock.out" \
+    || fail "$label: the twin's refusal does not name holder pid $orig and the unverified continuity: $(cat "$dir/state/twin-$n/lock.out")"
   [ "$(twin_value "$dir" twin "$n" lock-after)" = "$orig" ] || fail "$label: the twin rewrote the lock to $(cat "$dir/state/twin-$n/lock-after")"
   expect_code 1 "$(twin_value "$dir" twin "$n" owned.rc)" "$label: the twin reads the original's lock as its own"
   expect_code 0 "$(twin_value "$dir" twin "$n" foreign.rc)" "$label: the twin does not see the original as a live foreign owner"
@@ -1371,7 +1399,7 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   fire_twin "$dir" orig 1
   expect_code 0 "$(twin_value "$dir" orig 1 lock.rc)" "the original could not acquire the lock: $(cat "$dir/state/orig-1/lock.out")"
   [ "$(twin_value "$dir" orig 1 lock-after)" = "$orig" ] || fail "the original's lock names $(cat "$dir/state/orig-1/lock-after"), expected $orig"
-  [ "$(cat "$dir/state/.lock-session")" = "$(printf 'S1\nanchor=%s' "$orig")" ] \
+  anchored_sidecar "$dir/state/.lock-session" S1 "$orig" \
     || fail "the original did not record its id and its own pid as the anchor: $(cat "$dir/state/.lock-session")"
 
   start_twin_role "$dir" twin
@@ -1397,14 +1425,25 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   fire_twin "$dir" twin 3
   expect_twin_refused "$dir" 3 "$orig" "exited recorded anchor"
 
+  # The recorded anchor pid reused by the same-id caller itself: the pid is in
+  # its ancestry, but the start identity recorded beside it is another
+  # process's, so it proves no continuity.
+  printf 'S1\nanchor=%s\n%s\n' "$twin" "$(sed -n 3p "$dir/sidecar-before-twin")" > "$dir/state/.lock-session"
+  fire_twin "$dir" twin 4
+  expect_twin_refused "$dir" 4 "$orig" "anchor pid reused by the caller"
+
   # The original, whose own pid is line 1, still owns its lock beside an
   # id-only sidecar, and its lock run records its anchor.
   printf 'S1\n' > "$dir/state/.lock-session"
+  touch -t 202001010000 "$dir/state/.lock-session" "$dir/sidecar-time-ref"
   fire_twin "$dir" orig 2
   expect_code 0 "$(twin_value "$dir" orig 2 lock.rc)" "the original lost its own lock beside an id-only sidecar: $(cat "$dir/state/orig-2/lock.out")"
   expect_code 0 "$(twin_value "$dir" orig 2 owned.rc)" "the original no longer reads its lock as its own"
-  [ "$(cat "$dir/state/.lock-session")" = "$(printf 'S1\nanchor=%s' "$orig")" ] \
+  anchored_sidecar "$dir/state/.lock-session" S1 "$orig" \
     || fail "the original's lock run did not upgrade the id-only sidecar: $(cat "$dir/state/.lock-session")"
+  if [ "$dir/state/.lock-session" -nt "$dir/sidecar-time-ref" ] || [ "$dir/sidecar-time-ref" -nt "$dir/state/.lock-session" ]; then
+    fail "the anchor-only upgrade under the same session id changed the sidecar's modification time"
+  fi
 
   # A genuinely dead holder is still reclaimed by a later process of the same
   # session.
@@ -1421,10 +1460,10 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   fire_twin "$dir" late 1
   expect_code 0 "$(twin_value "$dir" late 1 lock.rc)" "the same session could not reclaim a dead holder's lock: $(cat "$dir/state/late-1/lock.out")"
   [ "$(twin_value "$dir" late 1 lock-after)" = "$late" ] || fail "the reclaim left line 1 at $(cat "$dir/state/late-1/lock-after")"
-  [ "$(cat "$dir/state/.lock-session")" = "$(printf 'S1\nanchor=%s' "$late")" ] \
+  anchored_sidecar "$dir/state/.lock-session" S1 "$late" \
     || fail "the reclaim did not record the new anchor: $(cat "$dir/state/.lock-session")"
   : > "$dir/state/stop-late"
-  pass "session-lock e2e: a live twin of a session never takes its lock, beside an anchored, an id-only, or an exited-anchor sidecar, and a dead holder is still reclaimed"
+  pass "session-lock e2e: a live twin of a session never takes its lock, beside an anchored, an id-only, an exited-anchor, or a reused-anchor sidecar, the anchor-only upgrade keeps the sidecar time, and a dead holder is still reclaimed"
 }
 
 # A same-session confirmation must refresh a /clear re-key even while another
@@ -1644,7 +1683,7 @@ test_failed_lock_write_restores_previous_sidecar() {
   [ "$(sed -n 1p "$dir/state/.lock-session")" = S1 ] \
     || fail "the first session did not record S1"
   stale_pid=$(tr -d '[:space:]' < "$dir/state/stale-pid")
-  [ "$(cat "$dir/state/.lock-session")" = "$(printf 'S1\nanchor=%s' "$stale_pid")" ] \
+  anchored_sidecar "$dir/state/.lock-session" S1 "$stale_pid" \
     || fail "the first session did not record its own pid $stale_pid as the anchor: $(cat "$dir/state/.lock-session")"
   cp "$dir/state/.lock" "$dir/state/lock-before-reclaim"
   cp "$dir/state/.lock-session" "$dir/state/sidecar-before-reclaim"
@@ -1703,6 +1742,7 @@ test_verified_reclaim_keeps_new_sidecar() {
   mkdir -p "$dir/state"
   printf '1\n' > "$dir/state/.lock"
   printf 'S1\n' > "$dir/state/.lock-session"
+  touch -t 202001010000 "$dir/state/.lock-session" "$dir/sidecar-time-ref"
   env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
     FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
     "$NAMED_CLAUDE" -c '
@@ -1713,10 +1753,12 @@ test_verified_reclaim_keeps_new_sidecar() {
   expect_code 0 "$(tr -d '[:space:]' < "$dir/state/reclaim.rc")" \
     "the reclaim failed: $(cat "$dir/state/reclaim.out")"
   new_pid=$(tr -d '[:space:]' < "$dir/state/new-pid")
-  [ "$(cat "$dir/state/.lock-session")" = "$(printf 'S2\nanchor=%s' "$new_pid")" ] \
+  anchored_sidecar "$dir/state/.lock-session" S2 "$new_pid" \
     || fail "the verified reclaim left sidecar $(cat "$dir/state/.lock-session"), expected S2 anchored at $new_pid"
   [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$new_pid" ] \
     || fail "the verified reclaim did not record the new anchor pid"
+  [ "$dir/state/.lock-session" -nt "$dir/sidecar-time-ref" ] \
+    || fail "a session-id change kept the previous session's sidecar modification time"
   pass "session-lock: a verified reclaim keeps the new sidecar beside the new pid"
 }
 
@@ -1742,7 +1784,9 @@ test_reanchor_keeps_task_leases_live() {
   env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
     FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
     "$NAMED_CLAUDE" -c '
-      printf "S1\nanchor=%s\n" "$$" > "$FM_HOME/state/.lock-session"
+      . "${FM_LOCK%/*}/fm-wake-lib.sh"
+      . "${FM_LOCK%/*}/fm-session-lock-lib.sh"
+      printf "S1\nanchor=%s\nanchor-identity=%s\n" "$$" "$(fm_session_pid_identity "$$")" > "$FM_HOME/state/.lock-session"
       CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/reanchor.out" 2>&1
       printf "%s\n" "$?" > "$FM_HOME/state/reanchor.rc"
       printf "%s\n" "$$" > "$FM_HOME/state/model-pid"
@@ -1803,7 +1847,9 @@ test_reanchor_keeps_autoarm_midturn_healthy() {
   env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
     FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
     "$NAMED_CLAUDE" -c '
-      printf "S1\nanchor=%s\n" "$$" > "$FM_HOME/state/.lock-session"
+      . "${FM_LOCK%/*}/fm-wake-lib.sh"
+      . "${FM_LOCK%/*}/fm-session-lock-lib.sh"
+      printf "S1\nanchor=%s\nanchor-identity=%s\n" "$$" "$(fm_session_pid_identity "$$")" > "$FM_HOME/state/.lock-session"
       CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/reanchor.out" 2>&1
       printf "%s\n" "$?" > "$FM_HOME/state/reanchor.rc"
       printf "%s\n" "$$" > "$FM_HOME/state/model-pid"

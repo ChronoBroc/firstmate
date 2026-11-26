@@ -881,6 +881,46 @@ EOF
   pass "a lock refusal prints a loud read-only banner, skips every mutating step, and still completes the digest"
 }
 
+# A resumed duplicate carries the live holder's own trusted session id. Session
+# start must refuse it the lock exactly as it refuses another session: the
+# digest names the live holder pid and the unverified continuity, the session is
+# read-only, and a queued wake is left byte-for-byte in place.
+test_same_session_twin_lock_refusal_read_only_path() {
+  local rec root home fakebin holder_pid out status
+  rec=$(new_world same-session-twin-refusal)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  append_wake "$home/state" signal twin-task "done: queued before the duplicate started" || fail "seed wake failed"
+  cp "$home/state/.wake-queue" "$TMP_ROOT/same-session-twin-queue-before"
+
+  sleep 300 &
+  holder_pid=$!
+  printf '%s\n' "$holder_pid" > "$home/state/.lock"
+  printf 'S1\nanchor=%s\n' "$holder_pid" > "$home/state/.lock-session"
+
+  status=0
+  out=$(CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID="$SESSION_START_TEST_HARNESS_PID" \
+    FM_FAKE_HARNESS_PID="$SESSION_START_TEST_HARNESS_PID" FM_FAKE_LIVE_HOLDER_PID="$holder_pid" \
+    run_session_start "$home" "$root" "$fakebin:$BASE_PATH") || status=$?
+  kill -0 "$holder_pid" 2>/dev/null || fail "the holder exited, so the refusal was not checked against a live holder"
+  kill "$holder_pid" 2>/dev/null || true
+  wait "$holder_pid" 2>/dev/null || true
+
+  expect_code 0 "$status" "fm-session-start.sh must exit 0 even on a same-session lock refusal"
+  assert_contains "$out" "READ-ONLY SESSION" "read-only banner missing on a same-session lock refusal"
+  assert_contains "$out" "another live process holds the lock under this same session id (pid $holder_pid, session S1) and this session's continuity with that holder could not be verified" \
+    "the digest did not name the live holder pid and the unverified continuity"
+  assert_not_contains "$out" "lock acquired" "the duplicate reported acquiring the lock"
+  assert_contains "$out" "skipped (read-only session)" "wake-queue section did not report itself skipped"
+  [ "$(tr -d '[:space:]' < "$home/state/.lock")" = "$holder_pid" ] || fail "the duplicate rewrote the lock to $(cat "$home/state/.lock")"
+  cmp -s "$TMP_ROOT/same-session-twin-queue-before" "$home/state/.wake-queue" \
+    || fail "the read-only duplicate changed the queued wake"
+  pass "a same-session duplicate is refused the live holder's lock at session start and stays read-only"
+}
+
 test_lock_write_failure_read_only_path() {
   local rec root home fakebin out status
   rec=$(new_world lock-write-failure)
@@ -3126,6 +3166,7 @@ EOF
 
 test_context_digest_absent_empty_present
 test_lock_refusal_read_only_path
+test_same_session_twin_lock_refusal_read_only_path
 test_lock_write_failure_read_only_path
 test_trace_context_effective_state_is_frozen_after_lock
 test_session_lock_concurrent_single_winner

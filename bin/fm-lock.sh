@@ -27,10 +27,12 @@
 # and left byte-identical when it already has the content this acquisition
 # would write. Its second line `anchor=<pid>` records the acquiring session's
 # own anchor pid beside the id, so a same-id caller outside the lock's ancestry
-# owns the lock only when that recorded anchor is in its own ancestry
-# (fm_session_lock_anchor_continues in bin/fm-session-lock-lib.sh); any other
-# same-id caller, including one beside a sidecar with no anchor line, is
-# refused as a duplicate and never re-anchors the lock. A same-session
+# owns the lock only when that recorded anchor is in its own ancestry and its
+# third line `anchor-identity=<identity>` still matches that process's start
+# identity (fm_session_lock_anchor_continues in bin/fm-session-lock-lib.sh);
+# any other same-id caller, including one beside a sidecar with no anchor or no
+# identity, is refused without a continuity verdict and never re-anchors the
+# lock. A same-session
 # confirmation keeps a live line 1 that is in this session's harness ancestry,
 # because bin/fm-startup-network.sh compares that pid across its deferred
 # sweeps; a dead recorded pid is reclaimed and rewritten to this session's
@@ -182,20 +184,37 @@ remember_lock_session() {
 
 # Record the trusted session id beside the lock, or remove a sidecar that no
 # trusted id backs. A second line `anchor=<pid>` records this session's anchor
-# pid beside the id (fm_session_lock_recorded_anchor). Called only while the
-# claim lock is held. A sidecar that already has exactly this content is left
-# untouched, so a same-session confirmation keeps it byte-identical.
+# pid beside the id (fm_session_lock_recorded_anchor), and a third line
+# `anchor-identity=<identity>` its process start identity when that is readable
+# (fm_session_lock_recorded_anchor_identity). Called only while the claim lock
+# is held. A sidecar that already has exactly this content is left untouched,
+# so a same-session confirmation keeps it byte-identical; one rewritten under
+# the same recorded id keeps its modification time, which marks when that
+# session id was recorded.
 publish_lock_session() {
-  local trusted current content tmp
+  local trusted current content identity recorded tmp
   if trusted=$(fm_session_lock_trusted_session_id); then
     content="$trusted"$'\n'"anchor=$me"
+    if identity=$(fm_session_pid_identity "$me" 2>/dev/null) && [ -n "$identity" ]; then
+      case "$identity" in
+        *$'\n'*|*$'\r'*) ;;
+        *) content="$content"$'\n'"anchor-identity=$identity" ;;
+      esac
+    fi
     if [ -f "$LOCK_SESSION" ] && [ ! -L "$LOCK_SESSION" ] \
       && current=$(cat "$LOCK_SESSION" 2>/dev/null) && [ "$current" = "$content" ]; then
       return 0
     fi
     remember_lock_session || return 1
     tmp=$(mktemp "$STATE/.lock-session.XXXXXX" 2>/dev/null) || return 1
-    if ! { printf '%s\n' "$content" > "$tmp" && mv -f "$tmp" "$LOCK_SESSION"; } 2>/dev/null; then
+    if ! printf '%s\n' "$content" > "$tmp" 2>/dev/null; then
+      rm -f "$tmp" 2>/dev/null
+      return 1
+    fi
+    if recorded=$(fm_session_lock_recorded_session_id "$STATE") && [ "$recorded" = "$trusted" ]; then
+      touch -r "$LOCK_SESSION" "$tmp" 2>/dev/null || true
+    fi
+    if ! mv -f "$tmp" "$LOCK_SESSION" 2>/dev/null; then
       rm -f "$tmp" 2>/dev/null
       return 1
     fi
@@ -258,7 +277,7 @@ refuse_live_owner() {  # <recorded-pid>
   local recorded trusted
   if recorded=$(fm_session_lock_recorded_session_id "$STATE") \
     && trusted=$(fm_session_lock_trusted_session_id) && [ "$trusted" = "$recorded" ]; then
-    echo "error: another live process of this same session holds the lock (pid $1, session $recorded): this session is a duplicate of one still running; operate read-only until resolved" >&2
+    echo "error: another live process holds the lock under this same session id (pid $1, session $recorded) and this session's continuity with that holder could not be verified; operate read-only until resolved" >&2
   elif [ -n "$recorded" ]; then
     echo "error: another live firstmate session holds the lock (pid $1, session $recorded); operate read-only until resolved" >&2
   else

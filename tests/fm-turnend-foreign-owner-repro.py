@@ -144,6 +144,7 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
+FAILURES = []
 try:
     root, env = make("nonowner")
     owner = start(
@@ -194,33 +195,38 @@ try:
     require(fresh.returncode == 0, "a fresh leftover beat must not restore foreign-owner blocking")
 
     stop(owner)
-    replacement = start(
-        env,
-        'printf \'%s\\n\' \'{"session_id":"replacement","stop_hook_active":true}\' | "$FM_ROOT_OVERRIDE/bin/fm-claude-stop-autoarm.sh"; printf "replacement_rc=%s\\n" "$?"; sleep 1',
-        "replacement.txt",
-    )
-    until(
-        lambda: (root / "state/.watch.lock/pid").is_file(),
-        message="replacement owner did not publish state/.watch.lock/pid",
-    )
-    watcher_pid = (root / "state/.watch.lock/pid").read_text().strip()
-    print("COUNTERFACTUAL dead original owner: watcher=", watcher_pid, flush=True)
-    healthy = guard(env, "replacement-owned healthy watcher")
-    require(healthy.returncode == 0, "a replacement owning session must still recover supervision")
-    stop(replacement)
+    try:
+        replacement = start(
+            env,
+            'printf \'%s\\n\' \'{"session_id":"replacement","stop_hook_active":true}\' | "$FM_ROOT_OVERRIDE/bin/fm-claude-stop-autoarm.sh"; printf "replacement_rc=%s\\n" "$?"; sleep 1',
+            "replacement.txt",
+        )
+        until(
+            lambda: (root / "state/.watch.lock/pid").is_file(),
+            message="replacement owner did not publish state/.watch.lock/pid",
+        )
+        watcher_pid = (root / "state/.watch.lock/pid").read_text().strip()
+        print("COUNTERFACTUAL dead original owner: watcher=", watcher_pid, flush=True)
+        healthy = guard(env, "replacement-owned healthy watcher")
+        require(healthy.returncode == 0, "a replacement owning session must still recover supervision")
+        stop(replacement)
+    except RuntimeError as error:
+        FAILURES.append(f"replacement-owner watcher case: {error}")
+        print("FAILED replacement-owner watcher case:", error, flush=True)
 
     # A live harness-shaped process outside the owner's ancestry that carries
     # the owner's own trusted session id, while the sidecar records the owner as
     # that session's model-loop anchor, is a live twin: a second running copy of
-    # the session. Its acquisition is refused with the duplicate diagnostic and
-    # its Stop ends safely as a non-owner.
+    # the session. Its acquisition is refused with a diagnostic naming the live
+    # holder and the unverified continuity, and its Stop ends safely as a
+    # non-owner.
     # A sidecar that records the id alone, as every sidecar written before the
     # anchor existed does, proves no continuity either: the twin stays refused.
     # A recorded anchor that has exited proves no continuity either, so the
     # live line 1 is never handed to a same-id process outside its ancestry.
     # Positive control: a process that is itself the recorded model-loop
-    # anchor, as a surviving helper is after its chain to line 1 is recycled,
-    # continues the session, so the lock accepts it and re-anchors line 1 onto
+    # anchor, pid and start identity, as a surviving helper is after its chain
+    # to line 1 is recycled, continues the session, so the lock accepts it and re-anchors line 1 onto
     # its CLAUDE_PID, keeping the recorded id. A different id against the
     # re-anchored lock keeps the refusal and names the recorded id.
     same, same_env = make("same-session")
@@ -251,12 +257,15 @@ try:
     print("live-twin acquisition", "rc=" + str(twin.returncode), "stdout=" + repr(twin.stdout), "stderr=" + repr(twin.stderr), flush=True)
     require("lock_rc=1" in twin.stdout, "a live twin of the owner's session took its lock")
     require(
-        f"another live process of this same session holds the lock (pid {same_lock_owner}, session synthetic-same)" in twin.stderr,
+        f"another live process holds the lock under this same session id (pid {same_lock_owner}, session synthetic-same) and this session's continuity with that holder could not be verified" in twin.stderr,
         "the live-twin refusal did not name the owner pid and the shared session id",
     )
     require(session_lock_text(same_lock) == same_lock_owner, "a live twin moved the lock line")
     require(
-        (same / "state/.lock-session").read_text().splitlines() == ["synthetic-same", "anchor=" + same_lock_owner],
+        (same / "state/.lock-session").read_text().splitlines()[:2] == ["synthetic-same", "anchor=" + same_lock_owner]
+        and len((same / "state/.lock-session").read_text().splitlines()) == 3
+        and (same / "state/.lock-session").read_text().splitlines()[2].startswith("anchor-identity=")
+        and len((same / "state/.lock-session").read_text().splitlines()[2]) > len("anchor-identity="),
         "the owner did not record its trusted session id and model-loop anchor beside the lock",
     )
     twin_stop = guard(same_env, "live-twin stop", prefix="export CLAUDE_PID=$$; ")
@@ -271,7 +280,7 @@ try:
     print("id-only sidecar twin acquisition", "rc=" + str(id_only.returncode), "stdout=" + repr(id_only.stdout), "stderr=" + repr(id_only.stderr), flush=True)
     require("lock_rc=1" in id_only.stdout, "a live twin took the owner's lock beside an id-only sidecar")
     require(
-        f"another live process of this same session holds the lock (pid {same_lock_owner}, session synthetic-same)" in id_only.stderr,
+        f"another live process holds the lock under this same session id (pid {same_lock_owner}, session synthetic-same) and this session's continuity with that holder could not be verified" in id_only.stderr,
         "the id-only twin refusal did not name the owner pid and the shared session id",
     )
     require(session_lock_text(same_lock) == same_lock_owner, "a twin moved the lock line beside an id-only sidecar")
@@ -289,7 +298,7 @@ try:
     print("exited-anchor twin acquisition", "rc=" + str(exited_twin.returncode), "stdout=" + repr(exited_twin.stdout), "stderr=" + repr(exited_twin.stderr), flush=True)
     require("lock_rc=1" in exited_twin.stdout, "a same-id process took the live owner's lock because the recorded anchor had exited")
     require(
-        f"another live process of this same session holds the lock (pid {same_lock_owner}, session synthetic-same)" in exited_twin.stderr,
+        f"another live process holds the lock under this same session id (pid {same_lock_owner}, session synthetic-same) and this session's continuity with that holder could not be verified" in exited_twin.stderr,
         "the exited-anchor refusal did not name the owner pid and the shared session id",
     )
     require(session_lock_text(same_lock) == same_lock_owner, "a same-id process moved the lock line beside an exited anchor")
@@ -300,7 +309,8 @@ try:
     accepted = start(
         same_env,
         'export CLAUDE_PID=$$; printf "%s\\n" "$$" > "$FM_HOME/state/accepted-pid"; '
-        'printf "synthetic-same\\nanchor=%s\\n" "$$" > "$FM_HOME/state/.lock-session"; '
+        '. "$FM_ROOT_OVERRIDE/bin/fm-wake-lib.sh"; . "$FM_ROOT_OVERRIDE/bin/fm-session-lock-lib.sh"; '
+        'printf "synthetic-same\\nanchor=%s\\nanchor-identity=%s\\n" "$$" "$(fm_session_pid_identity "$$")" > "$FM_HOME/state/.lock-session"; '
         '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; printf "%s\\n" "$?" > "$FM_HOME/state/accepted-rc.tmp"; '
         'mv "$FM_HOME/state/accepted-rc.tmp" "$FM_HOME/state/accepted-rc"; '
         "while :; do sleep 1; done",
@@ -345,6 +355,7 @@ try:
     )
     print("single owner, no autoarm firing", "rc=" + str(sole_owner.returncode), "stdout=" + repr(sole_owner.stdout), "stderr=" + repr(sole_owner.stderr), flush=True)
     require("single_owner_guard_rc=2" in sole_owner.stdout, "a sole owner without supervision must retain the guard")
+    require(not FAILURES, "independent cases failed: " + "; ".join(FAILURES))
     print("COMPLETE", flush=True)
 finally:
     for process in reversed(PROCS):
