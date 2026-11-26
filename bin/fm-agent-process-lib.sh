@@ -132,3 +132,86 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
     printf 'other'
   fi
 }
+
+# fm_agent_process_live_in_dir: the verified-harness agent processes owned by
+# this user whose working directory is exactly <dir> (a subdirectory does not
+# match), read from the kernel's per-process working directory rather than
+# from any terminal endpoint. Each process is classified through
+# fm_agent_process_classify, so only agents count, and this process and its
+# ancestors are excluded.
+#
+# Working directories come from /proc/<pid>/cwd where the kernel exposes it
+# (Linux) and from lsof otherwise (macOS).
+#
+# Prints and returns:
+#   0  one `<pid>\t<process name>` line per live agent process found.
+#   1  nothing: no agent process of this user works in <dir>.
+#   2  one line naming why the probe could not decide: <dir> does not
+#      resolve, no working-directory source is usable, or a candidate's
+#      identity could not be read while it was still running. Callers that
+#      would start an agent in <dir> must treat this as a refusal, never as 1.
+fm_agent_process_live_in_dir() {  # <dir>
+  local dir=${1:-} dir_real uid table pid ppid cwd self ancestors=' ' name args argv0 found='' lsof_out lsof_rc p
+  dir_real=$(cd "$dir" 2>/dev/null && pwd -P) || {
+    printf 'the directory %s does not resolve\n' "${dir:-<empty>}"
+    return 2
+  }
+  uid=$(id -u 2>/dev/null) || { printf 'the current user id could not be read\n'; return 2; }
+  table=$(LC_ALL=C ps -A -o pid=,ppid= 2>/dev/null) || table=
+  [ -n "$table" ] || { printf 'the process table could not be read\n'; return 2; }
+  self=${BASHPID:-$$}
+  while [ -n "$self" ] && [ "$self" != 0 ] && [ "${ancestors#* "$self" }" = "$ancestors" ]; do
+    ancestors="$ancestors$self "
+    self=$(printf '%s\n' "$table" | awk -v p="$self" '$1 == p { print $2; exit }')
+  done
+  ancestors="$ancestors$$ "
+  local candidates=''
+  if [ -r /proc/self/cwd ] || [ -L /proc/self/cwd ]; then
+    for p in /proc/[0-9]*; do
+      [ -O "$p" ] || continue
+      pid=${p#/proc/}
+      if cwd=$(readlink "$p/cwd" 2>/dev/null); then
+        [ "$cwd" = "$dir_real" ] && candidates="$candidates $pid"
+        continue
+      fi
+      [ -d "$p" ] || continue
+      case "$(awk '{ s = $0; sub(/^.*\) /, "", s); print substr(s, 1, 1) }' "$p/stat" 2>/dev/null)" in
+        Z|X|'') continue ;;
+      esac
+      printf 'the working directory of running process %s could not be read\n' "$pid"
+      return 2
+    done
+  else
+    command -v lsof >/dev/null 2>&1 || {
+      printf 'neither /proc nor lsof is available to read process working directories\n'
+      return 2
+    }
+    lsof_out=$(LC_ALL=C lsof -w -a -u "$uid" -d cwd -Fpn 2>/dev/null)
+    lsof_rc=$?
+    [ -n "$lsof_out" ] || {
+      printf 'lsof listed no working directories for this user (exit %s)\n' "$lsof_rc"
+      return 2
+    }
+    candidates=$(printf '%s\n' "$lsof_out" | awk -v want="$dir_real" '
+      /^p/ { pid = substr($0, 2); next }
+      /^n/ { if (substr($0, 2) == want) printf " %s", pid }')
+  fi
+  for pid in $candidates; do
+    case "$ancestors" in *" $pid "*) continue ;; esac
+    name=$(LC_ALL=C ps -o comm= -p "$pid" 2>/dev/null) || name=
+    args=$(LC_ALL=C ps -o args= -p "$pid" 2>/dev/null) || args=
+    if [ -z "$name" ]; then
+      kill -0 "$pid" 2>/dev/null || continue
+      printf 'the identity of running process %s working in %s could not be read\n' "$pid" "$dir_real"
+      return 2
+    fi
+    name=${name#"${name%%[![:space:]]*}"}
+    args=${args#"${args%%[![:space:]]*}"}
+    argv0=${args%%[[:space:]]*}
+    [ "$(fm_agent_process_classify "$name" "$argv0" "$args" "$pid")" = agent ] || continue
+    found="$found$pid"$'\t'"${name##*/}"$'\n'
+  done
+  [ -n "$found" ] || return 1
+  printf '%s' "$found"
+  return 0
+}

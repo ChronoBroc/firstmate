@@ -29,6 +29,8 @@ set -u
 . "$ROOT/bin/fm-trace-context-lib.sh"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-tasks-axi-lib.sh"
+# shellcheck source=/dev/null
+. "$ROOT/bin/fm-agent-process-lib.sh"
 
 CONTROL="$ROOT/bin/fm-control.sh"
 SPAWN="$ROOT/bin/fm-spawn.sh"
@@ -41,9 +43,14 @@ TMP_ROOT=$(fm_test_tmproot fm-control-relaunch)
 mkdir -p "$TMP_ROOT"
 TMP_ROOT=$(cd "$TMP_ROOT" && pwd)
 TASK_TMPS=()
+# Real processes the worktree-agent probe tests start, stopped on exit.
+LIVE_PIDS=()
 
 relaunch_cleanup() {
   local d
+  for d in "${LIVE_PIDS[@]:-}"; do
+    [ -n "$d" ] && kill "$d" 2>/dev/null
+  done
   for d in "${TASK_TMPS[@]:-}"; do
     [ -n "$d" ] && fm_test_remove_tree "$d"
   done
@@ -3779,6 +3786,180 @@ SH
   pass "fm-control exit removes the dialog file before it releases the control lock"
 }
 
+
+# --- an agent outside the recorded endpoint ---------------------------------
+#
+# The probe reads the kernel's working directory of real processes, so these
+# cases start real agent-named stand-ins (tests/lib.sh fm_agent_standin) and
+# need no harness. The endpoint itself stays the stubbed tmux above, which is
+# what lets the endpoint read agent-free while an agent still works in the
+# worktree - the double tmux server fault, without a second server.
+
+# start_dir_process <dir> <executable> [args...]: start a real process whose
+# working directory is <dir>; its pid lands in STARTED_PID and LIVE_PIDS.
+start_dir_process() {
+  local dir=$1
+  shift
+  (cd "$dir" && exec "$@") </dev/null >/dev/null 2>&1 &
+  STARTED_PID=$!
+  LIVE_PIDS+=("$STARTED_PID")
+}
+
+# agent_standin_named <dir> <name>: an agent-named stand-in executable, or
+# nonzero when this host cannot build one that survives the rename.
+agent_standin_named() {
+  local standin
+  standin=$(fm_agent_standin "$1/standin") || return 1
+  mkdir -p "$1/agentbin"
+  ln -sf "$standin" "$1/agentbin/$2"
+  printf '%s\n' "$1/agentbin/$2"
+}
+
+# wait_probe_rc <dir> <want-rc>: poll the probe until it answers <want-rc>.
+wait_probe_rc() {
+  local i=0 rc
+  while [ "$i" -lt 50 ]; do
+    rc=0
+    fm_agent_process_live_in_dir "$1" >/dev/null || rc=$?
+    [ "$rc" = "$2" ] && return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  return 1
+}
+
+test_worktree_agent_probe_finds_only_agents_working_there() {
+  local dir agent out rc agent_pid other_pid sub_pid shell_pid self_pid
+  dir="$TMP_ROOT/probe-$RANDOM"
+  mkdir -p "$dir/wt/sub"
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "worktree agent probe: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  start_dir_process "$dir/wt" /bin/sleep 600; other_pid=$STARTED_PID
+  start_dir_process "$dir/wt" /bin/sh -c 'sleep 600; :'; shell_pid=$STARTED_PID
+  start_dir_process "$dir/wt/sub" "$agent" 600; sub_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 1 || fail "a sleep, a shell, and an agent in a subdirectory are not agents working in the worktree: $(fm_agent_process_live_in_dir "$dir/wt")"
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the agent-named process working in the worktree was never found"
+  out=$(fm_agent_process_live_in_dir "$dir/wt"); rc=$?
+  expect_code 0 "$rc" "the probe should find the agent"
+  [ "$(printf '%s\n' "$out" | cut -f1)" = "$agent_pid" ] \
+    || fail "the probe must name exactly the agent working in the worktree ($agent_pid), got: $out"
+  assert_contains "$out" $'\t'claude "the probe should name the agent's process"
+  # The checker and its ancestors are never findings: run the probe from a
+  # process that is itself agent-named and works in the worktree.
+  ln -s "$(command -v bash)" "$dir/agentbin/claude-checker" || fail "could not name a checker shell like an agent"
+  # shellcheck disable=SC2016
+  out=$(cd "$dir/wt" && "$dir/agentbin/claude-checker" -c '. "$1/bin/fm-agent-process-lib.sh"; fm_agent_process_live_in_dir "$2"; exit $?' _ "$ROOT" "$dir/wt"); rc=$?
+  expect_code 0 "$rc" "the probe run from an agent-named checker should still find the agent"
+  [ "$(printf '%s\n' "$out" | cut -f1)" = "$agent_pid" ] \
+    || fail "the checking process must exclude itself, got: $out"
+  kill "$agent_pid" 2>/dev/null
+  wait_probe_rc "$dir/wt" 1 || fail "once the agent exits the probe must find nothing"
+  rc=0; out=$(fm_agent_process_live_in_dir "$dir/missing") || rc=$?
+  expect_code 2 "$rc" "a directory that does not resolve is inconclusive, never empty"
+  assert_contains "$out" "does not resolve" "the inconclusive answer should say why"
+  kill "$other_pid" "$shell_pid" "$sub_pid" 2>/dev/null
+  pass "worktree agent probe: finds the agent working in the directory and nothing else"
+}
+
+test_relaunch_refuses_an_agent_still_working_in_the_worktree() {
+  local dir agent out rc agent_pid
+  dir=$(new_case beside rl90)
+  add_ship_task "$dir" rl90 claude
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "fm-control relaunch beside a live agent: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  cp -p "$dir/home/data/rl90/brief.md" "$dir/brief.orig"
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  out=$(FM_SPAWN_LIVE_AGENT_SETTLE_SECS=0 run_control "$dir" rl90 relaunch --note "lost its terminal"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch beside a live agent in the worktree must refuse"$'\n'"$out"
+  assert_contains "$out" "pid $agent_pid (claude)" "the refusal must name the live agent's pid"
+  assert_contains "$out" "still working in its local copy" "the outcome must not claim no agent is running"
+  assert_not_contains "$out" "no agent is running" "an agent is running in the worktree"
+  ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no replacement agent may be launched"
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl90/brief.md" \
+    || fail "the live agent's instructions must be restored byte-exact"
+  kill -0 "$agent_pid" 2>/dev/null || fail "the found agent must be left running, never killed"
+  kill "$agent_pid" 2>/dev/null
+  pass "fm-control relaunch: refuses and names the pid of an agent still working in the worktree"
+}
+
+test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
+  local dir agent out rc agent_pid
+  dir=$(new_case settling rl91)
+  add_ship_task "$dir" rl91 claude
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "fm-control relaunch after a stopping agent: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  # The stand-in outlives the stop by a few seconds, as a real harness can
+  # while it shuts down, so the replacement is due while it still runs.
+  (
+    until grep -Fqx /exit "$dir/fake/literal" 2>/dev/null; do sleep 0.1; done
+    sleep 3
+    kill "$agent_pid" 2>/dev/null
+  ) </dev/null >/dev/null 2>&1 &
+  out=$(FM_SPAWN_LIVE_AGENT_SETTLE_SECS=10 run_control "$dir" rl91 relaunch --note "stopped mid-refactor"); rc=$?
+  expect_code 0 "$rc" "an agent that finishes exiting within the settle window must not block the relaunch"$'\n'"$out"
+  assert_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "the replacement should have been launched"
+  pass "fm-control relaunch: an agent still exiting when the replacement is due is waited for, then replaced"
+}
+
+test_spawn_relaunch_refuses_when_the_worktree_probe_is_inconclusive() {
+  local dir out rc
+  if [ -e /proc/self/cwd ]; then
+    pass "fm-spawn --relaunch inconclusive probe: skipped - this host reads working directories from /proc, not lsof"
+    return 0
+  fi
+  dir=$(new_case inconclusive rl92)
+  add_ship_task "$dir" rl92 claude
+  printf 'zsh' > "$dir/fake/command"
+  printf '#!/bin/sh\nexit 1\n' > "$dir/fakebin/lsof"
+  chmod +x "$dir/fakebin/lsof"
+  out=$(run_spawn "$dir" rl92 --relaunch --harness claude); rc=$?
+  expect_code 1 "$rc" "an inconclusive worktree probe must refuse the relaunch"$'\n'"$out"
+  assert_contains "$out" "could not establish whether an agent process is still working" "the refusal should say the probe was inconclusive"
+  assert_contains "$out" "lsof listed no working directories" "the refusal should name the concrete cause"
+  ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no replacement agent may be launched"
+  pass "fm-spawn --relaunch: an inconclusive worktree probe refuses rather than launching"
+}
+
+test_secondmate_respawn_refuses_an_agent_still_working_in_its_home() {
+  local dir home agent out rc agent_pid
+  dir=$(new_case smbeside sm90)
+  home="$dir/home"
+  agent=$(agent_standin_named "$dir" codex) || {
+    pass "fm-spawn --secondmate beside a live agent: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  mkdir -p "$home/data/sm90"
+  printf '# secondmate brief\n' > "$home/data/sm90/brief.md"
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
+  mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin"
+  printf 'sm90\n' > "$dir/smhome/.fm-secondmate-home"
+  printf '# agents\n' > "$dir/smhome/AGENTS.md"
+  printf '%s\n' "fm-sm90" > "$dir/fake/windows"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+  printf 'zsh' > "$dir/fake/command"
+  start_dir_process "$dir/smhome" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/smhome" 0 || fail "the stand-in agent never appeared in the secondmate home"
+  out=$(FM_SPAWN_LIVE_AGENT_SETTLE_SECS=0 run_spawn "$dir" sm90 "$dir/smhome" --secondmate claude); rc=$?
+  expect_code 1 "$rc" "a secondmate respawn beside its live agent must refuse"$'\n'"$out"
+  assert_contains "$out" "the secondmate home" "the refusal should name the secondmate home"
+  assert_contains "$out" "pid $agent_pid (codex)" "the refusal must name the live agent's pid"
+  ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no second secondmate may be launched"
+  kill "$agent_pid" 2>/dev/null
+  wait_probe_rc "$dir/smhome" 1 || fail "the stand-in agent should be gone"
+  out=$(run_spawn "$dir" sm90 "$dir/smhome" --secondmate claude); rc=$?
+  assert_not_contains "$out" "refusing to start an agent" "an empty home must not be refused by the probe"
+  pass "fm-spawn --secondmate: refuses and names the pid of an agent still working in the home"
+}
 test_relaunch_off_opencode_removes_tracked_wiring
 test_exit_and_relaunch_remove_the_dialog_file
 test_exit_removes_the_dialog_file_before_releasing_the_lock
@@ -3892,3 +4073,8 @@ test_away_relaunch_of_a_dead_worker_below_the_cap_proceeds
 test_away_direct_spawn_relaunch_of_a_dead_worker_at_a_full_cap_defers
 test_away_relaunch_defers_while_another_launch_takes_the_last_slot
 test_away_direct_spawn_relaunch_defers_while_another_launch_takes_the_last_slot
+test_worktree_agent_probe_finds_only_agents_working_there
+test_relaunch_refuses_an_agent_still_working_in_the_worktree
+test_relaunch_waits_for_a_stopping_agent_to_finish_exiting
+test_spawn_relaunch_refuses_when_the_worktree_probe_is_inconclusive
+test_secondmate_respawn_refuses_an_agent_still_working_in_its_home

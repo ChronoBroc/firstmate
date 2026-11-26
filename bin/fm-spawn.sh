@@ -103,6 +103,10 @@
 #   Only a crewmate or scout rebinds: a secondmate whose endpoint is gone is
 #   respawned by its own owner (`--secondmate`, driven by the session-start
 #   liveness sweep).
+#   Whatever the endpoint reads, a relaunch, and a --secondmate spawn into an
+#   existing home, refuses while a live agent process still works in that
+#   worktree or home (spawn_refuse_if_live_agent_in below; docs/agent-control.md
+#   owns the rule).
 #   Every fresh ship/scout launch and replacement explicitly enters the recorded
 #   worktree immediately before trust setup and brief delivery, and a pre-launch
 #   cwd check refuses any endpoint that still reports another copy; a Herdr shell
@@ -2291,6 +2295,35 @@ fi
 if [ "$RELAUNCH" -ne 1 ]; then
   fm_lease_forbid_branch "new-task spawn (fm-spawn)" --away-relocated
 fi
+# spawn_refuse_if_live_agent_in <dir> <what>: exit 1 naming the pid when a
+# live agent process works in <dir> (fm_agent_process_live_in_dir), after
+# giving one that is exiting FM_SPAWN_LIVE_AGENT_SETTLE_SECS (default 5) to
+# finish; an inconclusive probe also exits 1.
+spawn_refuse_if_live_agent_in() {
+  local dir=$1 what=$2 out rc settle=${FM_SPAWN_LIVE_AGENT_SETTLE_SECS:-5} deadline pids
+  case "$settle" in ''|*[!0-9]*) settle=5 ;; esac
+  deadline=$(($(date +%s) + settle))
+  while :; do
+    rc=0
+    out=$(fm_agent_process_live_in_dir "$dir") || rc=$?
+    case "$rc" in
+      1) return 0 ;;
+      0)
+        if [ "$(date +%s)" -lt "$deadline" ]; then
+          sleep 0.5
+          continue
+        fi
+        pids=$(printf '%s\n' "$out" | awk -F'\t' 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }')
+        echo "error: refusing to start an agent for $ID: $what $dir already has a live agent process working in it, pid $pids, whatever its recorded endpoint reads from here; stop that agent, or confirm it is not this task's, before launching another" >&2
+        exit 1
+        ;;
+      *)
+        echo "error: refusing to start an agent for $ID: could not establish whether an agent process is still working in $what $dir (${out:-probe failed}); an unproven answer is treated as a live agent" >&2
+        exit 1
+        ;;
+    esac
+  done
+}
 spawn_refuse_if_away_spend_cap() {
   [ "$KIND" != secondmate ] || return 0
   if [ "$RELAUNCH" -eq 1 ]; then
@@ -2645,6 +2678,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: task $ID's recorded worktree '${RELAUNCH_WT:-none}' is missing; refusing to relaunch without the local copy its work lives in" >&2
     exit 1
   }
+  spawn_refuse_if_live_agent_in "$RELAUNCH_WT" "the recorded worktree"
   if [ "$KIND" = secondmate ]; then
     FIRSTMATE_HOME=$(fm_meta_get "$RELAUNCH_META" home)
     [ -n "$FIRSTMATE_HOME" ] || FIRSTMATE_HOME=$RELAUNCH_WT
@@ -4234,6 +4268,7 @@ if [ "$KIND" = secondmate ]; then
     exit 1
   }
   PROJ_ABS=$(validate_firstmate_home_for_spawn "$ID" "$FIRSTMATE_HOME")
+  [ "$RELAUNCH" -eq 1 ] || spawn_refuse_if_live_agent_in "$PROJ_ABS" "the secondmate home"
   if [ -e "$DATA/secondmates.md" ] || [ -L "$DATA/secondmates.md" ]; then
     if ! secondmate_registry_validate_bindings "$DATA/secondmates.md" resolve_path "$ID" "$FIRSTMATE_HOME"; then
       echo "error: $SECONDMATE_REGISTRY_ERROR" >&2

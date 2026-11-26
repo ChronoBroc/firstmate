@@ -1033,8 +1033,25 @@ relaunch_rollback() {
         journal_write "failed:$RELAUNCH_PHASE" "rollback=none-new-record-kept" || true
         echo "error: $ID was relaunched on $TARGET_HARNESS but no running agent could be confirmed; its work is preserved at $WT" >&2
       else
-        journal_write "failed:$RELAUNCH_PHASE" "rollback=prior-record-kept" || true
-        echo "error: $ID's agent was stopped but the replacement did not launch; no agent is running, and its work plus the recorded progress note are preserved at $WT" >&2
+        local live_rc=0 live_out
+        live_out=$(fm_agent_process_live_in_dir "$WT") || live_rc=$?
+        if [ "$live_rc" -eq 1 ]; then
+          journal_write "failed:$RELAUNCH_PHASE" "rollback=prior-record-kept" || true
+          echo "error: $ID's agent was stopped but the replacement did not launch; no agent is running, and its work plus the recorded progress note are preserved at $WT" >&2
+        else
+          # An agent outside the endpoint may still be working in the local
+          # copy: restore its instructions as the still-running cases do.
+          if [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ]; then
+            cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null || true
+          fi
+          if [ "$live_rc" -eq 0 ]; then
+            journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-restored-agent-in-worktree" || true
+            echo "error: $ID's recorded endpoint holds no agent now, but no replacement was launched because an agent is still working in its local copy $WT (pid $(printf '%s\n' "$live_out" | awk -F'\t' 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }')); its original instructions were restored and the durable record was retained" >&2
+          else
+            journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-restored-agent-in-worktree-unproven" || true
+            echo "error: $ID's recorded endpoint holds no agent now, but the replacement did not launch and whether an agent still works in its local copy $WT could not be established ($live_out); its original instructions were restored and the durable record was retained" >&2
+          fi
+        fi
       fi
       ;;
   esac
