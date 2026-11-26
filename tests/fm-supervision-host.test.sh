@@ -126,6 +126,49 @@ test_engine_in_another_time_zone_handles_its_granted_rows() {
   pass "host: an engine in another time zone than the host drains, reports, and acknowledges its granted rows"
 }
 
+# A real engine's tools may be sandboxed from inspecting the host process: ps
+# fails and no proc root is readable. Its drain must still use the grant the
+# host published, or every routine turn end it takes is handed back to main
+# with its granted rows unacknowledged, one wasted main turn per worker. Turn
+# ends from several workers at once reach it as one close whose grant holds
+# every one of them, and all of them must clear.
+
+# One engine drain printed a distinct signal row (queue column 4 is the row's
+# key) for each of the demo, alpha, and beta turn ends.
+one_drain_holds_every_turn_end() {  # <home>
+  local drain
+  for drain in "$1"/engine-drain.*; do
+    [ -f "$drain" ] || continue
+    awk -F '\t' '$3 == "signal" && ($4 == "demo.turn-ended" || $4 == "alpha.turn-ended" || $4 == "beta.turn-ended") && !seen[$4]++ { n++ }
+      END { exit n == 3 ? 0 : 1 }' "$drain" && return 0
+  done
+  return 1
+}
+
+test_engine_that_cannot_inspect_the_host_handles_routine_turn_ends() {
+  local home task
+  home=$(make_home engine-no-ps attended)
+  mkdir -p "$home/engine-bin"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$home/engine-bin/ps"
+  chmod +x "$home/engine-bin/ps"
+  for task in alpha beta; do
+    printf 'project=demo\nwindow=fm-%s\nharness=claude\n' "$task" > "$home/state/$task.meta"
+  done
+  printf '#!/usr/bin/env bash\nPATH="%s:$PATH" FM_PROC_ROOT_OVERRIDE="%s" exec "%s" "$@"\n' \
+    "$home/engine-bin" "$home/no-proc" "$STUB" > "$home/engine-wrap"
+  chmod +x "$home/engine-wrap"
+  touch "$home/state/demo.turn-ended" "$home/state/alpha.turn-ended" "$home/state/beta.turn-ended"
+  FM_SUPERVISION_ENGINE_CLAUDE_BIN="$home/engine-wrap" start_host "$home"
+  wait_until 250 one_drain_holds_every_turn_end "$home" \
+    || fail "engine no ps: no single engine drain was granted a row for each worker's turn end: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
+  wait_until 250 handled_at_least "$home" 1 \
+    || fail "engine no ps: the host never counted the batched turn as handled: $(cat "$home/host.out"; cat "$home/state/.supervision-host.log")"
+  host_exited "$home" && fail "engine no ps: a routine turn end reached main: $(cat "$home/host.out")"
+  assert_no_re '	failed	' "$home/state/.supervision-host.log" "engine no ps: a turn failed to acknowledge its granted rows"
+  [ ! -s "$home/state/.wake-queue" ] || fail "engine no ps: granted rows were left queued: $(cat "$home/state/.wake-queue")"
+  pass "host: an engine that cannot inspect the host still handles routine turn ends off main"
+}
+
 test_attended_captain_outcome_reaches_main_through_branch_outcomes() {
   local home drained
   home=$(make_home attended-captain attended)
@@ -503,7 +546,7 @@ SH
   printf '{"hook_event_name":"UserPromptSubmit","prompt_id":"p2","prompt":"second ask, never handed over"}' > "$home/mirror-seed.2"
   : > "$home/slow-render"
   echo 0 > "$home/park-clock"
-  park_after_stop "$home"
+  park_after_stop "$home" empty
   append_status "$home" 'reaches the boundary'
   wait_until 400 host_exited "$home" || fail "mirror boundary: the host did not end its park"
   assert_re '^supervision-host: cycle boundary - ' "$home/host.out" "fixture: the second host did not exit at its boundary"
@@ -525,16 +568,17 @@ SH
   kill -TERM "$(awk -F '\t' '$1 == "host" { print $2 }' "$home/state/.supervision-host")"
   wait_until_deadline 60 host_exited "$home" || fail "mirror boundary: the second handling host did not stop on TERM"
   echo hang > "$home/stub-mode"
-  park_after_stop "$home"
+  park_after_stop "$home" empty
   append_status "$home" 'stopped mid-turn'
   wait_until 250 test -e "$home/engine-call.3" || fail "mirror boundary: the stopped turn never started"
   assert_re '^\[captain\] third ask, turn stopped$' "$home/engine-call.3" "fixture: the stopped turn did not carry the third dialog"
   kill -TERM "$(awk -F '\t' '$1 == "host" { print $2 }' "$home/state/.supervision-host")"
   wait_until_deadline 60 host_exited "$home" || fail "mirror boundary: the host did not stop mid-turn on TERM"
+  # The stopped turn's row stays queued, so the next park's downtime resurface
+  # holds only that routine row and is the turn that carries its dialog.
   echo handle > "$home/stub-mode"
-  park_after_stop "$home"
-  append_status "$home" 'handled after the stop'
-  wait_until 250 handled_at_least "$home" 3 || fail "mirror boundary: the wake after the stop was not handled: $(cat "$home/state/.supervision-host.log")"
+  park_after_stop "$home" engine
+  handled_at_least "$home" 3 || fail "mirror boundary: the wake after the stop was not handled: $(cat "$home/state/.supervision-host.log")"
   third="$home/engine-call.4"
   assert_re '^arg=--resume$' "$third" "fixture: the turn after the stop did not resume the conversation"
   assert_re '^\[captain\] third ask, turn stopped$' "$third" "dialog of a turn stopped before its report must reach the next turn"
@@ -544,7 +588,7 @@ SH
   kill -TERM "$(awk -F '\t' '$1 == "host" { print $2 }' "$home/state/.supervision-host")"
   wait_until_deadline 60 host_exited "$home" || fail "mirror boundary: the third handling host did not stop on TERM"
   echo noreport > "$home/stub-mode"
-  park_after_stop "$home"
+  park_after_stop "$home" empty
   append_status "$home" 'no report'
   wait_until_deadline 60 host_exited "$home" || fail "mirror boundary: the unreported turn did not hand its wake back"
   assert_re '^\[captain\] fourth ask, turn unreported$' "$home/engine-call.5" "fixture: the unreported turn did not carry the fourth dialog"
@@ -921,6 +965,7 @@ fm_test_run \
   test_attended_routine_wake_is_handled_on_the_engine_and_stays_off_main \
   test_host_stopped_right_after_a_handled_wake_exits_and_frees_the_queue \
   test_engine_in_another_time_zone_handles_its_granted_rows \
+  test_engine_that_cannot_inspect_the_host_handles_routine_turn_ends \
   test_attended_captain_outcome_reaches_main_through_branch_outcomes \
   test_captain_leaving_mid_turn_keeps_its_captain_outcome_for_the_return \
   test_quiet_record_without_its_daemon_is_a_present_captain \

@@ -1217,6 +1217,44 @@ _fm_recovery_marker_ack() {
   fm_lock_release "$lock"
 }
 
+# Retire one recovery generation's handling episode only while the durable
+# queue is empty, read under the queue and marker locks so no row appended
+# meanwhile is left unannounced: a non-empty queue leaves the marker untouched,
+# and so does a marker back at downtime, even of the same generation, because
+# a watcher that stopped since then reuses its handling generation for that
+# outage (bin/fm-watch.sh cleanup) and the next park must still announce it.
+# The supervision host uses it for a recovery close it absorbed with nothing to
+# hand anyone (bin/fm-supervision-host.sh); every other retirement is main's or
+# the branch's sequence-bound drain acknowledgement. Returns 0 retired or
+# already retired, 3 when the marker no longer reads this generation's
+# handling episode.
+_fm_recovery_marker_retire_idle() {
+  local marker=$1 generation=$2 lock status=0
+  [ -n "$generation" ] || return 2
+  lock="${marker}.lock"
+  fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK" || return 1
+  if ! fm_lock_acquire_wait "$lock"; then
+    fm_lock_release "$FM_WAKE_QUEUE_LOCK"
+    return 1
+  fi
+  if [ ! -s "$FM_WAKE_QUEUE" ]; then
+    if ! fm_recovery_marker_read "$marker"; then
+      status=3
+    else
+      case "$FM_RECOVERY_MARKER_TOKEN" in
+        "pending:handling:$generation"|"announced:handling:$generation")
+          _fm_recovery_marker_write_locked "$marker" handling "$generation" acked || status=1
+          ;;
+        "acked:handling:$generation") ;;
+        *) status=3 ;;
+      esac
+    fi
+  fi
+  fm_lock_release "$lock"
+  fm_lock_release "$FM_WAKE_QUEUE_LOCK"
+  return "$status"
+}
+
 # Bounded-or-plain acquire for the recovery transitions a caller may bound.
 # On a bounded refusal it records which lock refused and the last holder the
 # acquire saw, so the caller can print the typed startup diagnostic
@@ -1410,6 +1448,9 @@ fm_recovery_transition() {
     acknowledge)
       _fm_recovery_marker_ack "$marker" "$target"
       ;;
+    retire-idle)
+      _fm_recovery_marker_retire_idle "$marker" "$target"
+      ;;
     arm-check)
       _fm_recovery_marker_arm_check "$marker" "$bound"
       ;;
@@ -1461,6 +1502,10 @@ fm_recovery_marker_handback() {
 
 fm_recovery_marker_ack() {
   fm_recovery_transition "$1" acknowledge "$2"
+}
+
+fm_recovery_marker_retire_idle() {  # <marker> <generation>
+  fm_recovery_transition "$1" retire-idle "$2"
 }
 
 fm_recovery_marker_handling_settled() {

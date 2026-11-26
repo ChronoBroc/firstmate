@@ -236,7 +236,7 @@ In its `--claude` mode it cooperates with the auto-arm.
 ## Recovery episode acknowledgement
 
 A recovery episode is one generation of the `state/.watcher-down` marker.
-It is retired only by the generation-bound acknowledgement the drain prints as `WAKE_ACK_REQUIRED`.
+It is retired by the generation-bound acknowledgement the drain prints as `WAKE_ACK_REQUIRED`, or by the supervision host for an attended recovery close it absorbed while the queue stayed empty ([supervision-host.md](supervision-host.md#attended)).
 The away return brief treats a still-open handling episode as a wake in progress, not watcher downtime; an open downtime episode remains a gap.
 
 ### Announcement
@@ -274,7 +274,7 @@ It is a non-fatal result that names its own remedy: re-drain, then acknowledge t
 
 The acknowledgement retires the marker only when no rows remain after sequence-bound consumption.
 A concurrently appended wake has a higher sequence, remains queued, and keeps the episode pending for presentation.
-Consequently, a watcher close during handling republishes the same generation as pending and forces one recovery turn even when no queue row remains, while the outstanding generation-bound acknowledgement stays valid.
+Consequently, a watcher close during handling republishes the same generation as pending, and the next park announces one recovery close even when no queue row remains, while the outstanding generation-bound acknowledgement stays valid. That close forces a handling turn unless an attended supervision host absorbs it: with no row queued and nothing main has not yet seen, the host runs neither main nor its engine and retires the handling episode itself ([supervision-host.md](supervision-host.md#attended)).
 An acknowledged episode does not freeze the generation, because the next downtime after it opens an episode of its own.
 
 ## Per-actor acknowledgement

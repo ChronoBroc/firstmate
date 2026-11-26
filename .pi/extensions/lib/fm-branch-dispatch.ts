@@ -84,6 +84,10 @@ export function branchWakePrompt(message: string, reportSurface: string, posture
   return `${head}FIRSTMATE SUPERVISION WAKE: ${message}\n\nHandle this per your operating procedure and finish with ${reportSurface}.${postureTail}`;
 }
 
+// The reason line bin/fm-watch.sh (resurface_after_downtime) closes with when
+// it recovers watcher downtime rather than an event of its own.
+const RECOVERY_RESURFACE_REASON = "check: rearm-resurface";
+
 export type UnreadWakeScopeStatus = "safe" | "empty" | "unsafe";
 
 export interface UnreadWakeScope {
@@ -142,6 +146,13 @@ export interface UnreadWakeScope {
    * non-heartbeat wake claims it in the away posture.
    */
   heartbeatSeqs: string[];
+  /**
+   * How many records the queue held when this scan read it, eligible or not,
+   * blank records included (only the file's final newline ends no record).
+   * Zero for an unsafe scan or a queue with no records. A scan whose
+   * eligibleSeqs covers every queued record holds nothing for main.
+   */
+  queuedRows: number;
   taskByWakeKey: Record<string, string>;
 }
 
@@ -155,6 +166,7 @@ const EMPTY_SCOPE: UnreadWakeScope = {
   needsDecisionKeys: [],
   checkSeqs: [],
   heartbeatSeqs: [],
+  queuedRows: 0,
   taskByWakeKey: {},
 };
 const UNSAFE_SCOPE: UnreadWakeScope = {
@@ -167,6 +179,7 @@ const UNSAFE_SCOPE: UnreadWakeScope = {
   needsDecisionKeys: [],
   checkSeqs: [],
   heartbeatSeqs: [],
+  queuedRows: 0,
   taskByWakeKey: {},
 };
 
@@ -378,8 +391,10 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
     return UNSAFE_SCOPE;
   }
 
-  const rows = queue.split(/\r?\n/).filter((line) => line.length > 0);
-  if (rows.length === 0) return EMPTY_SCOPE;
+  const records = queue.split(/\r?\n/);
+  if (records[records.length - 1] === "") records.pop();
+  const rows = records.filter((line) => line.length > 0);
+  if (rows.length === 0) return records.length === 0 ? EMPTY_SCOPE : { ...EMPTY_SCOPE, queuedRows: records.length };
 
   const projects = new Set<string>();
   const metadata = new Map<string, string>();
@@ -569,6 +584,7 @@ export function scopeForUnreadWake(state: string, heartbeat: boolean, afk = fals
     needsDecisionKeys,
     checkSeqs,
     heartbeatSeqs,
+    queuedRows: records.length,
     taskByWakeKey: Object.fromEntries(taskByKey),
   };
 }
@@ -582,6 +598,11 @@ export interface BranchOfferVerdict {
   eligible: boolean;
   /** True when the close is eligible only because of the away collapse. */
   awayOnly: boolean;
+  /**
+   * True when the attended supervision host judged the watcher's generic
+   * downtime recovery close by its queued rows.
+   */
+  recovery: boolean;
 }
 
 // The offer rule for one actionable close: whether a branch may take it, in
@@ -608,10 +629,41 @@ export interface BranchOfferVerdict {
 // The away posture collapses that partition: every actionable row is
 // branch-eligible and the trigger class no longer forces anything to main
 // (scopeForUnreadWake owns the per-row rule).
+//
+// One check close is judged by its rows instead, and only by the attended
+// supervision host off Pi: the watcher's generic downtime recovery
+// (RECOVERY_RESURFACE_REASON). It names no event of its own; it only says the
+// queue may hold rows no watcher announced. So the host may take it when the
+// queue is empty (a state directory holding no queue file yet included) or
+// every queued row is one the branch may claim, and it stays main's whenever
+// any queued row is main's or the queue cannot be read. The host still asks
+// main's drain owner whether anything main has not yet seen waits
+// (bin/fm-wake-drain.sh --pending-for-main) before keeping it.
+function queueNotYetCreated(state: string): boolean {
+  try {
+    lstatSync(`${state}/.wake-queue`);
+    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+  }
+  try {
+    return lstatSync(state).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 export function branchOfferForWake(state: string, message: string, afk: boolean, attendedHost = false): BranchOfferVerdict {
   const heartbeat = /^heartbeat($|:)/.test(message);
+  const recovery = attendedHost && !afk && message === RECOVERY_RESURFACE_REASON;
   const isCheckTrigger = /^check:/.test(message);
   const scope = scopeForUnreadWake(state, heartbeat, afk, attendedHost && !afk);
+  if (recovery) {
+    const judged = scope.status === "unsafe" && queueNotYetCreated(state) ? EMPTY_SCOPE : scope;
+    const eligible = (judged.status === "empty" && judged.queuedRows === 0)
+      || (judged.eligible && judged.eligibleSeqs.length === judged.queuedRows);
+    return { scope: judged, heartbeat, eligible, awayOnly: false, recovery: true };
+  }
   const triggerKeys = /^signal:/.test(message)
     ? message
       .slice("signal:".length)
@@ -629,7 +681,7 @@ export function branchOfferForWake(state: string, message: string, afk: boolean,
     afk ? scopeForUnreadWake(state, heartbeat, false).eligible : scope.eligible
   );
   const eligible = afk ? scope.eligible : attendedEligible;
-  return { scope, heartbeat, eligible, awayOnly: Boolean(eligible && !attendedEligible) };
+  return { scope, heartbeat, eligible, awayOnly: Boolean(eligible && !attendedEligible), recovery: false };
 }
 
 // The exact state-relative filename bin/fm-wake-drain.sh reads for a

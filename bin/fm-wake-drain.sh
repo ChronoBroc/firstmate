@@ -7,6 +7,8 @@
 # a supervision-host home the supervision session's new and unprocessed
 # outcomes (BRANCH OUTCOMES), and captain outcomes whose reported wait has
 # since ended (SETTLED WAITS), then assert liveness.
+# --pending-for-main instead answers whether such a section holds something
+# main has not yet seen (pending_for_main below owns that contract).
 #
 # Keep sequence-bound row consumption independent from generation-bound episode
 # retirement; docs/watcher-continuity.md owns the recovery contract.
@@ -228,8 +230,14 @@ presented_max_row() { # <rows-file>
   fi
 }
 
+PENDING_QUERY=false
 case "${1:-}" in
   '') ;;
+  --pending-for-main)
+    [ "$#" -eq 1 ] || { echo "wake drain: unexpected arguments" >&2; exit 2; }
+    [ "$ACTOR" = main ] || { echo "wake drain: --pending-for-main answers for main only" >&2; exit 2; }
+    PENDING_QUERY=true
+    ;;
   --ack-through)
     ACK_THROUGH=${2:-}
     case "$ACK_THROUGH" in ''|*[!0-9]*) echo "wake drain: invalid acknowledgement sequence" >&2; exit 2 ;; esac
@@ -239,7 +247,7 @@ case "${1:-}" in
     case "$ACK_GENERATION" in ''|*[!A-Za-z0-9._-]*) echo "wake drain: invalid recovery generation" >&2; exit 2 ;; esac
     [ "$#" -eq 4 ] || { echo "wake drain: unexpected acknowledgement arguments" >&2; exit 2; }
     ;;
-  *) echo "usage: fm-wake-drain.sh [--ack-through SEQUENCE --recovery-generation GENERATION]" >&2; exit 2 ;;
+  *) echo "usage: fm-wake-drain.sh [--ack-through SEQUENCE --recovery-generation GENERATION | --pending-for-main]" >&2; exit 2 ;;
 esac
 
 [ "$ACTOR" != branch ] || require_branch_eligible_rows || exit 1
@@ -337,7 +345,9 @@ EOF
 }
 
 print_status_outcome_backstop_section() {  # <task-and-endpoint-snapshot>
-  local snapshot=$1 task endpoint ident event event_endpoint line verb key receipt store lock ready
+  local snapshot=$1 task endpoint ident event event_endpoint event_rc line verb key receipt store lock ready
+  local acquire=fm_lock_acquire_wait_bounded
+  [ -z "${_FM_STATUS_READS_STRICT:-}" ] || acquire=fm_lock_acquire_wait_max
   local output='' used=0 shown=0 omitted=0 bytes item_bytes=220 global_bytes=4000 rc=0
   [ "$ACTOR" = main ] || return 0
 
@@ -348,7 +358,7 @@ print_status_outcome_backstop_section() {  # <task-and-endpoint-snapshot>
       printf 'STATUS OUTCOME BACKSTOP SKIPPED: branch outcome history could not be read safely; repair it before relying on drain recovery.\n'
       return 0
     fi
-    if ! fm_lock_acquire_wait_bounded "$lock" "$PRESENTATION_LOCK_TIMEOUT"; then
+    if ! "$acquire" "$lock" "$PRESENTATION_LOCK_TIMEOUT"; then
       printf 'STATUS OUTCOME BACKSTOP SKIPPED: branch outcome history is busy; retry on the next drain.\n'
       return 0
     fi
@@ -368,7 +378,12 @@ print_status_outcome_backstop_section() {  # <task-and-endpoint-snapshot>
     [ -n "$task" ] || continue
     receipt=$(status_outcome_backstop_cursor_offset "$STATE/$task.status") || { rc=1; break; }
     [ "$receipt" -lt "$endpoint" ] || continue
-    status_snapshot_latest_event "$STATE/$task.status" "$endpoint" "$ident" || continue
+    event_rc=0
+    status_snapshot_latest_event "$STATE/$task.status" "$endpoint" "$ident" || event_rc=$?
+    if [ "$event_rc" -ne 0 ]; then
+      [ "$event_rc" -eq 2 ] || [ -z "${_FM_STATUS_READS_STRICT:-}" ] || { rc=1; break; }
+      continue
+    fi
     event=$FM_STATUS_SNAPSHOT_EVENT_LINE
     event_endpoint=$FM_STATUS_SNAPSHOT_EVENT_ENDPOINT
     [ "$receipt" -lt "$event_endpoint" ] || continue
@@ -910,6 +925,94 @@ print_status_presentation() {  # [<deduped-raw-rows>]
   fm_lock_release "$lock"
   return "$rc"
 }
+
+# 0 when a task in <snapshot> holds an open decision the OPEN DECISIONS fold
+# has not yet presented: its key is open in the status log but absent from
+# the open set the fold's cursor recorded at its last presentation (read
+# through status_open_decisions_cursor_offset, which writes no cursor). 1 when
+# every open decision was presented, 2 when a log or cursor cannot be read.
+unpresented_open_decision() {  # <task-and-endpoint-snapshot>
+  local task endpoint ident f open presented key
+  while IFS=$(printf '\t') read -r task endpoint ident; do
+    [ -n "$task" ] || continue
+    f="$STATE/$task.status"
+    open=$(status_open_decisions "$f") || return 2
+    [ -n "$open" ] || continue
+    presented=$({ FM_STATUS_CURSOR_SNAPSHOT_FILE=/dev/fd/3 status_open_decisions_cursor_offset "$f" >/dev/null; } 3>&1) \
+      || return 2
+    presented=$(printf '%s\n' "$presented" | tail -n +4 | cut -f1)
+    while IFS=$(printf '\t') read -r key _; do
+      [ -n "$key" ] || continue
+      printf '%s\n' "$presented" | grep -qxF -- "$key" || return 0
+    done <<EOF
+$open
+EOF
+  done <<EOF
+$snapshot
+EOF
+  return 1
+}
+
+# --pending-for-main: whether main's next drain would present something main
+# has not yet seen beyond the queue's own rows - a captain-facing status event
+# the STATUS OUTCOME BACKSTOP would print (print_status_outcome_backstop_section
+# decides, its receipt left uncommitted), or a captain outcome not yet
+# processed (BRANCH OUTCOMES), or a captain wait that has settled or can no
+# longer be confirmed (SETTLED WAITS, which presents each once and drops its
+# record), judged without consuming the record, or an open decision the OPEN
+# DECISIONS fold has not yet presented (unpresented_open_decision). An open
+# decision or record divergence main's drain already presented does not count. A status log the
+# snapshot or the backstop's event read cannot read is unknown here, though
+# an ordinary drain skips it (_FM_STATUS_READS_STRICT), and the backstop waits
+# for the outcome lock in this process, so the caller's deadline ends the wait
+# with the query. Moves no queue
+# row, cursor, or receipt. Main only. Prints nothing; exits 0 when something
+# waits, 1 when nothing does, and 2 when a source cannot be read, which callers
+# treat as something waiting. The supervision host asks it before keeping a
+# recovery close off main (bin/fm-supervision-host.sh).
+pending_for_main() {
+  local snapshot backstop rows jq_rc config path rc _FM_STATUS_READS_STRICT=1
+  snapshot=$(status_presentation_snapshot "$STATE") || return 2
+  backstop=$(print_status_outcome_backstop_section "$snapshot") || return 2
+  case "$backstop" in
+    '') ;;
+    'STATUS OUTCOME BACKSTOP SKIPPED'*) return 2 ;;
+    *) return 0 ;;
+  esac
+  rc=0
+  unpresented_open_decision "$snapshot" || rc=$?
+  [ "$rc" -eq 1 ] || return "$rc"
+  ! fm_afk_contract_away_present "$STATE" || return 1
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    rc=0
+    fm_captain_wait_judge "$STATE" "$path" || rc=$?
+    case "$rc" in
+      0|3) return 0 ;;
+      1) ;;
+      *) return 2 ;;
+    esac
+  done <<EOF
+$(fm_captain_wait_records "$STATE")
+EOF
+  config=${FM_CONFIG_OVERRIDE:-$FM_HOME/config}
+  fm_supervision_host_outcomes_drained "$config" && [ -s "$STATE/branch-outcomes.jsonl" ] || return 1
+  command -v jq >/dev/null 2>&1 || return 2
+  rows=$("$SCRIPT_DIR/fm-branch-outcome.sh" present 2>/dev/null) || return 2
+  [ -n "$rows" ] || return 1
+  jq_rc=0
+  printf '%s\n' "$rows" | jq -e -s 'any(.[]; .verdict == "captain")' >/dev/null 2>&1 || jq_rc=$?
+  case "$jq_rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
+if [ "$PENDING_QUERY" = true ]; then
+  pending_for_main
+  exit $?
+fi
 
 # shellcheck disable=SC2317,SC2329 # Invoked by trap handlers below.
 cleanup() {

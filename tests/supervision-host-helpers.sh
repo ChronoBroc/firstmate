@@ -93,7 +93,7 @@ result() {
 }
 if [ "$mode" = hang ]; then
   perl -e 'setpgrp(0, 0); exec "sleep", $ARGV[0]' "$FM_TEST_STUB_MAX_BLOCK_SECONDS" &
-  printf '%s\n' "$!" > "$FM_HOME/orphan-pid"
+  printf '%s\t%s\n' "$!" "$(ps -o lstart= -p "$!" 2>/dev/null)" > "$FM_HOME/orphan-pid"
   sleep "$FM_TEST_STUB_MAX_BLOCK_SECONDS"
   exit 0
 fi
@@ -191,6 +191,36 @@ unset FM_SUPERVISION_ACTOR FM_BRANCH_REPORT_TURN FM_LEASE_HOLDER_PID PI_CODING_A
 HOMES_FILE="$TMP_ROOT/homes"
 # Stop whatever a case left running, by the exact pids its home recorded.
 stop_home_processes() {  # <home>
+  local home=$1 pid i started
+  stop_home_supervision "$home"
+  while IFS= read -r pid; do
+    { [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; } || continue
+    [ "$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')" = "$$" ] || continue
+    if [ -e "$home/session.stop" ]; then
+      # End the session's running Stop hook as Claude does when the session
+      # ends. The hook restarts a host that dies by signal, and that host can
+      # stay parked, so stop whichever host it is waiting on as well.
+      pkill -TERM -P "$pid" 2>/dev/null || true
+      i=0
+      while [ "$i" -lt 20 ] && kill -0 "$pid" 2>/dev/null; do
+        stop_home_supervision "$home"
+        sleep 0.5
+        i=$((i + 1))
+      done
+      wait "$pid" 2>/dev/null || true
+    else
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
+  done < <(cat "$home/claude-pids" 2>/dev/null)
+  [ ! -f "$home/claude-pids" ] || : > "$home/claude-pids"
+  while IFS=$(printf '\t') read -r pid started; do
+    [ -n "$pid" ] && [ -n "$started" ] || continue
+    [ "$(ps -o lstart= -p "$pid" 2>/dev/null)" = "$started" ] || continue
+    kill -TERM "$pid" 2>/dev/null || true
+  done < <(cat "$home/orphan-pid" 2>/dev/null)
+  rm -f "$home/orphan-pid"
+}
+stop_home_supervision() {  # <home>
   local home=$1 pid arms='' i=0
   pid=$(cut -f1 "$home/state/.supervision-handoff-owner" 2>/dev/null || true)
   [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
@@ -208,16 +238,6 @@ stop_home_processes() {  # <home>
   done
   pid=$(cat "$home/state/.watch.lock/pid" 2>/dev/null || true)
   [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
-  while IFS= read -r pid; do
-    if [ -e "$home/session.stop" ]; then
-      wait "$pid" 2>/dev/null || true
-    else
-      kill -TERM "$pid" 2>/dev/null || true
-    fi
-  done < <(cat "$home/claude-pids" 2>/dev/null)
-  while IFS= read -r pid; do
-    kill -TERM "$pid" 2>/dev/null || true
-  done < <(cat "$home/orphan-pid" 2>/dev/null)
 }
 suite_cleanup() {
   local home
@@ -378,6 +398,28 @@ watcher_live() {  # <home>
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 host_exited() { [ -s "$1/host.rc" ]; }
+# Tear a parked host down the way Claude ends its async Stop hook when main
+# starts a new turn: the arm and host get TERM, and the watcher either runs its
+# own cleanup (TERM) or dies without it, leaving its lock behind (KILL).
+parked_host_and_watcher() {  # <home>
+  awk -F '\t' '$1 == "host" { found = 1 } END { exit !found }' "$1/state/.supervision-host" 2>/dev/null \
+    && watcher_live "$1"
+}
+tear_down_parked_host() {  # <home> <KILL|TERM>
+  local home=$1 sig=$2 host arm watcher
+  wait_until 100 parked_host_and_watcher "$home" \
+    || fail "fixture: no parked host and watcher to tear down: $(cat "$home/host.out" 2>/dev/null)"
+  host=$(awk -F '\t' '$1 == "host" { print $2; exit }' "$home/state/.supervision-host")
+  watcher=$(cat "$home/state/.watch.lock/pid" 2>/dev/null || true)
+  kill "-$sig" "$watcher" 2>/dev/null || true
+  while IFS= read -r arm; do
+    [ -z "$arm" ] || kill -TERM "$arm" 2>/dev/null || true
+  done < <(awk -F '\t' '$1 == "arm" { print $2 }' "$home/state/.supervision-host")
+  kill -TERM "$host" 2>/dev/null || true
+  wait_until_deadline 30 host_exited "$home" || fail "fixture: the torn-down host did not exit"
+  wait_until 100 bash -c '! kill -0 "$1" 2>/dev/null' _ "$watcher" || fail "fixture: the torn-down watcher survived"
+  rm -f "$home/host.rc"
+}
 # The recovery marker's episode kind (downtime or handling), read through its
 # owner's parser; the Claude re-arm owner delivers a close only on downtime.
 marker_kind() {  # <home>
@@ -522,11 +564,12 @@ hook_exited() { [ -s "$1/hook.rc" ]; }
 
 # Main's rewoken turn drains; the caller runs the printed acknowledgement
 # (MAIN_ACK) when that turn's handling is done.
-main_drain() {  # <home>; prints the drain and sets MAIN_ACK
-  local out
-  out=$(FM_HOME="$1" "$FAKE_CLAUDE" -c '"$0" 2>&1' "$ROOT/bin/fm-wake-drain.sh")
+main_drain() {  # <home>; prints the drain, sets MAIN_ACK, returns the drain's status
+  local out rc=0
+  out=$(FM_HOME="$1" "$FAKE_CLAUDE" -c '"$0" 2>&1' "$ROOT/bin/fm-wake-drain.sh") || rc=$?
   MAIN_ACK=$(printf '%s\n' "$out" | sed -n 's/^WAKE_ACK_REQUIRED: after handling completes run bin\/fm-wake-drain.sh //p' | tail -1)
   printf '%s\n' "$out"
+  return "$rc"
 }
 
 
@@ -752,45 +795,35 @@ no_home_arms() { [ -z "$(home_arms "$1")" ]; }
 mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 
 
-# Park again after a host was stopped mid-park: the new cycle's first close is
-# the watcher's downtime resurface, which main drains before the next park.
-# That close can end the park before its cycle is ever seen live, so this
-# waits for the exit itself.
-# The resurface pass-through leaves its successor running. Stop that watcher
-# and acknowledge the downtime its exit records, so the next park starts a
-# watcher it owns. Attaching instead would not observe the exit until the
-# beacon went stale, and this fixture's turn budget would already be gone.
-quiet_pass_through_successor() {  # <home>
-  local home=$1 pid i gen
-  pid=$(cat "$home/state/.watch.lock/pid" 2>/dev/null || true)
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-    kill -TERM "$pid" 2>/dev/null || true
-    i=0
-    while [ "$i" -lt 50 ] && kill -0 "$pid" 2>/dev/null; do
-      sleep 0.1
-      i=$((i + 1))
-    done
-    kill -0 "$pid" 2>/dev/null && fail "fixture: the pass-through successor did not stop"
-  fi
-  gen=$(cat "$home/state/.watcher-down" 2>/dev/null || true)
-  gen=${gen##*:}
-  [ -n "$gen" ] || return 0
-  FM_HOME="$home" bash -c '
-    . "$1"
-    fm_recovery_marker_ack "$2" "$3"
-  ' _ "$ROOT/bin/fm-wake-lib.sh" "$home/state/.watcher-down" "$gen" \
-    || fail "fixture: could not acknowledge the successor downtime"
+# How many downtime resurfaces the host ledger records with <outcome>
+# (no-op or handled).
+recovery_closes() {  # <home> <outcome>
+  local n
+  n=$(grep -c "	$2	.*check: rearm-resurface" "$1/state/.supervision-host.log" 2>/dev/null)
+  printf '%s\n' "${n:-0}"
 }
+recovery_closes_above() { [ "$(recovery_closes "$1" "$2")" -gt "$3" ]; }  # <home> <outcome> <count>
 
 
-park_after_stop() {  # <home>
-  rm -f "$1/host.rc"
-  : > "$1/park.go"
-  wait_until_deadline 60 host_exited "$1" || fail "the watcher's downtime resurface did not reach main: $(cat "$1/host.out")"
-  assert_re '^check: rearm-resurface' "$1/host.out" "fixture: the first close after the watcher stopped was not its resurface"
-  main_drain_and_ack "$1"
-  quiet_pass_through_successor "$1"
-  park_again "$1"
+# Park again after a host was stopped mid-park. The new cycle's first close is
+# the watcher's downtime resurface, which the host keeps off main when nothing
+# waits there: with an empty queue it absorbs the close and stays parked
+# (empty), and with only routine rows queued it handles them on the engine
+# (engine). Either way the host is left parked on a live watcher it owns.
+park_after_stop() {  # <home> <empty|engine>
+  local home=$1 outcome before
+  case "$2" in
+    empty) outcome='no-op' ;;
+    engine) outcome='handled' ;;
+    *) fail "fixture: park_after_stop needs empty or engine, not '$2'" ;;
+  esac
+  before=$(recovery_closes "$home" "$outcome")
+  rm -f "$home/host.rc"
+  : > "$home/park.go"
+  wait_until 250 recovery_closes_above "$home" "$outcome" "$before" \
+    || fail "the watcher's downtime resurface was not kept off main ($2): $(cat "$home/host.out"; tail -n 5 "$home/state/.supervision-host.log" 2>/dev/null)"
+  host_exited "$home" && fail "the watcher's downtime resurface reached main ($2): $(cat "$home/host.out")"
+  wait_until 150 watcher_live "$home" || fail "the host did not stay parked after its downtime resurface ($2)"
 }
 
 

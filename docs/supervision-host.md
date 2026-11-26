@@ -109,6 +109,9 @@ Only an away record is away: no record, or the record daemon-backed quiet mode w
 
 The host asks the Pi branch's offer rule (`branchOfferForWake`, through `bin/fm-branch-dispatch.mjs offer`) whether the branch may take the close.
 So a close reaches main off Pi exactly when it would on Pi: a check trigger, a decision-owned signal or stale trigger, and a scan that is unsafe or holds nothing for the branch stay main's.
+One check close is the host's exception: the watcher's downtime recovery, `check: rearm-resurface`, which names no event of its own.
+A park that ends without its own close, as when Claude ends the Stop hook running it, leaves watcher downtime, so the next park opens with that recovery even when the queue holds nothing for main.
+The host takes it when the queue is empty (a state directory with no queue file yet counts) or every queued row is one the branch may claim, and `bin/fm-wake-drain.sh --pending-for-main` reports, within a fixed 5-second bound, nothing main has not yet seen: no captain-facing status event its drain's status outcome backstop would still present, no open decision its `OPEN DECISIONS` section has not yet presented, no unprocessed captain outcome, and no recorded captain wait that has settled or can no longer be confirmed, which the drain's `SETTLED WAITS` section would present once and then drop. An open decision or record divergence main's drain already presented does not wake main again; its drain keeps listing it while it stands. A worker status log the query cannot read leaves the close main's. The host retires an empty one's recovery episode itself, only while the marker still reads that episode's handling, so a watcher outage that has since reused its generation stays for the next park; any main-owned row, a blank queue record main's drain must repair, unseen work, a source the query cannot read, or a query that cannot answer within that bound (an outcome-store lock held elsewhere, for one) leaves it main's.
 On that main-only pass-through the host starts the successor watcher cycle and leaves it running, then prints the close unchanged.
 That successor, like one a turn hands back at its start (see [Away](#away)), runs in a process group of its own, so the harness tearing down the hook's group after the rewake does not stop it.
 The host confirms no handling handoff and republishes the watcher's recovery marker as downtime, even when an earlier engine turn left it reading handling, because the re-arm owner delivers a close to main only while that marker reads downtime.
@@ -460,6 +463,7 @@ Each arm owner's own suite covers its host mode against a stub host.
 |---|---|
 | `tests/fm-supervision-host-drain.test.sh` | Report surface, dispatch entry, and the drain's `BRANCH OUTCOMES` section against the shared stub-engine fixtures. |
 | `tests/fm-supervision-host.test.sh` | Drives the real host against a stub engine for wakes, closes, the dialog mirror, and return outcomes, in both postures. |
+| `tests/fm-supervision-host-recovery.test.sh` | Attended downtime recovery closes kept off main, retired, or handed to main, and the `--pending-for-main` query, against the same stub-engine fixtures. |
 | `tests/fm-supervision-host-park.test.sh` | Latch, park boundary, compaction, and lock ownership against the same stub-engine fixtures. |
 | `tests/fm-supervision-host-hook.test.sh` | Claude Stop-hook re-arm, successor take-over, lost hand-back continuations, and guarded retry submission. |
 | `tests/fm-claude-stop-autoarm.test.sh` | The Claude arm owner's host mode against a stub host. |
@@ -473,7 +477,7 @@ Each arm owner's own suite covers its host mode against a stub host.
 | `tests/fm-afk-return.test.sh` | The return's drain-owned read-cursor advance through the away window on a host home, and none on Pi. |
 | `tests/fm-supervision-host-live-e2e.test.sh` | Runs a real engine turn; opt-in because it spends tokens. |
 | `tests/fm-supervision-host-landed-live-e2e.test.sh` | Opt-in credentialed guard that a real engine turn reports a worker's landed-but-open PR as open, not merged, and leaves its worker, record, and copy in place; `FM_LANDED_E2E_SOURCE` runs it against an earlier tree for a negative control. |
-| `tests/fm-supervision-host-attended-live-e2e.test.sh` | Opt-in credentialed guard for repeated attended main-only hand-backs to an idle Claude primary, the successor's own close, a close that turns main-only at its turn, and a stand-in remote listener; accepts a pre-fix ref for a negative control. |
+| `tests/fm-supervision-host-attended-live-e2e.test.sh` | Opt-in credentialed guard for repeated attended main-only hand-backs to an idle Claude primary, the next park's take-over of the pass-through successor, a close that turns main-only at its turn, and a stand-in remote listener; accepts a pre-fix ref for a negative control. |
 | `tests/fm-supervision-host-herdr-live-e2e.test.sh` | Opt-in credentialed guard that a real Claude primary in an isolated herdr session loses its hand-back continuation, receives the detached retry through the inherited pane, drains, and acknowledges, with one watcher retained. |
 | `tests/fm-host-mirror-live-e2e.test.sh` | Proves the Claude and Cursor mirror writers against the real harnesses; opt-in because it spends tokens. |
 

@@ -421,7 +421,7 @@ family_for_basename() {
     fm-afk-contract.test.sh|fm-afk-inject-e2e.test.sh|fm-afk-return.test.sh|\
     fm-supervision-host.test.sh|fm-supervision-host-drain.test.sh|\
     fm-supervision-host-hook.test.sh|fm-supervision-host-park.test.sh|\
-    fm-host-mirror.test.sh)
+    fm-supervision-host-recovery.test.sh|fm-host-mirror.test.sh)
       printf '%s\n' afk
       ;;
     fm-bearings-board-render.test.sh|fm-bearings-snapshot.test.sh|fm-contributions.test.sh|\
@@ -950,6 +950,7 @@ tests/fm-supervision-host-hook.test.sh 403793
 tests/fm-supervision-host-landed-live-e2e.test.sh 75
 tests/fm-supervision-host-live-e2e.test.sh 75
 tests/fm-supervision-host-park.test.sh 329326
+tests/fm-supervision-host-recovery.test.sh 200000
 tests/fm-supervision-host.test.sh 435581
 tests/fm-tangle-guard.test.sh 8501
 tests/fm-task-delivery.test.sh 32789
@@ -1621,10 +1622,14 @@ families_for_changed_path() {
     bin/fm-watch*|bin/fm-classify-lib.sh)
       printf '%s\n' watcher-wake-lock
       printf '%s\n' "__script__:fm-backend-t3code.test.sh"
+      [ "$path" != bin/fm-classify-lib.sh ] || printf '%s\n' __script__:fm-supervision-host-recovery.test.sh
       ;;
     bin/fm-wake*|bin/fm-inactive-reconcile.sh|\
     bin/fm-daemon*|bin/fm-turnend-guard*|bin/fm-guard.sh)
       printf '%s\n' watcher-wake-lock
+      case "$path" in
+        bin/fm-wake-drain.sh|bin/fm-wake-lib.sh) printf '%s\n' __script__:fm-supervision-host-recovery.test.sh ;;
+      esac
       ;;
     bin/fm-afk*)
       printf '%s\n' afk
@@ -1739,6 +1744,7 @@ families_for_changed_path() {
       printf '%s\n' __script__:fm-supervision-host-drain.test.sh
       printf '%s\n' __script__:fm-supervision-host-hook.test.sh
       printf '%s\n' __script__:fm-supervision-host-park.test.sh
+      printf '%s\n' __script__:fm-supervision-host-recovery.test.sh
       # Whether an arriving outcome still lets the captain type is a fact only
       # a real Pi TUI can answer, so the live guards are selected too.
       printf '%s\n' live-harness-optin
