@@ -188,7 +188,10 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   # so it proves no continuity.
   twin_start=$(FM_STATE_OVERRIDE="$dir/state" bash -c '. "$1/bin/fm-wake-lib.sh" && fm_pid_start_time "$2"' _ "$ROOT" "$twin") \
     && [ -n "$twin_start" ] || fail "could not read the twin's start time"
-  reused_start='Thu Jan  1 00:00:00 1970'
+  case "$twin_start" in
+    proc-starttime=*) reused_start=proc-starttime=1 ;;
+    *) reused_start='Thu Jan  1 00:00:00 1970' ;;
+  esac
   [ "$reused_start" != "$twin_start" ] || fail "the seeded start time collides with the twin's own start time"
   printf 'S1\nanchor=%s\nanchor-start=%s\n' "$twin" "$reused_start" > "$dir/state/.lock-session"
   fire_twin "$dir" twin 4
@@ -204,6 +207,9 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   status_out=$(FM_HOME="$dir" "$ROOT/bin/fm-lock.sh" status)
   [ "$status_out" = "lock: held by live harness pid $orig" ] \
     || fail "a dead line 1 beside a live recorded anchor was reported as '$status_out'"
+  status_out=$(PATH="$dir/nostart-bin:$PATH" FM_PROC_ROOT_OVERRIDE="$dir/no-proc" FM_HOME="$dir" "$ROOT/bin/fm-lock.sh" status)
+  [ "$status_out" = "lock: unknown (recorded model-loop anchor pid $orig is still running but its identity cannot be verified)" ] \
+    || fail "a dead line 1 beside a running anchor whose start time is unreadable was reported as '$status_out'"
   fire_twin "$dir" twin 5
   expect_code 1 "$(twin_value "$dir" twin 5 lock.rc)" "the twin took a lock whose recorded anchor is still running: $(cat "$dir/state/twin-5/lock.out")"
   grep -qF "another live process holds the lock under this same session id (pid $orig, session S1) and this session's continuity with that holder could not be verified" "$dir/state/twin-5/lock.out" \
@@ -213,13 +219,28 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
     || fail "the refused twin changed the live anchor's sidecar: $(cat "$dir/state/.lock-session")"
   printf '%s\n' "$orig" > "$dir/state/.lock"
 
+  # A sidecar that exists but cannot be read is no evidence of absence: even
+  # the original, whose own pid is line 1, is refused and both records stay.
+  if [ "$(id -u)" != 0 ]; then
+    cp -p "$dir/sidecar-before-twin" "$dir/state/.lock-session"
+    chmod 000 "$dir/state/.lock-session"
+    fire_twin "$dir" orig 2
+    chmod 644 "$dir/state/.lock-session"
+    expect_code 1 "$(twin_value "$dir" orig 2 lock.rc)" "an unreadable sidecar was read as no anchor: $(cat "$dir/state/orig-2/lock.out")"
+    grep -qF "pid $orig" "$dir/state/orig-2/lock.out" || fail "the unreadable-sidecar refusal does not name line 1: $(cat "$dir/state/orig-2/lock.out")"
+    [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$orig" ] || fail "an unreadable sidecar let line 1 be rewritten"
+    cmp -s "$dir/sidecar-before-twin" "$dir/state/.lock-session" || fail "an unreadable sidecar was replaced"
+  else
+    fire_twin "$dir" orig 2
+  fi
+
   # The original, whose own pid is line 1, still owns its lock beside an
   # id-only sidecar, and its lock run records its anchor.
   printf 'S1\n' > "$dir/state/.lock-session"
   touch -t 202001010000 "$dir/state/.lock-session" "$dir/sidecar-time-ref"
-  fire_twin "$dir" orig 2
-  expect_code 0 "$(twin_value "$dir" orig 2 lock.rc)" "the original lost its own lock beside an id-only sidecar: $(cat "$dir/state/orig-2/lock.out")"
-  expect_code 0 "$(twin_value "$dir" orig 2 owned.rc)" "the original no longer reads its lock as its own"
+  fire_twin "$dir" orig 3
+  expect_code 0 "$(twin_value "$dir" orig 3 lock.rc)" "the original lost its own lock beside an id-only sidecar: $(cat "$dir/state/orig-3/lock.out")"
+  expect_code 0 "$(twin_value "$dir" orig 3 owned.rc)" "the original no longer reads its lock as its own"
   anchored_sidecar "$dir/state/.lock-session" S1 "$orig" \
     || fail "the original's lock run did not upgrade the id-only sidecar: $(cat "$dir/state/.lock-session")"
   if [ "$dir/state/.lock-session" -nt "$dir/sidecar-time-ref" ] || [ "$dir/sidecar-time-ref" -nt "$dir/state/.lock-session" ]; then
@@ -229,8 +250,8 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   # A confirmation whose own start time cannot be read keeps the start time
   # already recorded beside this same id and anchor.
   cp "$dir/state/.lock-session" "$dir/sidecar-before-nostart"
-  fire_twin "$dir" orig 3 nostart
-  expect_code 0 "$(twin_value "$dir" orig 3 lock.rc)" "the original lost its lock when its start time was unreadable: $(cat "$dir/state/orig-3/lock.out")"
+  fire_twin "$dir" orig 4 nostart
+  expect_code 0 "$(twin_value "$dir" orig 4 lock.rc)" "the original lost its lock when its start time was unreadable: $(cat "$dir/state/orig-4/lock.out")"
   cmp -s "$dir/sidecar-before-nostart" "$dir/state/.lock-session" \
     || fail "an unreadable start time erased the recorded anchor proof: $(cat "$dir/state/.lock-session")"
 
@@ -325,5 +346,64 @@ test_e2e_sibling_model_loops_under_a_shared_front_end() {
   pass "session-lock e2e: a duplicate model loop under a shared front-end is refused while the original loop lives, and the surviving loop owns the lock once it has exited"
 }
 
+
+# A sidecar written before anchors existed records the id alone beside a
+# shared front-end on line 1, and the duplicate loop reaches session start
+# first. Neither loop can be told from the other, so both are refused with the
+# unverified diagnostic and the upgrade note, and both records stay as they
+# were. Stopping the recorded front-end clears it: line 1 is then dead, and the
+# next acquisition reclaims the lock as before.
+test_e2e_legacy_shared_front_end_refuses_the_first_claimant() {
+  local dir front orig dup
+  dir="$TMP_ROOT/e2e-legacy-front"
+  make_twin_home "$dir"
+  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID FM_HOME="$dir" FM_BIN="$ROOT/bin" \
+    FM_FIXTURE_CLAUDE="$NAMED_CLAUDE" \
+    bash -c '"$0" "$1" leg-orig leg-dup &' "$NAMED_CLAUDE" "$dir/front.sh"
+  wait_for_file "$dir/state/front-pid" "the shared front-end"
+  wait_for_file "$dir/state/leg-orig-pid" "the original model loop"
+  wait_for_file "$dir/state/leg-dup-pid" "the duplicate model loop"
+  front=$(tr -d '[:space:]' < "$dir/state/front-pid")
+  orig=$(tr -d '[:space:]' < "$dir/state/leg-orig-pid")
+  dup=$(tr -d '[:space:]' < "$dir/state/leg-dup-pid")
+  printf '%s\n' "$front" > "$dir/state/.lock"
+  printf 'S1\n' > "$dir/state/.lock-session"
+  cp "$dir/state/.lock" "$dir/lock-legacy"
+  cp "$dir/state/.lock-session" "$dir/sidecar-legacy"
+
+  fire_twin "$dir" leg-dup 1
+  fire_twin "$dir" leg-orig 1
+  local role
+  for role in leg-dup leg-orig; do
+    expect_code 1 "$(twin_value "$dir" "$role" 1 lock.rc)" "$role took a legacy lock under the shared front-end: $(cat "$dir/state/$role-1/lock.out")"
+    grep -qF "another live process holds the lock under this same session id (pid $front, session S1) and this session's continuity with that holder could not be verified" "$dir/state/$role-1/lock.out" \
+      || fail "$role's refusal is not the unverified diagnostic naming front-end $front: $(cat "$dir/state/$role-1/lock.out")"
+    grep -qF "clears when front-end pid $front is stopped" "$dir/state/$role-1/lock.out" \
+      || fail "$role's refusal does not state how the one-time upgrade state clears: $(cat "$dir/state/$role-1/lock.out")"
+    expect_code 1 "$(twin_value "$dir" "$role" 1 owned.rc)" "$role reads an ambiguous legacy lock as its own"
+  done
+  cmp -s "$dir/lock-legacy" "$dir/state/.lock" || fail "a refused legacy claimant changed lock line 1"
+  cmp -s "$dir/sidecar-legacy" "$dir/state/.lock-session" || fail "a refused legacy claimant changed the sidecar"
+
+  : > "$dir/state/stop-front"
+  local i=0
+  while [ "$i" -lt 200 ] && kill -0 "$front" 2>/dev/null; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  kill -0 "$front" 2>/dev/null && fail "the front-end did not stop"
+  fire_twin "$dir" leg-orig 2
+  expect_code 0 "$(twin_value "$dir" leg-orig 2 lock.rc)" "the lock was not reclaimed once the recorded front-end stopped: $(cat "$dir/state/leg-orig-2/lock.out")"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$orig" ] || fail "the reclaim left line 1 at $(cat "$dir/state/.lock")"
+  anchored_sidecar "$dir/state/.lock-session" S1 "$orig" \
+    || fail "the reclaim did not record its anchor: $(cat "$dir/state/.lock-session")"
+  fire_twin "$dir" leg-dup 2
+  expect_code 1 "$(twin_value "$dir" leg-dup 2 lock.rc)" "the other loop took the reclaimed lock: $(cat "$dir/state/leg-dup-2/lock.out")"
+  : > "$dir/state/stop-leg-orig"
+  : > "$dir/state/stop-leg-dup"
+  pass "session-lock e2e: an id-only sidecar beside a shared front-end refuses whichever loop claims first, and clears once that front-end stops"
+}
+
 test_e2e_live_twin_of_a_session_never_takes_the_lock
 test_e2e_sibling_model_loops_under_a_shared_front_end
+test_e2e_legacy_shared_front_end_refuses_the_first_claimant

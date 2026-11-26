@@ -794,7 +794,8 @@ fm_session_lock_pid_blocks_reclaim() {
 # (fm_session_lock_decide). A sidecar without an anchor, as every pre-anchor
 # sidecar is, proves no continuity.
 
-# Print the Claude session id this process may own with, or return 1. $1 is the
+# Print the Claude session id this process may own with, or return 1, or 2 when
+# CLAUDE_PID is in the ancestry but its process could not be read. $1 is the
 # ancestry list an earlier walk already produced, so a caller that walked once
 # need not walk again.
 fm_session_lock_trusted_session_id() {  # [<ancestry-pids>]
@@ -810,7 +811,7 @@ fm_session_lock_trusted_session_id() {  # [<ancestry-pids>]
     # from CLAUDE_PID and this same id, so it is matched in that form.
     case "$pid" in
       "$claude_pid")
-        fm_proc_info "$pid" || return 1
+        fm_proc_info "$pid" || return 2
         fm_harness_process_matches "$FM_PROC_COMM" "$FM_PROC_ARGS" || return 1
         ;;
       "$FM_WIN_PID_PREFIX$claude_pid")
@@ -869,12 +870,18 @@ fm_session_lock_recorded_anchor_start() {  # <state>
 # Classify the model-loop anchor recorded in state dir $1's sidecar. Sets
 # FM_SESSION_LOCK_ANCHOR_PID to the recorded pid and FM_SESSION_LOCK_ANCHOR_STATE
 # to one of:
-#   none     no anchor is recorded.
-#   gone     positive evidence the recorded process ended: no such pid, or a
-#            readable start time that differs from the recorded one.
-#   alive    the pid's readable start time equals the recorded one.
-#   unknown  the pid still exists but its identity cannot be confirmed: no
-#            start time is recorded, or the current one cannot be read.
+#   none        no sidecar exists, or it records no anchor.
+#   unreadable  the sidecar exists but cannot be read, so whether it records an
+#               anchor is not known.
+#   gone        positive evidence the recorded process ended: no such pid, or
+#               a readable start time of the same kind that differs from the
+#               recorded one.
+#   alive       the pid's readable start time equals the recorded one.
+#   unknown     the pid still exists but its identity cannot be confirmed: no
+#               start time is recorded, the current one cannot be read, or the
+#               two come from different sources (fm_pid_start_time's
+#               `proc-starttime=` form against its ps form) and cannot be
+#               compared.
 # shellcheck disable=SC2034 # Output globals, read by sourcing callers.
 FM_SESSION_LOCK_ANCHOR_PID=
 # shellcheck disable=SC2034 # Output globals, read by sourcing callers.
@@ -883,6 +890,10 @@ fm_session_lock_anchor_state() {  # <state>
   local anchor recorded current
   FM_SESSION_LOCK_ANCHOR_PID=
   FM_SESSION_LOCK_ANCHOR_STATE=none
+  if [ -f "$1/.lock-session" ] && [ ! -L "$1/.lock-session" ] && ! sed -n '1p' "$1/.lock-session" >/dev/null 2>&1; then
+    FM_SESSION_LOCK_ANCHOR_STATE=unreadable
+    return 0
+  fi
   anchor=$(fm_session_lock_recorded_anchor "$1") || return 0
   FM_SESSION_LOCK_ANCHOR_PID=$anchor
   fm_session_lock_pid_verdict "$anchor"
@@ -899,6 +910,10 @@ fm_session_lock_anchor_state() {  # <state>
     . "$FM_SESSION_LOCK_LIB_DIR/fm-wake-lib.sh"
   fi
   current=$(fm_pid_start_time "$anchor" 2>/dev/null) && [ -n "$current" ] || return 0
+  case "$current:$recorded" in
+    proc-starttime=*:proc-starttime=*) ;;
+    proc-starttime=*:*|*:proc-starttime=*) return 0 ;;
+  esac
   if [ "$current" = "$recorded" ]; then
     FM_SESSION_LOCK_ANCHOR_STATE=alive
   else
@@ -947,34 +962,54 @@ fm_session_lock_anchor_pid() {
 #      anchor, even when line 1 is a shared front-end inside this ancestry.
 #      Only gone - no such pid, or a different readable start time - lets the
 #      decision continue past an anchor outside this ancestry.
-#   2. Line 1 is a member of this ancestry: own. This covers a recorded anchor
+#   2. The sidecar records a session id but no anchor, as one written before
+#      anchors existed does, this process proves a trusted Claude session whose
+#      CLAUDE_PID is not line 1, and line 1 is a member of this ancestry: line
+#      1 is a front-end shared by more than one model loop, and the original
+#      cannot be told from a duplicate, so the verdict is unknown naming line
+#      1, with FM_SESSION_LOCK_DECISION_LEGACY_FRONT set. This arises once, for
+#      a session started before anchors existed under a shared front-end, and
+#      clears when that front-end process stops: line 1 is then dead and the
+#      ordinary reclaim applies. A process whose CLAUDE_PID is line 1 is not
+#      affected and owns through the next row.
+#   3. Line 1 is a member of this ancestry: own. This covers a recorded anchor
 #      that is this process or its ancestor, a recorded anchor that has exited
 #      or whose pid was reused while line 1 is still this process's ancestor,
 #      and a sidecar that is absent or records the id alone.
-#   3. The trusted Claude session id equals the recorded one, the live
+#   4. The trusted Claude session id equals the recorded one, the live
 #      recorded anchor is in this ancestry, and line 1 is still a live harness:
 #      own. This is a recycled helper chain whose surviving model loop is the
 #      recorded anchor; an id alone, an exited or reused anchor, or no recorded
 #      start time is no such proof.
-#   4. Line 1 must not be reclaimed (fm_session_lock_pid_blocks_reclaim):
+#   5. Line 1 must not be reclaimed (fm_session_lock_pid_blocks_reclaim):
 #      foreign naming line 1. Otherwise none, and bin/fm-lock.sh reclaims.
 #
-# A missing or malformed line 1 is none. An ancestry that cannot be resolved is
-# unknown, naming the holder that may be live - a recorded anchor that is not
-# gone, else a line 1 that must not be reclaimed - and none when neither
-# exists. Sets FM_SESSION_LOCK_DECISION (own|foreign|unknown|none) and, for
+# A missing or malformed line 1 is none. A sidecar that exists but cannot be
+# read is unknown naming line 1, before any other row. An ancestry that cannot
+# be resolved is unknown, naming the holder that may be live - a recorded
+# anchor that is not gone, else a line 1 that must not be reclaimed - and none
+# when neither exists. Sets FM_SESSION_LOCK_DECISION (own|foreign|unknown|none) and, for
 # foreign or unknown, FM_SESSION_LOCK_FOREIGN_OWNER_PID.
 # shellcheck disable=SC2034 # Output globals, read by sourcing callers.
 FM_SESSION_LOCK_DECISION=none
+# shellcheck disable=SC2034 # Output globals, read by sourcing callers.
+FM_SESSION_LOCK_DECISION_LEGACY_FRONT=
 # shellcheck disable=SC2034 # Output global, read by the sourcing guard caller.
 FM_SESSION_LOCK_FOREIGN_OWNER_PID=
 fm_session_lock_decide() {  # <state>
   local state=$1 lock_pid pids
   FM_SESSION_LOCK_DECISION=none
+  # shellcheck disable=SC2034 # Output global, read by bin/fm-lock.sh's refusal.
+  FM_SESSION_LOCK_DECISION_LEGACY_FRONT=
   FM_SESSION_LOCK_FOREIGN_OWNER_PID=
   lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
   fm_session_pid_valid "$lock_pid" || return 0
   fm_session_lock_anchor_state "$state"
+  if [ "$FM_SESSION_LOCK_ANCHOR_STATE" = unreadable ]; then
+    FM_SESSION_LOCK_DECISION=unknown
+    FM_SESSION_LOCK_FOREIGN_OWNER_PID=$lock_pid
+    return 0
+  fi
   if ! pids=$(fm_harness_ancestry_pids); then
     case "$FM_SESSION_LOCK_ANCHOR_STATE" in
       alive|unknown)
@@ -999,6 +1034,16 @@ fm_session_lock_decide() {  # <state>
       fi
       ;;
   esac
+  if [ "$FM_SESSION_LOCK_ANCHOR_STATE" = none ] && fm_harness_pid_listed "$lock_pid" "$pids" \
+    && [ "$lock_pid" != "${CLAUDE_PID:-}" ] && [ "$lock_pid" != "$FM_WIN_PID_PREFIX${CLAUDE_PID:-}" ] \
+    && fm_session_lock_recorded_session_id "$state" >/dev/null \
+    && fm_session_lock_trusted_session_id "$pids" >/dev/null; then
+    FM_SESSION_LOCK_DECISION=unknown
+    # shellcheck disable=SC2034 # Output global, read by bin/fm-lock.sh's refusal.
+    FM_SESSION_LOCK_DECISION_LEGACY_FRONT=1
+    FM_SESSION_LOCK_FOREIGN_OWNER_PID=$lock_pid
+    return 0
+  fi
   if fm_harness_pid_listed "$lock_pid" "$pids"; then
     FM_SESSION_LOCK_DECISION=own
     return 0
@@ -1049,12 +1094,16 @@ fm_session_lock_foreign_owner_live() {  # <state>
 # names that anchor.
 # stale: the recorded pid is gone.
 # unknown: the file or pid cannot be classified without guessing, including a
-# live process that is not a verified harness. Existence of a lock file, a
-# session record, or a pane is never treated as liveness.
+# live process that is not a verified harness, and a line 1 that is not held
+# while the sidecar's recorded model-loop anchor still exists but cannot be
+# confirmed by its start time; the pid then names that anchor and
+# FM_LOCK_INSPECT_ANCHOR_UNVERIFIED is 1. Existence of a lock file, a session
+# record, or a pane is never treated as liveness.
 # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
 FM_LOCK_INSPECT_STATE=unknown
 FM_LOCK_INSPECT_PID=
 FM_LOCK_INSPECT_LIVE_HARNESS=unknown
+FM_LOCK_INSPECT_ANCHOR_UNVERIFIED=
 fm_session_lock_inspect() {  # <state>
   local state=$1 lock pid
   # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
@@ -1063,6 +1112,8 @@ fm_session_lock_inspect() {  # <state>
   FM_LOCK_INSPECT_PID=
   # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
   FM_LOCK_INSPECT_LIVE_HARNESS=unknown
+  # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
+  FM_LOCK_INSPECT_ANCHOR_UNVERIFIED=
   lock="$state/.lock"
   if [ ! -e "$lock" ]; then
     FM_LOCK_INSPECT_STATE=free
@@ -1107,6 +1158,17 @@ fm_session_lock_inspect() {  # <state>
   esac
   [ "$FM_LOCK_INSPECT_STATE" != held ] || return 0
   fm_session_lock_anchor_state "$state"
+  if [ "$FM_SESSION_LOCK_ANCHOR_STATE" = unknown ]; then
+    # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
+    FM_LOCK_INSPECT_STATE=unknown
+    # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
+    FM_LOCK_INSPECT_PID=$FM_SESSION_LOCK_ANCHOR_PID
+    # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
+    FM_LOCK_INSPECT_LIVE_HARNESS=unknown
+    # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
+    FM_LOCK_INSPECT_ANCHOR_UNVERIFIED=1
+    return 0
+  fi
   if [ "$FM_SESSION_LOCK_ANCHOR_STATE" = alive ] && fm_harness_pid_alive "$FM_SESSION_LOCK_ANCHOR_PID"; then
     # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
     FM_LOCK_INSPECT_STATE=held

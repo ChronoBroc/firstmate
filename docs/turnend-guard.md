@@ -108,6 +108,8 @@ Otherwise the current session owns the lock when either of these holds:
 
 That second signal keeps a background Claude session owning its own lock after the transient helper chain between its hooks and its recorded owner is recycled.
 For a hook outside line 1's ancestry, a recorded anchor outside its own ancestry, a reused anchor pid, and a sidecar that records no anchor or no anchor start time prove no continuity with the live holder; a hook whose ancestry contains line 1 still owns through the first signal unless the live-holder rule above applies. Such a non-owning hook may belong to a second running copy of the same session, such as a running session resumed again under another terminal server, or to a genuine original whose evidence is insufficient; either way it is a non-owner and its turns end through this diagnostic.
+A sidecar that exists but cannot be read, and a start time recorded by a different source than the one now readable, are likewise never read as an ended holder.
+Upgrade note: a sidecar written before model-loop anchors existed records the session id alone. When line 1 beside it is a front-end shared by more than one model loop, the original loop cannot be told from a duplicate, so every loop under that front-end other than line 1 itself is refused with the could-not-verify diagnostic, which says so. This arises once, for a session started before this change under a shared front-end, and clears when the recorded front-end process is stopped: line 1 is then dead and the next session start reclaims the lock as before.
 The library's header owns the trust gate (`CLAUDE_PID` must be a Claude-shaped member of the current run).
 `bin/fm-lock.sh` owns the sidecar and the line-1 anchor it records for such a session.
 

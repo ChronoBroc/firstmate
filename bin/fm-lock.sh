@@ -83,6 +83,13 @@ if [ "${1:-}" = "status" ]; then
     free) echo "lock: free" ;;
     unreadable) echo "lock: unreadable" ;;
     held) echo "lock: held by live harness pid $FM_LOCK_INSPECT_PID" ;;
+    unknown)
+      if [ -n "$FM_LOCK_INSPECT_ANCHOR_UNVERIFIED" ]; then
+        echo "lock: unknown (recorded model-loop anchor pid $FM_LOCK_INSPECT_PID is still running but its identity cannot be verified)"
+      else
+        echo "lock: stale (pid $FM_LOCK_INSPECT_PID dead or not a harness)"
+      fi
+      ;;
     *) echo "lock: stale (pid $FM_LOCK_INSPECT_PID dead or not a harness)" ;;
   esac
   exit 0
@@ -185,8 +192,10 @@ remember_lock_session() {
 }
 
 # Record the trusted session id beside the lock, or remove a sidecar that no
-# trusted id backs. A second line `anchor=<pid>` records the CLAUDE_PID the
-# trusted id was verified against in this same ancestry walk, tagged when the
+# trusted id backs; an ancestry or CLAUDE_PID read that cannot be completed
+# fails the publication and leaves the sidecar as it was. A second line
+# `anchor=<pid>` records the CLAUDE_PID the trusted id was verified against in
+# this same ancestry walk, tagged when the
 # walk lists it tagged (fm_session_lock_recorded_anchor), and a third line
 # `anchor-start=<start>` its process start time (fm_pid_start_time) when that is
 # readable (fm_session_lock_recorded_anchor_start); when it is not, a start
@@ -196,9 +205,15 @@ remember_lock_session() {
 # rewritten under the same recorded id keeps its modification time, which marks
 # when that session id was recorded, or the rewrite fails.
 publish_lock_session() {
-  local pids trusted anchor current content start recorded tmp
-  if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ -n "${CLAUDE_PID:-}" ] && [ -z "${CLAUDE_PID//[0-9]/}" ] \
-    && pids=$(fm_harness_ancestry_pids) && trusted=$(fm_session_lock_trusted_session_id "$pids"); then
+  local pids trusted='' rc anchor current content start recorded tmp
+  if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ -n "${CLAUDE_PID:-}" ] && [ -z "${CLAUDE_PID//[0-9]/}" ]; then
+    pids=$(fm_harness_ancestry_pids) || return 1
+    rc=0
+    trusted=$(fm_session_lock_trusted_session_id "$pids") || rc=$?
+    [ "$rc" -ne 2 ] || return 1
+    [ "$rc" -eq 0 ] || trusted=
+  fi
+  if [ -n "${trusted:-}" ]; then
     anchor=$CLAUDE_PID
     fm_harness_pid_listed "$anchor" "$pids" || anchor="$FM_WIN_PID_PREFIX$CLAUDE_PID"
     content="$trusted"$'\n'"anchor=$anchor"
@@ -304,6 +319,9 @@ refuse_if_live_holder() {  # <recorded-pid>
 
 refuse_live_owner() {  # <recorded-pid>
   local recorded trusted
+  if [ -n "${FM_SESSION_LOCK_DECISION_LEGACY_FRONT:-}" ]; then
+    echo "note: the lock was recorded before model-loop anchors existed, by a session under the front-end pid $1 that this session shares, so the original model loop cannot be told from a duplicate; this arises once for a session started before this change, and clears when front-end pid $1 is stopped, after which session start reclaims the lock" >&2
+  fi
   if recorded=$(fm_session_lock_recorded_session_id "$STATE") \
     && trusted=$(fm_session_lock_trusted_session_id) && [ "$trusted" = "$recorded" ]; then
     echo "error: another live process holds the lock under this same session id (pid $1, session $recorded) and this session's continuity with that holder could not be verified; operate read-only until resolved" >&2
