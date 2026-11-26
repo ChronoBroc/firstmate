@@ -2493,7 +2493,7 @@ stop_refusal_helper() {  # <dir>
 }
 
 test_hook_claude_refused_caller_never_touches_owner_records() {
-  local path dir home claude holder before out status nojq tool tool_path variant failcat
+  local path dir home claude holder before out status nojq tool tool_path variant failcat sidecarfail dead_line1 holder_start
   claude="$TMP_ROOT/refusal-harness/claude"
   mkdir -p "${claude%/*}"
   ln -sf /bin/bash "$claude"
@@ -2509,7 +2509,7 @@ test_hook_claude_refused_caller_never_touches_owner_records() {
     # shellcheck disable=SC2016 # the fake harness expands FM_HOME inside its child shell.
     out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
       | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
-        "$claude" -c 'bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude' 2>&1) || status=$?
+        "$claude" -c 'bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude; exit $?' 2>&1) || status=$?
     kill "$holder" 2>/dev/null || true
     wait "$holder" 2>/dev/null || true
     stop_refusal_helper "$dir"
@@ -2546,7 +2546,26 @@ done
 exec $(command -v cat) "\$@"
 SH
   chmod +x "$failcat/cat"
-  for variant in nojq unreadable-lock lock-directory lock-dangling-symlink; do
+  sidecarfail="$TMP_ROOT/refusal-sidecar-once-bin"
+  mkdir -p "$sidecarfail"
+  for tool in cat sed head; do
+    cat > "$sidecarfail/$tool" <<SH
+#!/bin/sh
+for arg in "\$@"; do
+  case "\$arg" in
+    */state/.lock-session)
+      if [ -e "\$FM_TEST_SIDECAR_READ_ONCE" ]; then
+        exit 1
+      fi
+      : > "\$FM_TEST_SIDECAR_READ_ONCE"
+      ;;
+  esac
+done
+exec $(command -v "$tool") "\$@"
+SH
+    chmod +x "$sidecarfail/$tool"
+  done
+  for variant in nojq unreadable-lock lock-directory lock-dangling-symlink sidecar-read-once; do
     dir=$(make_refusal_path_home "$TMP_ROOT/refused-$variant" stale)
     home=$(cd "$dir" && pwd)
     "$claude" -c 'while kill -0 "$1" 2>/dev/null && [ "$SECONDS" -lt 600 ]; do sleep 1; done' refusal-holder "$$" &
@@ -2554,6 +2573,15 @@ SH
     case "$variant" in
       lock-directory) mkdir "$dir/state/.lock" ;;
       lock-dangling-symlink) ln -s "$dir/state/no-such-lock" "$dir/state/.lock" ;;
+      sidecar-read-once)
+        sh -c ':' &
+        dead_line1=$!
+        wait "$dead_line1" 2>/dev/null || true
+        printf '%s\n' "$dead_line1" > "$dir/state/.lock"
+        holder_start=$(STATE="$dir/state" bash -c '. "$1/bin/fm-wake-lib.sh"; fm_pid_start_time "$2"' _ "$ROOT" "$holder") \
+          || fail "sidecar-read-once: could not read the holder's start time"
+        printf 'S1\nanchor=%s\nanchor-start=%s\n' "$holder" "$holder_start" > "$dir/state/.lock-session"
+        ;;
       *) printf '%s\n' "$holder" > "$dir/state/.lock" ;;
     esac
     before=$(refusal_records "$dir")
@@ -2570,8 +2598,16 @@ SH
         out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
           | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID PATH="$failcat:$PATH" FM_TEST_LOCK_READ_FAILED="$dir/lock-read-failed" \
             CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
-            "$claude" -c 'printf "%s\n" "$$" > "$FM_HOME/state/.lock"; bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude' 2>&1) || status=$?
+            "$claude" -c 'printf "%s\n" "$$" > "$FM_HOME/state/.lock"; bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude; exit $?' 2>&1) || status=$?
         [ -e "$dir/lock-read-failed" ] || fail "unreadable-lock: the injected first lock read never happened"
+        ;;
+      sidecar-read-once)
+        # shellcheck disable=SC2016 # the fake harness expands FM_HOME inside its child shell.
+        out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
+          | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID PATH="$sidecarfail:$PATH" FM_TEST_SIDECAR_READ_ONCE="$dir/sidecar-read" \
+            CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+            "$claude" -c 'bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude; exit $?' 2>&1) || status=$?
+        [ -e "$dir/sidecar-read" ] || fail "sidecar-read-once: the sidecar was never read"
         ;;
       *)
         out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
@@ -2587,6 +2623,10 @@ SH
         assert_contains "$out" "OWNER CANNOT BE VERIFIED: this read-only session cannot and should not arm or repair the watcher (the session lock cannot be read)" \
           "unreadable-lock: the Stop did not take the read-only exit with the unreadable-lock reason"
         assert_not_contains "$out" "lock owner pid" "unreadable-lock: the diagnostic named a holder pid it could not read"
+        ;;
+      sidecar-read-once)
+        assert_contains "$out" "OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid $holder)" \
+          "sidecar-read-once: a sidecar that can be read only once lost the live recorded anchor $holder"
         ;;
       lock-directory|lock-dangling-symlink)
         assert_contains "$out" "OWNER CANNOT BE VERIFIED: this read-only session cannot and should not arm or repair the watcher (the session lock is not a regular file)" \
@@ -2605,7 +2645,7 @@ SH
   # shellcheck disable=SC2016 # the fake harness expands FM_HOME inside its child shell.
   out=$(printf '{"stop_hook_active":false,"session_id":"sess-owner"}' \
     | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID PATH="$nojq" CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
-      "$claude" -c 'printf "%s\n" "$$" > "$FM_HOME/state/.lock"; bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude' 2>&1) || status=$?
+      "$claude" -c 'printf "%s\n" "$$" > "$FM_HOME/state/.lock"; bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude; exit $?' 2>&1) || status=$?
   expect_code 0 "$status" "nojq: the owner's Stop without jq did not end: $out"
   [ "$(parent_busy_verdict "$dir")" = 'state=idle source=claude-hook event=stop' ] \
     || fail "nojq: the owner's Stop without jq did not record idle for the parent: $(cat "$dir/parent-state/sm.busy-state")"
@@ -2617,7 +2657,7 @@ SH
     # shellcheck disable=SC2016 # the fake harness expands FM_HOME inside its child shell.
     out=$(printf '{"stop_hook_active":false,"session_id":"sess-owner"}' \
       | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
-        "$claude" -c 'printf "%s\n" "$$" > "$FM_HOME/state/.lock"; bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude' 2>&1) || status=$?
+        "$claude" -c 'printf "%s\n" "$$" > "$FM_HOME/state/.lock"; bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude; exit $?' 2>&1) || status=$?
     stop_refusal_helper "$dir"
     assert_not_contains "$out" "OWNED BY ANOTHER LIVE SESSION" "$path: the lock owner took the read-only exit"
     case "$path" in

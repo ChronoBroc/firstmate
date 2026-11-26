@@ -52,7 +52,7 @@ while [ "${2:-}" != child ] && [ "$i" -lt 200 ] && [ "$(ps -o ppid= -p $$ 2>/dev
   sleep 0.05
   i=$((i + 1))
 done
-export CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$
+export CLAUDE_CODE_SESSION_ID=${FM_TWIN_SESSION_ID:-S1} CLAUDE_PID=$$
 printf '%s\n' "$$" > "$FM_HOME/state/$role-pid"
 n=1
 while [ ! -e "$FM_HOME/state/stop-$role" ] && kill -0 "$FM_TEST_SUITE_PID" 2>/dev/null \
@@ -114,8 +114,8 @@ SH
   chmod +x "$dir/front.sh"
 }
 
-start_twin_role() {  # <dir> <role>
-  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID FM_HOME="$1" FM_BIN="$ROOT/bin" \
+start_twin_role() {  # <dir> <role> [<session-id>]
+  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID FM_HOME="$1" FM_BIN="$ROOT/bin" FM_TWIN_SESSION_ID="${3:-S1}" \
     bash -c '"$0" "$1" "$2" &' "$NAMED_CLAUDE" "$1/twin.sh" "$2"
   wait_for_file "$1/state/$2-pid" "the $2 session"
 }
@@ -293,12 +293,12 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
     i=$((i + 1))
   done
   kill -0 "$orig" 2>/dev/null && fail "the original did not exit"
-  start_twin_role "$dir" late
+  start_twin_role "$dir" late S2
   late=$(tr -d '[:space:]' < "$dir/state/late-pid")
   fire_twin "$dir" late 1
   expect_code 0 "$(twin_value "$dir" late 1 lock.rc)" "the same session could not reclaim a dead holder's lock: $(cat "$dir/state/late-1/lock.out")"
   [ "$(twin_value "$dir" late 1 lock-after)" = "$late" ] || fail "the reclaim left line 1 at $(cat "$dir/state/late-1/lock-after")"
-  anchored_sidecar "$dir/state/.lock-session" S1 "$late" \
+  anchored_sidecar "$dir/state/.lock-session" S2 "$late" \
     || fail "the reclaim did not record the new anchor: $(cat "$dir/state/.lock-session")"
   : > "$dir/state/stop-late"
   pass "session-lock e2e: a live twin of a session never takes its lock, beside an anchored, an id-only, an exited-anchor, or a reused-anchor sidecar, the anchor-only upgrade keeps the sidecar time, an unreadable start time keeps the recorded proof, and a dead holder is still reclaimed"

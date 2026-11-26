@@ -23,13 +23,34 @@ fm_session_lock_recorded_session_id() {  # <state>
 # trusted id: the recording session's own anchor pid (its CLAUDE_PID, or that
 # pid tagged on Windows).
 fm_session_lock_recorded_anchor() {  # <state>
-  local state=$1 line
-  [ -f "$state/.lock-session" ] && [ ! -L "$state/.lock-session" ] || return 1
-  line=$(sed -n '2p' "$state/.lock-session" 2>/dev/null) || return 1
+  local text
+  text=$(_fm_session_lock_sidecar_text "$1") || return 1
+  _fm_session_lock_anchor_in "$text"
+}
+
+# Print state dir $1's sidecar text, or return 1 when it is absent, a symlink,
+# not a regular file, or cannot be read.
+_fm_session_lock_sidecar_text() {  # <state>
+  [ -f "$1/.lock-session" ] && [ ! -L "$1/.lock-session" ] || return 1
+  cat "$1/.lock-session" 2>/dev/null
+}
+
+# Print the valid anchor pid on line 2 of sidecar text $1, or return 1.
+_fm_session_lock_anchor_in() {  # <sidecar-text>
+  local line
+  line=$(printf '%s\n' "$1" | sed -n '2p')
   case "$line" in anchor=*) ;; *) return 1 ;; esac
   line=${line#anchor=}
   fm_session_pid_valid "$line" || return 1
   printf '%s\n' "$line"
+}
+
+# Print the anchor start time on line 3 of sidecar text $1, or return 1.
+_fm_session_lock_anchor_start_in() {  # <sidecar-text>
+  local line
+  line=$(printf '%s\n' "$1" | sed -n '3p')
+  case "$line" in anchor-start=?*) ;; *) return 1 ;; esac
+  printf '%s\n' "${line#anchor-start=}"
 }
 
 # Print the anchor's process start time recorded in state dir $1's sidecar, or
@@ -37,11 +58,9 @@ fm_session_lock_recorded_anchor() {  # <state>
 # (fm_pid_start_time of the anchor) whenever that start time is readable; a
 # sidecar without it, as for a tagged Windows anchor, records none.
 fm_session_lock_recorded_anchor_start() {  # <state>
-  local state=$1 line
-  [ -f "$state/.lock-session" ] && [ ! -L "$state/.lock-session" ] || return 1
-  line=$(sed -n '3p' "$state/.lock-session" 2>/dev/null) || return 1
-  case "$line" in anchor-start=?*) ;; *) return 1 ;; esac
-  printf '%s\n' "${line#anchor-start=}"
+  local text
+  text=$(_fm_session_lock_sidecar_text "$1") || return 1
+  _fm_session_lock_anchor_start_in "$text"
 }
 
 # Classify the model-loop anchor recorded in state dir $1's sidecar. Sets
@@ -65,14 +84,15 @@ FM_SESSION_LOCK_ANCHOR_PID=
 # shellcheck disable=SC2034 # Output globals, read by sourcing callers.
 FM_SESSION_LOCK_ANCHOR_STATE=none
 fm_session_lock_anchor_state() {  # <state>
-  local anchor recorded current
+  local text anchor recorded current
   FM_SESSION_LOCK_ANCHOR_PID=
   FM_SESSION_LOCK_ANCHOR_STATE=none
-  if [ -f "$1/.lock-session" ] && [ ! -L "$1/.lock-session" ] && ! sed -n '1p' "$1/.lock-session" >/dev/null 2>&1; then
+  [ -f "$1/.lock-session" ] && [ ! -L "$1/.lock-session" ] || return 0
+  if ! text=$(_fm_session_lock_sidecar_text "$1"); then
     FM_SESSION_LOCK_ANCHOR_STATE=unreadable
     return 0
   fi
-  anchor=$(fm_session_lock_recorded_anchor "$1") || return 0
+  anchor=$(_fm_session_lock_anchor_in "$text") || return 0
   FM_SESSION_LOCK_ANCHOR_PID=$anchor
   fm_session_lock_pid_verdict "$anchor"
   if [ "$FM_SESSION_LOCK_PID_VERDICT" = dead ]; then
@@ -89,7 +109,7 @@ fm_session_lock_anchor_state() {  # <state>
       ;;
   esac
   FM_SESSION_LOCK_ANCHOR_STATE=unknown
-  recorded=$(fm_session_lock_recorded_anchor_start "$1") || return 0
+  recorded=$(_fm_session_lock_anchor_start_in "$text") || return 0
   if ! command -v fm_pid_start_time >/dev/null 2>&1; then
     # shellcheck disable=SC2034 # Read by the sourced fm-wake-lib.sh.
     local STATE=${FM_STATE_OVERRIDE:-$1}
