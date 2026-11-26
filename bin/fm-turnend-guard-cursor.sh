@@ -267,6 +267,7 @@ current_session_still_ours() {
 # be reclaimed, and any reclaim is delegated to bin/fm-lock.sh so acquisition
 # keeps its single owner.
 if ! fm_session_lock_owned_by_self "$STATE"; then
+  case "$FM_SESSION_LOCK_DECISION" in foreign|unknown) exit 0 ;; esac
   LOCK_PID=$(cat "$STATE/.lock" 2>/dev/null || true)
   fm_session_pid_valid "$LOCK_PID" || exit 0
   fm_session_lock_pid_blocks_reclaim "$LOCK_PID" && exit 0

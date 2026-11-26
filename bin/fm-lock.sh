@@ -24,7 +24,17 @@
 # sidecar written only here and only under the claim lock: refreshed on every
 # confirmed-own acquisition, including the early already-mine exit that waits
 # for the claim lock, removed when the acquiring session proves no trusted id,
-# and left byte-identical when it already names that id. A same-session
+# and left byte-identical when it already has the content this acquisition
+# would write. Its second line `anchor=<pid>` records the acquiring session's
+# own anchor pid beside the id, and its third line `anchor-start=<start>` that
+# process's start time. fm_session_lock_decide in bin/fm-session-lock-lib.sh
+# turns them into one verdict: a recorded anchor still running outside the
+# caller's ancestry is a live holder that refuses the caller even when line 1
+# is a shared front-end in its ancestry; a same-id caller outside the lock's
+# ancestry owns the lock only when that live recorded anchor is in its own
+# ancestry; any other same-id caller, including one beside a sidecar with no
+# anchor or no start time, is refused without a continuity verdict and never
+# re-anchors the lock. A same-session
 # confirmation keeps a live line 1 that is in this session's harness ancestry,
 # because bin/fm-startup-network.sh compares that pid across its deferred
 # sweeps; a dead recorded pid is reclaimed and rewritten to this session's
@@ -73,6 +83,17 @@ if [ "${1:-}" = "status" ]; then
     free) echo "lock: free" ;;
     unreadable) echo "lock: unreadable" ;;
     held) echo "lock: held by live harness pid $FM_LOCK_INSPECT_PID" ;;
+    unknown)
+      if [ "$FM_LOCK_INSPECT_DETAIL" = anchor-unverified ]; then
+        echo "lock: unknown (recorded model-loop anchor pid $FM_LOCK_INSPECT_PID has not been shown to have exited, but its identity cannot be verified)"
+      elif [ "$FM_LOCK_INSPECT_DETAIL" = sidecar-unreadable ]; then
+        echo "lock: unknown (pid $FM_LOCK_INSPECT_PID; the session sidecar beside the lock cannot be read, so whether its recorded holder is still running cannot be verified)"
+      elif [ "$FM_LOCK_INSPECT_DETAIL" = holder-unverified ]; then
+        echo "lock: unknown (pid $FM_LOCK_INSPECT_PID has not been shown to have exited, but its identity cannot be read)"
+      else
+        echo "lock: stale (pid $FM_LOCK_INSPECT_PID dead or not a harness)"
+      fi
+      ;;
     *) echo "lock: stale (pid $FM_LOCK_INSPECT_PID dead or not a harness)" ;;
   esac
   exit 0
@@ -166,7 +187,7 @@ remember_lock_session() {
   [ "$LOCK_SESSION_PHASE" -eq 0 ] || return 0
   if [ -e "$LOCK_SESSION" ] || [ -L "$LOCK_SESSION" ]; then
     rm -f "$LOCK_SESSION_PREV" 2>/dev/null || true
-    cp -P "$LOCK_SESSION" "$LOCK_SESSION_PREV" 2>/dev/null || return 1
+    cp -pP "$LOCK_SESSION" "$LOCK_SESSION_PREV" 2>/dev/null || return 1
     LOCK_SESSION_KIND=1
   else
     LOCK_SESSION_KIND=2
@@ -175,18 +196,65 @@ remember_lock_session() {
 }
 
 # Record the trusted session id beside the lock, or remove a sidecar that no
-# trusted id backs. Called only while the claim lock is held. A sidecar already
-# naming this id is left untouched, so a same-session confirmation keeps it
-# byte-identical.
+# trusted id backs; an ancestry or CLAUDE_PID read that cannot be completed,
+# including a walk that stopped early beside any existing sidecar,
+# fails the publication and leaves the sidecar as it was. A second line
+# `anchor=<pid>` records the CLAUDE_PID the trusted id was verified against in
+# this same ancestry walk, tagged when the
+# walk lists it tagged (_fm_session_lock_anchor_in), and a third line
+# `anchor-start=<start>` its process start time (fm_pid_start_time) when that is
+# readable (_fm_session_lock_anchor_start_in); when it is not, a start
+# time already recorded beside this same anchor is kept, across a re-key too.
+# An existing sidecar is read once, and a failed read fails the publication and
+# leaves it as it was. Called only while the claim lock is held. A sidecar that already has exactly this content
+# is left untouched, so a same-session confirmation keeps it byte-identical; one
+# rewritten under the same recorded id keeps its modification time, which marks
+# when that session id was recorded, or the rewrite fails.
 publish_lock_session() {
-  local trusted recorded tmp
-  if trusted=$(fm_session_lock_trusted_session_id); then
-    if recorded=$(fm_session_lock_recorded_session_id "$STATE") && [ "$recorded" = "$trusted" ]; then
-      return 0
+  local pids trusted='' rc anchor existing='' content start recorded tmp
+  if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ -n "${CLAUDE_PID:-}" ] && [ -z "${CLAUDE_PID//[0-9]/}" ]; then
+    pids=$(fm_harness_ancestry_pids) || return 1
+    rc=0
+    trusted=$(fm_session_lock_trusted_session_id "$pids") || rc=$?
+    [ "$rc" -ne 2 ] || return 1
+    if [ "$rc" -ne 0 ]; then
+      trusted=
+      if [ -e "$LOCK_SESSION" ] || [ -L "$LOCK_SESSION" ]; then
+        fm_harness_ancestry_complete "$pids" || return 1
+      fi
     fi
+  fi
+  if [ -n "${trusted:-}" ]; then
+    anchor=$CLAUDE_PID
+    fm_harness_pid_listed "$anchor" "$pids" || anchor="$FM_WIN_PID_PREFIX$CLAUDE_PID"
+    content="$trusted"$'\n'"anchor=$anchor"
+    if [ -f "$LOCK_SESSION" ] && [ ! -L "$LOCK_SESSION" ]; then
+      existing=$(_fm_session_lock_sidecar_text "$STATE") || return 1
+    fi
+    if ! { start=$(fm_pid_start_time "$anchor" 2>/dev/null) && [ -n "$start" ]; }; then
+      start=
+      if [ "$(_fm_session_lock_anchor_in "$existing")" = "$anchor" ]; then
+        start=$(_fm_session_lock_anchor_start_in "$existing") || start=
+      fi
+    fi
+    case "$start" in
+      ''|*$'\n'*|*$'\r'*) ;;
+      *) content="$content"$'\n'"anchor-start=$start" ;;
+    esac
+    [ "$existing" != "$content" ] || return 0
     remember_lock_session || return 1
     tmp=$(mktemp "$STATE/.lock-session.XXXXXX" 2>/dev/null) || return 1
-    if ! { printf '%s\n' "$trusted" > "$tmp" && mv -f "$tmp" "$LOCK_SESSION"; } 2>/dev/null; then
+    if ! printf '%s\n' "$content" > "$tmp" 2>/dev/null; then
+      rm -f "$tmp" 2>/dev/null
+      return 1
+    fi
+    if recorded=$(_fm_session_lock_session_id_in "$existing") && [ "$recorded" = "$trusted" ]; then
+      if ! touch -r "$LOCK_SESSION" "$tmp" 2>/dev/null; then
+        rm -f "$tmp" 2>/dev/null
+        return 1
+      fi
+    fi
+    if ! mv -f "$tmp" "$LOCK_SESSION" 2>/dev/null; then
       rm -f "$tmp" 2>/dev/null
       return 1
     fi
@@ -225,7 +293,7 @@ confirm_own_lock() {  # <recorded-pid>
     waited=1
   fi
   recorded=$(cat "$LOCK" 2>/dev/null || true)
-  if [ "$recorded" = "$me" ] || fm_session_lock_owned_by_self "$STATE"; then
+  if fm_session_lock_owned_by_self "$STATE"; then
     if [ "$recorded" != "$me" ] && pids=$(fm_harness_ancestry_pids) \
       && ! fm_harness_pid_listed "$recorded" "$pids" \
       && fm_lock_acquire_wait_max "$LEASE_LOCK" "$LEASE_LOCK_WAIT"; then
@@ -245,9 +313,43 @@ confirm_own_lock() {  # <recorded-pid>
   return 1
 }
 
+# Exit through refuse_live_owner when this session does not own the lock and
+# a holder may be live: the decision's foreign or unknown holder, or line 1 $1
+# when it must not be reclaimed.
+refuse_if_live_holder() {  # <recorded-pid>
+  fm_session_lock_decide "$STATE"
+  case "$FM_SESSION_LOCK_DECISION" in
+    foreign|unknown) refuse_live_owner "$FM_SESSION_LOCK_FOREIGN_OWNER_PID" ;;
+  esac
+  if fm_session_lock_pid_blocks_reclaim "$1"; then
+    refuse_live_owner "$1"
+  fi
+  return 0
+}
+
 refuse_live_owner() {  # <recorded-pid>
-  local recorded
-  if recorded=$(fm_session_lock_recorded_session_id "$STATE"); then
+  local recorded trusted
+  case "${FM_SESSION_LOCK_DECISION:-}:${FM_SESSION_LOCK_DECISION_REASON:-}" in
+    unknown:lock-unreadable)
+      echo "error: session lock is unreadable; operate read-only until resolved" >&2
+      exit 1
+      ;;
+    unknown:sidecar-unreadable)
+      echo "error: whether the lock holder is still running could not be verified (lock pid $1): the session sidecar beside the lock cannot be read; operate read-only until resolved" >&2
+      exit 1
+      ;;
+    unknown:*)
+      if [ "$FM_SESSION_LOCK_DECISION_REASON" = legacy-front ]; then
+        echo "note: the lock was recorded before model-loop anchors existed, by a session under the front-end pid $1 that this session shares, so the original model loop cannot be told from a duplicate; this arises once for a session started before this change, and clears when front-end pid $1 is stopped, after which session start reclaims the lock" >&2
+      fi
+      echo "error: whether the lock holder is still running could not be verified (pid $1): $(fm_session_lock_decision_reason_text); operate read-only until resolved" >&2
+      exit 1
+      ;;
+  esac
+  if recorded=$(fm_session_lock_recorded_session_id "$STATE") \
+    && trusted=$(fm_session_lock_trusted_session_id) && [ "$trusted" = "$recorded" ]; then
+    echo "error: another live process holds the lock under this same session id (pid $1, session $recorded) and this session's continuity with that holder could not be verified; operate read-only until resolved" >&2
+  elif [ -n "$recorded" ]; then
     echo "error: another live firstmate session holds the lock (pid $1, session $recorded); operate read-only until resolved" >&2
   else
     echo "error: another live firstmate session holds the lock (pid $1); operate read-only until resolved" >&2
@@ -257,13 +359,11 @@ refuse_live_owner() {  # <recorded-pid>
 
 if [ -f "$LOCK" ] && [ ! -L "$LOCK" ]; then
   old=$(cat "$LOCK" 2>/dev/null || true)
-  if [ "$old" = "$me" ] || fm_session_lock_owned_by_self "$STATE"; then
+  if fm_session_lock_owned_by_self "$STATE"; then
     confirm_own_lock "$old"
     old=$(cat "$LOCK" 2>/dev/null || true)
   fi
-  if [ -z "$REANCHOR" ] && fm_session_lock_pid_blocks_reclaim "$old"; then
-    refuse_live_owner "$old"
-  fi
+  [ -n "$REANCHOR" ] || refuse_if_live_holder "$old"
 fi
 
 if [ "$CLAIM_LOCK_HELD" -ne 1 ]; then
@@ -289,12 +389,10 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
   }
   # A re-anchor decided above has held the claim lock since, so line 1 is the
   # pid it recorded and needs no second verdict.
-  if [ -z "$REANCHOR" ] && [ "$old" != "$me" ] && fm_session_lock_pid_blocks_reclaim "$old"; then
+  if [ -z "$REANCHOR" ]; then
     fm_session_lock_owned_by_self "$STATE" && confirm_own_lock "$old"
     old=$(cat "$LOCK" 2>/dev/null || true)
-    if [ -z "$REANCHOR" ] && [ "$old" != "$me" ] && fm_session_lock_pid_blocks_reclaim "$old"; then
-      refuse_live_owner "$old"
-    fi
+    [ -n "$REANCHOR" ] || refuse_if_live_holder "$old"
   fi
 fi
 # The sidecar goes first: a fresh pid beside a previous session's id would let

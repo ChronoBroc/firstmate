@@ -87,6 +87,7 @@ fi
 EXEC_NUM=$(printf '%s' "$PAYLOAD" | jq -r 'if (.executionNum | type) == "number" then (.executionNum | floor | tostring) else "" end' 2>/dev/null || true)
 
 if ! fm_session_lock_owned_by_self "$STATE"; then
+  case "$FM_SESSION_LOCK_DECISION" in foreign|unknown) allow_stop ;; esac
   LOCK_PID=$(cat "$STATE/.lock" 2>/dev/null || true)
   fm_session_pid_valid "$LOCK_PID" || allow_stop
   fm_harness_pid_alive "$LOCK_PID" && allow_stop

@@ -6,11 +6,15 @@
 # bin/fm-lock.sh uses it to acquire and inspect state/.lock and its
 # state/.lock-session sidecar; bin/fm-claude-stop-autoarm.sh uses it to prove a
 # Stop hook fires inside the lock-owning primary session before it may arm or
-# rewake. Two signals decide ownership, either one sufficient: the recorded pid
-# is a member of this process's contiguous harness ancestry, or the trusted
-# Claude session id below matches the id recorded beside a live lock. Neither
-# signal ever fails open: no id, no sidecar, an untrusted id, or a different
-# recorded id leaves the ancestry verdict exactly as it was.
+# rewake. One ordered rule decides ownership (fm_session_lock_decide): a
+# recorded model-loop anchor still running outside this process's contiguous
+# harness ancestry is a live holder; otherwise the recorded pid being a member
+# of that ancestry owns, or the trusted Claude session id below matching the
+# id recorded beside a live lock whose live recorded anchor is in that
+# ancestry. No signal ever fails open: no id, no sidecar, an untrusted id, or a
+# different recorded id grants no ownership beyond the ancestry verdict, and a
+# live recorded anchor outside the ancestry still refuses whatever id it was
+# recorded under (docs/turnend-guard.md "Foreign session-lock owner").
 # A second decision is owned here too: fm_session_lock_pid_blocks_reclaim
 # answers whether a recorded owner may be reclaimed, so recovery callers
 # delegate that question instead of re-deriving liveness from the fields.
@@ -27,6 +31,7 @@ _FM_SESSION_LOCK_LIB_DIR=${BASH_SOURCE[0]%/*}
 . "${_FM_SESSION_LOCK_LIB_DIR:-/}/fm-cursor-lib.sh"
 # shellcheck source=bin/fm-omp-process-lib.sh
 . "${_FM_SESSION_LOCK_LIB_DIR:-/}/fm-omp-process-lib.sh"
+FM_SESSION_LOCK_LIB_DIR=$(cd "${_FM_SESSION_LOCK_LIB_DIR:-/}" && pwd)
 unset _FM_SESSION_LOCK_LIB_DIR
 
 # Known harness command names; extend when a new adapter is verified. omp and
@@ -622,6 +627,25 @@ fm_harness_ancestry_pid() {
   _fm_harness_outermost_pid "$pids"
 }
 
+# True when ancestry list $1, as fm_harness_ancestry_pids printed it, ended
+# because the walk reached the end of the session's contiguous run rather than
+# because a read failed: its outermost pid is not a Claude harness, is a tagged
+# Windows pid, or has a readable parent that is not a Claude harness or no
+# parent at all.
+fm_harness_ancestry_complete() {  # <ancestry-pids>
+  local outermost ppid
+  outermost=$(_fm_harness_outermost_pid "$1") || return 1
+  case "$outermost" in "$FM_WIN_PID_PREFIX"*) return 0 ;; esac
+  fm_proc_info "$outermost" || return 1
+  fm_harness_process_matches "$FM_PROC_COMM" "$FM_PROC_ARGS" || return 1
+  [ "$FM_HARNESS_IS_CLAUDE" -eq 1 ] || return 0
+  ppid=$FM_PROC_PPID
+  [ -n "$ppid" ] || return 1
+  [ "$ppid" != 0 ] || return 0
+  fm_proc_info "$ppid" || return 1
+  ! { fm_harness_process_matches "$FM_PROC_COMM" "$FM_PROC_ARGS" && [ "$FM_HARNESS_IS_CLAUDE" -eq 1 ]; }
+}
+
 # Print the last (outermost) pid of ancestry list $1, or return 1 when empty.
 _fm_harness_outermost_pid() {  # <ancestry-pids>
   local pid outermost=''
@@ -784,10 +808,16 @@ fm_session_lock_pid_blocks_reclaim() {
 #
 # A --fork-session successor mints a new id, so it stays a foreign live owner
 # until the pre-fork process exits; that is the safe direction and a documented
-# non-goal. Two genuinely different live sessions sharing one id is not a
-# supported state (Claude refuses to resume a running session under its id).
+# non-goal. A second live copy of one session under the same id - a running
+# session resumed again elsewhere - shares that id, so the id alone never
+# proves ownership: a same-id caller owns a lock outside its ancestry only
+# through positive continuity with the live recorded model-loop anchor
+# (fm_session_lock_decide). A sidecar without an anchor, as every pre-anchor
+# sidecar is, proves no continuity.
 
-# Print the Claude session id this process may own with, or return 1. $1 is the
+# Print the Claude session id this process may own with, or return 1, or 2 when
+# CLAUDE_PID, plain or tagged, is in the ancestry but its process could not be
+# read. $1 is the
 # ancestry list an earlier walk already produced, so a caller that walked once
 # need not walk again.
 fm_session_lock_trusted_session_id() {  # [<ancestry-pids>]
@@ -803,11 +833,16 @@ fm_session_lock_trusted_session_id() {  # [<ancestry-pids>]
     # from CLAUDE_PID and this same id, so it is matched in that form.
     case "$pid" in
       "$claude_pid")
-        fm_proc_info "$pid" || return 1
+        fm_proc_info "$pid" || return 2
         fm_harness_process_matches "$FM_PROC_COMM" "$FM_PROC_ARGS" || return 1
         ;;
       "$FM_WIN_PID_PREFIX$claude_pid")
-        fm_harness_pid_alive "$pid" || return 1
+        fm_session_lock_pid_verdict "$pid"
+        case "$FM_SESSION_LOCK_PID_VERDICT" in
+          readable) fm_harness_process_matches "$FM_PROC_COMM" "$FM_PROC_ARGS" || return 1 ;;
+          dead) return 1 ;;
+          *) return 2 ;;
+        esac
         ;;
       *) continue ;;
     esac
@@ -820,161 +855,8 @@ EOF
   return 1
 }
 
-# Print the session id recorded beside the lock in state dir $1, or return 1.
-# bin/fm-lock.sh is the only writer of state/.lock-session; a missing,
-# symlinked, unreadable, or empty sidecar, or one whose first line contains a
-# newline or carriage return, is simply no recorded id.
-fm_session_lock_recorded_session_id() {  # <state>
-  local state=$1 recorded
-  [ -f "$state/.lock-session" ] && [ ! -L "$state/.lock-session" ] || return 1
-  recorded=$(head -n 1 "$state/.lock-session" 2>/dev/null) || return 1
-  [ -n "$recorded" ] || return 1
-  case "$recorded" in *$'\n'*|*$'\r'*) return 1 ;; esac
-  printf '%s\n' "$recorded"
-}
-
-# True when the lock in state dir $1 was recorded by this same Claude session:
-# the trusted id equals the id recorded beside the lock. No trusted id, no
-# sidecar, or a different recorded id is false.
-fm_session_lock_same_session() {  # <state> [<ancestry-pids>]
-  local state=$1 trusted recorded
-  trusted=$(fm_session_lock_trusted_session_id "${2:-}") || return 1
-  recorded=$(fm_session_lock_recorded_session_id "$state") || return 1
-  [ "$recorded" = "$trusted" ]
-}
-
-# Print the pid bin/fm-lock.sh records on lock line 1 for this session. For a
-# Claude session with a trusted id that is CLAUDE_PID, the model-loop process:
-# never the shared transient daemon and never a front-end that outlives the
-# session, so "recorded pid dead" keeps meaning "session gone" instead of
-# wedging a home behind a live daemon whose session died. A replaced background
-# helper leaves a dead pid that its own session's next hook reclaims, because
-# the sidecar still names that session. Every other session records the
-# outermost pid of its contiguous run, exactly as before; a trusted Windows
-# session's run is its tagged CLAUDE_PID alone, so it records that tagged pid.
-fm_session_lock_anchor_pid() {
-  local pids
-  pids=$(fm_harness_ancestry_pids) || return 1
-  if fm_session_lock_trusted_session_id "$pids" >/dev/null \
-    && fm_harness_pid_listed "$CLAUDE_PID" "$pids"; then
-    printf '%s\n' "$CLAUDE_PID"
-    return 0
-  fi
-  _fm_harness_outermost_pid "$pids"
-}
-
-# True when state dir $1 holds a session lock that this process's session owns:
-# the recorded pid is ANY harness ancestor of the current process, or the lock
-# was recorded by this same trusted Claude session and its recorded pid is still
-# a live harness. Membership is the honest ancestry test, because the lock owner
-# sits at an unknown depth in a contiguous Claude run - it is the outermost pid
-# when the hook fires inside the session's own nested worker chain, and an inner
-# pid when a harness-named daemon parents the session. The same-session path
-# requires the recorded pid alive so that a dead one is reclaimed through
-# bin/fm-lock.sh's ordinary stale-owner path, which refreshes line 1, rather than
-# silently owned with a dead anchor. A missing lock, a malformed lock, a lock
-# held by a harness outside this ancestry under another (or no) session id, or
-# an ancestry that cannot be resolved all fail closed.
-fm_session_lock_owned_by_self() {
-  local state=$1 lock_pid pids
-  lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
-  fm_session_pid_valid "$lock_pid" || return 1
-  pids=$(fm_harness_ancestry_pids) || return 1
-  fm_harness_pid_listed "$lock_pid" "$pids" && return 0
-  fm_session_lock_same_session "$state" "$pids" || return 1
-  fm_harness_pid_alive "$lock_pid"
-}
-
-# True when state dir $1 records a lock owner outside this process's contiguous
-# harness ancestry that this session must not reclaim and did not record under
-# its own trusted Claude session id - a live verified harness, or a live owner
-# whose identity cannot be read. Sets FM_SESSION_LOCK_FOREIGN_OWNER_PID for a
-# diagnostic caller.
-# Malformed, missing, dead, and ancestry-uncertain locks are not foreign-owner
-# evidence.
-# shellcheck disable=SC2034 # Output global, read by the sourcing guard caller.
-FM_SESSION_LOCK_FOREIGN_OWNER_PID=
-fm_session_lock_foreign_owner_live() {
-  local state=$1 lock_pid pids
-  FM_SESSION_LOCK_FOREIGN_OWNER_PID=
-  [ -f "$state/.lock" ] && [ ! -L "$state/.lock" ] || return 1
-  lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
-  fm_session_pid_valid "$lock_pid" || return 1
-  fm_session_lock_pid_blocks_reclaim "$lock_pid" || return 1
-  pids=$(fm_harness_ancestry_pids) || return 1
-  fm_harness_pid_listed "$lock_pid" "$pids" && return 1
-  fm_session_lock_same_session "$state" "$pids" && return 1
-  # shellcheck disable=SC2034 # Output global, read by the sourcing guard caller.
-  FM_SESSION_LOCK_FOREIGN_OWNER_PID=$lock_pid
-  return 0
-}
-
-# Read-only classification of state/.lock for machine-readable callers.
-# Never acquires the lock. A held lock is not proof the holder is consuming
-# wakes; that question belongs to the inbox readiness projection.
-#
-# Sets:
-#   FM_LOCK_INSPECT_STATE         free|held|stale|unreadable|unknown
-#   FM_LOCK_INSPECT_PID           recorded pid, or empty
-#   FM_LOCK_INSPECT_LIVE_HARNESS  true|false|unknown
-#
-# held: the recorded pid is a live verified harness.
-# stale: the recorded pid is gone.
-# unknown: the file or pid cannot be classified without guessing, including a
-# live process that is not a verified harness. Existence of a lock file, a
-# session record, or a pane is never treated as liveness.
-# shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
-FM_LOCK_INSPECT_STATE=unknown
-FM_LOCK_INSPECT_PID=
-FM_LOCK_INSPECT_LIVE_HARNESS=unknown
-fm_session_lock_inspect() {  # <state>
-  local state=$1 lock pid
-  # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
-  FM_LOCK_INSPECT_STATE=unknown
-  # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
-  FM_LOCK_INSPECT_PID=
-  # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
-  FM_LOCK_INSPECT_LIVE_HARNESS=unknown
-  lock="$state/.lock"
-  if [ ! -e "$lock" ]; then
-    FM_LOCK_INSPECT_STATE=free
-    FM_LOCK_INSPECT_LIVE_HARNESS=false
-    return 0
-  fi
-  if [ ! -f "$lock" ] || [ -L "$lock" ]; then
-    FM_LOCK_INSPECT_STATE=unreadable
-    return 0
-  fi
-  pid=$(cat "$lock" 2>/dev/null) || {
-    FM_LOCK_INSPECT_STATE=unreadable
-    return 0
-  }
-  pid=${pid%%$'\n'*}
-  # shellcheck disable=SC2034 # Output global, read by lock status and inbox ready.
-  FM_LOCK_INSPECT_PID=$pid
-  fm_session_pid_valid "$pid" || return 0
-  # One verdict for every identity form. A tagged Windows pid is resolved by
-  # this same call through the Windows table, so the match below is the single
-  # place "live verified harness" is decided; deciding it a second time ahead
-  # of this one is what let a holder read as held there and unknown here.
-  fm_session_lock_pid_verdict "$pid"
-  case "$FM_SESSION_LOCK_PID_VERDICT" in
-    dead)
-      # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
-      FM_LOCK_INSPECT_STATE=stale
-      # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
-      FM_LOCK_INSPECT_LIVE_HARNESS=false
-      ;;
-    readable)
-      if fm_harness_process_matches "$FM_PROC_COMM" "$FM_PROC_ARGS"; then
-        # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
-        FM_LOCK_INSPECT_STATE=held
-        # shellcheck disable=SC2034 # Output globals, read by lock status and inbox ready.
-        FM_LOCK_INSPECT_LIVE_HARNESS=true
-      else
-        # shellcheck disable=SC2034 # Output global, read by lock status and inbox ready.
-        FM_LOCK_INSPECT_LIVE_HARNESS=false
-      fi
-      ;;
-  esac
-}
+# The sidecar records, the anchor classification, the one ownership decision,
+# and the read-only lock inspection live beside this file and are part of this
+# library's interface; sourcing this file loads them.
+# shellcheck source=bin/fm-session-lock-decision-lib.sh
+. "$FM_SESSION_LOCK_LIB_DIR/fm-session-lock-decision-lib.sh"

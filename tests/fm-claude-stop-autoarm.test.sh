@@ -32,6 +32,7 @@ install_autoarm_scripts() {
   cp "$ROOT/bin/fm-wake-lib.sh" "$dir/bin/fm-wake-lib.sh"
   cp "$ROOT/bin/fm-path-lib.sh" "$dir/bin/fm-path-lib.sh"
   cp "$ROOT/bin/fm-session-lock-lib.sh" "$dir/bin/fm-session-lock-lib.sh"
+  cp "$ROOT/bin/fm-session-lock-decision-lib.sh" "$dir/bin/fm-session-lock-decision-lib.sh"
   cp "$ROOT/bin/fm-omp-process-lib.sh" "$dir/bin/fm-omp-process-lib.sh"
   cp "$ROOT/bin/fm-cursor-lib.sh" "$dir/bin/fm-cursor-lib.sh"
   cp "$ROOT/bin/fm-hook-host-lib.sh" "$dir/bin/fm-hook-host-lib.sh"
@@ -1043,7 +1044,8 @@ test_replacement_retires_interrupted_session_episode() {
 }
 
 # An interrupted failure belongs to the session, including when fm-lock moves
-# its live anchor to the current model process within that same session.
+# its live line 1 to the current model process within that same session, which
+# the sidecar records as its model-loop anchor.
 test_same_session_lock_move_preserves_interrupted_episode() {
   local dir status=0
   dir=$(make_primary_dir "$TMP_ROOT/interrupted-lock-move")
@@ -1065,10 +1067,11 @@ test_same_session_lock_move_preserves_interrupted_episode() {
     "$FAKE_CLAUDE" -c '\''
       export CLAUDE_PID=$$
       old_pid=$(cat "$FM_HOME/state/.lock")
+      . "$FM_HOME/bin/fm-wake-lib.sh"
+      printf "%s\nanchor=%s\nanchor-start=%s\n" "$CLAUDE_CODE_SESSION_ID" "$$" "$(fm_pid_start_time "$$")" > "$FM_HOME/state/.lock-session"
       "$FM_HOME/bin/fm-lock.sh" || exit 93
       [ "$(cat "$FM_HOME/state/.lock")" = "$$" ] || exit 94
       [ "$old_pid" != "$$" ] || exit 95
-      . "$FM_HOME/bin/fm-wake-lib.sh"
       fm_autoarm_claim_next "$FM_HOME/state" || exit 96
       [ -e "$FM_HOME/state/.claude-autoarm-failure-notified" ] || exit 11
       [ "$(cat "$FM_HOME/state/.claude-autoarm-failure-alarmed")" = alarmed ] || exit 12
@@ -1158,6 +1161,8 @@ test_signal_session_identity_proof() {
         FM_HOME="$dir" "$FAKE_CLAUDE" -c '
           export CLAUDE_CODE_SESSION_ID=sess-signal CLAUDE_PID=$$
           old=$(cat "$FM_HOME/state/.lock")
+          . "$FM_HOME/bin/fm-wake-lib.sh"
+          printf "%s\nanchor=%s\nanchor-start=%s\n" "$CLAUDE_CODE_SESSION_ID" "$$" "$(fm_pid_start_time "$$")" > "$FM_HOME/state/.lock-session"
           "$FM_HOME/bin/fm-lock.sh" || exit 90
           [ "$(cat "$FM_HOME/state/.lock")" = "$$" ] && [ "$old" != "$$" ] || exit 91
           kill -"$2" "$1" || exit 92
