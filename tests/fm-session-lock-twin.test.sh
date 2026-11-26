@@ -16,6 +16,8 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/session-lock-helpers.sh
+. "$(dirname "${BASH_SOURCE[0]}")/session-lock-helpers.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-session-lock-twin)
 fm_git_identity fmtest fmtest@example.invalid
@@ -40,15 +42,6 @@ wait_for_file() {  # <path> <what>
     i=$((i + 1))
   done
   [ -s "$1" ] || fail "twin fixture never produced $2"
-}
-
-# The sidecar <file> records session <id> with anchor <pid> and a non-empty
-# anchor start time on its third line, as bin/fm-lock.sh's sidecar contract
-# states.
-anchored_sidecar() {  # <file> <id> <pid>
-  [ "$(sed -n 1,2p "$1" 2>/dev/null)" = "$(printf '%s\nanchor=%s' "$2" "$3")" ] \
-    && sed -n 3p "$1" | grep -q '^anchor-start=.' \
-    && [ "$(wc -l < "$1" | tr -d ' ')" = 3 ]
 }
 
 make_twin_home() {  # <dir>
@@ -138,7 +131,7 @@ expect_twin_refused() {  # <dir> <n> <orig> <label>
 }
 
 test_e2e_live_twin_of_a_session_never_takes_the_lock() {
-  local dir orig twin late exited exited_start
+  local dir orig twin late exited exited_start twin_start reused_start
   dir="$TMP_ROOT/e2e-live-twin"
   make_twin_home "$dir"
   start_twin_role "$dir" orig
@@ -186,7 +179,11 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   # The recorded anchor pid reused by the same-id caller itself: the pid is in
   # its ancestry, but the start time recorded beside it is another process's,
   # so it proves no continuity.
-  printf 'S1\nanchor=%s\n%s\n' "$twin" "$(sed -n 3p "$dir/sidecar-before-twin")" > "$dir/state/.lock-session"
+  twin_start=$(bash -c '. "$1/bin/fm-wake-lib.sh" && fm_pid_start_time "$2"' _ "$ROOT" "$twin") \
+    && [ -n "$twin_start" ] || fail "could not read the twin's start time"
+  reused_start='Thu Jan  1 00:00:00 1970'
+  [ "$reused_start" != "$twin_start" ] || fail "the seeded start time collides with the twin's own start time"
+  printf 'S1\nanchor=%s\nanchor-start=%s\n' "$twin" "$reused_start" > "$dir/state/.lock-session"
   fire_twin "$dir" twin 4
   expect_twin_refused "$dir" 4 "$orig" "anchor pid reused by the caller"
 

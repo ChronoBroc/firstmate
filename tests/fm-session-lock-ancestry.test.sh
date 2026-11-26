@@ -15,6 +15,8 @@ set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/session-lock-helpers.sh
+. "$(dirname "${BASH_SOURCE[0]}")/session-lock-helpers.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-session-lock-ancestry)
 fm_git_identity fmtest fmtest@example.invalid
@@ -1296,15 +1298,6 @@ test_e2e_background_session_keeps_its_lock_across_a_recycled_chain() {
   : > "$dir/state/stop-frontend"
   : > "$dir/state/stop-spare"
   pass "session-lock e2e: a background session keeps its lock and its supervision across a recycled helper chain and a same-process session-id change"
-}
-
-# The sidecar <file> records session <id> with anchor <pid> and a non-empty
-# anchor start time on its third line, as bin/fm-lock.sh's sidecar contract
-# states.
-anchored_sidecar() {  # <file> <id> <pid>
-  [ "$(sed -n 1,2p "$1" 2>/dev/null)" = "$(printf '%s\nanchor=%s' "$2" "$3")" ] \
-    && sed -n 3p "$1" | grep -q '^anchor-start=.' \
-    && [ "$(wc -l < "$1" | tr -d ' ')" = 3 ]
 }
 
 # A same-session confirmation must refresh a /clear re-key even while another

@@ -144,7 +144,6 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
-FAILURES = []
 try:
     root, env = make("nonowner")
     owner = start(
@@ -194,25 +193,6 @@ try:
     fresh = guard(env, "fresh-beat-only counterfactual")
     require(fresh.returncode == 0, "a fresh leftover beat must not restore foreign-owner blocking")
 
-    stop(owner)
-    try:
-        replacement = start(
-            env,
-            'printf \'%s\\n\' \'{"session_id":"replacement","stop_hook_active":true}\' | "$FM_ROOT_OVERRIDE/bin/fm-claude-stop-autoarm.sh"; printf "replacement_rc=%s\\n" "$?"; sleep 1',
-            "replacement.txt",
-        )
-        until(
-            lambda: (root / "state/.watch.lock/pid").is_file(),
-            message="replacement owner did not publish state/.watch.lock/pid",
-        )
-        watcher_pid = (root / "state/.watch.lock/pid").read_text().strip()
-        print("COUNTERFACTUAL dead original owner: watcher=", watcher_pid, flush=True)
-        healthy = guard(env, "replacement-owned healthy watcher")
-        require(healthy.returncode == 0, "a replacement owning session must still recover supervision")
-        stop(replacement)
-    except RuntimeError as error:
-        FAILURES.append(f"replacement-owner watcher case: {error}")
-        print("FAILED replacement-owner watcher case:", error, flush=True)
 
     # A live harness-shaped process outside the owner's ancestry that carries
     # the owner's own trusted session id, while the sidecar records the owner as
@@ -363,7 +343,22 @@ try:
     )
     print("single owner, no autoarm firing", "rc=" + str(sole_owner.returncode), "stdout=" + repr(sole_owner.stdout), "stderr=" + repr(sole_owner.stderr), flush=True)
     require("single_owner_guard_rc=2" in sole_owner.stdout, "a sole owner without supervision must retain the guard")
-    require(not FAILURES, "independent cases failed: " + "; ".join(FAILURES))
+    stop(owner)
+    replacement = start(
+        env,
+        'printf \'%s\\n\' \'{"session_id":"replacement","stop_hook_active":true}\' | "$FM_ROOT_OVERRIDE/bin/fm-claude-stop-autoarm.sh"; printf "replacement_rc=%s\\n" "$?"; sleep 1',
+        "replacement.txt",
+    )
+    until(
+        lambda: (root / "state/.watch.lock/pid").is_file(),
+        message="replacement owner did not publish state/.watch.lock/pid",
+    )
+    watcher_pid = (root / "state/.watch.lock/pid").read_text().strip()
+    print("COUNTERFACTUAL dead original owner: watcher=", watcher_pid, flush=True)
+    healthy = guard(env, "replacement-owned healthy watcher")
+    require(healthy.returncode == 0, "a replacement owning session must still recover supervision")
+    stop(replacement)
+
     print("COMPLETE", flush=True)
 finally:
     for process in reversed(PROCS):

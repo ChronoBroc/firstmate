@@ -473,7 +473,7 @@ FIXED same-session id re-anchors the lock onto its own process; a different id i
 ok - a same-session duplicate is refused the live holder's lock at session start and stays read-only
 ```
 
-On the same machine the repro's replacement-owner watcher case failed on its own (`FAILED replacement-owner watcher case: replacement owner did not publish state/.watch.lock/pid`), both with and without this change, so `tests/fm-turnend-foreign-owner-arm-fix.test.sh` exited 1 after every live-twin control above had run and passed.
+On the same machine the repro's replacement-owner watcher case, which runs after every live-twin control, failed (`replacement owner did not publish state/.watch.lock/pid`) both with and without this change, so `tests/fm-turnend-foreign-owner-arm-fix.test.sh` exited 1 after the controls above had run and passed.
 
 No live unattended Claude background session ran on the verifying machine: that topology is documented by the real process listings in issues #3902, #2314, #3398, and #4066, and the coverage above is the structural predicate plus those executable fixtures, not a live pass.
 [`sessionstart-nudge.md`](../sessionstart-nudge.md#shared-wrapper-and-safety) owns the nudge wrapper's separate ancestry check and its redundant-nudge behavior after helper-chain recycling.
