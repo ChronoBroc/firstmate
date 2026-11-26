@@ -307,6 +307,7 @@ while [ "$#" -gt 0 ]; do
     *) shift ;;
   esac
 done
+[ "$pid" != "${FM_TEST_PS_FAIL_PID:-}" ] || exit 1
 case "$pid:$field:${FM_TEST_DAEMON_PRESENT:-0}" in
   700:comm=:*) printf '%s\n' claude ;;
   700:args=:*) printf '%s\n' 'claude --resume' ;;
@@ -462,6 +463,16 @@ test_same_session_id_owns_a_recycled_background_chain() {
   printf 'S1\nanchor=710\nanchor-start=%s\n' "$spare_start" > "$state/.lock-session"
   if FM_TEST_KILL_RC=1 FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
     fail "a same-session lock whose recorded pid is dead was owned instead of left for reclaim"
+  fi
+  # 7. A walk that stops because a parent cannot be read is incomplete, while
+  # one that reaches a non-harness parent is complete.
+  lib_eval "$fakebin" 'fm_harness_ancestry_complete "$(fm_harness_ancestry_pids)"' \
+    || fail "a walk that reached the non-harness top of the recycled chain was reported incomplete"
+  got=$(FM_TEST_PS_FAIL_PID=720 lib_eval "$fakebin" 'fm_harness_ancestry_pids') \
+    || fail "the walk failed outright instead of stopping at the unreadable pty-host"
+  [ "$got" = 710 ] || fail "a walk stopped at an unreadable parent printed '$got', expected the spare 710 alone"
+  if FM_TEST_PS_FAIL_PID=720 lib_eval "$fakebin" 'fm_harness_ancestry_complete 710'; then
+    fail "a walk that stopped at an unreadable Claude parent was reported complete"
   fi
   unset FM_PROC_ROOT_OVERRIDE
   pass "session-lock: a trusted same-session id keeps owning a recycled background chain, and nothing weaker does"
@@ -928,6 +939,7 @@ install_autoarm_scripts() {
   cp "$ROOT/bin/fm-wake-lib.sh" "$dir/bin/fm-wake-lib.sh"
   cp "$ROOT/bin/fm-path-lib.sh" "$dir/bin/fm-path-lib.sh"
   cp "$ROOT/bin/fm-session-lock-lib.sh" "$dir/bin/fm-session-lock-lib.sh"
+  cp "$ROOT/bin/fm-session-lock-decision-lib.sh" "$dir/bin/fm-session-lock-decision-lib.sh"
   cp "$ROOT/bin/fm-omp-process-lib.sh" "$dir/bin/fm-omp-process-lib.sh"
   cp "$ROOT/bin/fm-cursor-lib.sh" "$dir/bin/fm-cursor-lib.sh"
   # Launch probe sibling of fm-cursor-lib.sh; keep it next to the copy so a

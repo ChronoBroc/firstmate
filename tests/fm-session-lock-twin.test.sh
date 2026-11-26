@@ -61,7 +61,14 @@ while [ ! -e "$FM_HOME/state/stop-$role" ] && kill -0 "$FM_TEST_SUITE_PID" 2>/de
   if [ -f "$req" ]; then
     out="$FM_HOME/state/$role-$n"
     mkdir -p "$out"
-    if [ "$(cat "$req")" = nostart ]; then
+    if [ "$(cat "$req")" = guard ]; then
+      printf '%s\n' '{"session_id":"fixture","stop_hook_active":true}' \
+        | FM_ROOT_OVERRIDE="$FM_HOME" FM_STATE_OVERRIDE="$FM_HOME/state" FM_CONFIG_OVERRIDE="$FM_HOME/config" \
+          FM_DATA_OVERRIDE="$FM_HOME/data" FM_PROJECTS_OVERRIDE="$FM_HOME/projects" FM_POLL=1 \
+          FM_HEARTBEAT=999999 FM_HOME_SUMMARY_INTERVAL=999999 FM_CHECK_INTERVAL=999999 \
+          FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=0 "$FM_HOME/bin/fm-turnend-guard.sh" --claude > "$out/guard.out" 2>&1
+      printf '%s\n' "$?" > "$out/guard.rc"
+    elif [ "$(cat "$req")" = nostart ]; then
       PATH="$FM_HOME/nostart-bin:$PATH" FM_PROC_ROOT_OVERRIDE="$FM_HOME/no-proc" \
         "$FM_BIN/fm-lock.sh" > "$out/lock.out" 2>&1
     else
@@ -226,7 +233,16 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
     chmod 000 "$dir/state/.lock-session"
     fire_twin "$dir" orig 2
     chmod 644 "$dir/state/.lock-session"
+    printf '%s\n' "$dead_line1" > "$dir/state/.lock"
+    chmod 000 "$dir/state/.lock-session"
+    status_out=$(FM_HOME="$dir" "$ROOT/bin/fm-lock.sh" status)
+    chmod 644 "$dir/state/.lock-session"
+    printf '%s\n' "$orig" > "$dir/state/.lock"
+    [ "$status_out" = "lock: unknown (pid $dead_line1; the session sidecar beside the lock cannot be read, so whether its recorded holder is still running cannot be verified)" ] \
+      || fail "a dead line 1 beside an unreadable sidecar was reported as '$status_out'"
     expect_code 1 "$(twin_value "$dir" orig 2 lock.rc)" "an unreadable sidecar was read as no anchor: $(cat "$dir/state/orig-2/lock.out")"
+    grep -qF "whether the lock holder is still running could not be verified (lock pid $orig): the session sidecar beside the lock cannot be read" "$dir/state/orig-2/lock.out" \
+      || fail "the unreadable-sidecar refusal claims more than was verified: $(cat "$dir/state/orig-2/lock.out")"
     grep -qF "pid $orig" "$dir/state/orig-2/lock.out" || fail "the unreadable-sidecar refusal does not name line 1: $(cat "$dir/state/orig-2/lock.out")"
     [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$orig" ] || fail "an unreadable sidecar let line 1 be rewritten"
     cmp -s "$dir/sidecar-before-twin" "$dir/state/.lock-session" || fail "an unreadable sidecar was replaced"
@@ -385,6 +401,23 @@ test_e2e_legacy_shared_front_end_refuses_the_first_claimant() {
   cmp -s "$dir/lock-legacy" "$dir/state/.lock" || fail "a refused legacy claimant changed lock line 1"
   cmp -s "$dir/sidecar-legacy" "$dir/state/.lock-session" || fail "a refused legacy claimant changed the sidecar"
 
+  # Each refused loop's Stop takes the read-only exit with active work and a
+  # stale watcher beacon, and never writes the home's Stop continuation budget.
+  ln -s "$ROOT/bin" "$dir/bin"
+  git init -q "$dir"
+  mkdir -p "$dir/config" "$dir/data" "$dir/projects"
+  : > "$dir/AGENTS.md"
+  printf 'project=synthetic\n' > "$dir/state/task.meta"
+  printf '{}\n' > "$dir/state/home-summary.json"
+  touch -t 202001010000 "$dir/state/.last-watcher-beat"
+  for role in leg-dup leg-orig; do
+    fire_twin "$dir" "$role" 2 guard
+    expect_code 0 "$(twin_value "$dir" "$role" 2 guard.rc)" "$role's Stop was blocked instead of ending read-only: $(cat "$dir/state/$role-2/guard.out")"
+    grep -q "OWNED BY ANOTHER LIVE SESSION.*lock owner pid $front" "$dir/state/$role-2/guard.out" \
+      || fail "$role's Stop did not take the read-only exit naming front-end $front: $(cat "$dir/state/$role-2/guard.out")"
+  done
+  [ ! -e "$dir/state/.turnend-claude-blocks" ] || fail "a refused legacy loop's Stop wrote the continuation budget: $(cat "$dir/state/.turnend-claude-blocks")"
+
   : > "$dir/state/stop-front"
   local i=0
   while [ "$i" -lt 200 ] && kill -0 "$front" 2>/dev/null; do
@@ -392,13 +425,13 @@ test_e2e_legacy_shared_front_end_refuses_the_first_claimant() {
     i=$((i + 1))
   done
   kill -0 "$front" 2>/dev/null && fail "the front-end did not stop"
-  fire_twin "$dir" leg-orig 2
-  expect_code 0 "$(twin_value "$dir" leg-orig 2 lock.rc)" "the lock was not reclaimed once the recorded front-end stopped: $(cat "$dir/state/leg-orig-2/lock.out")"
+  fire_twin "$dir" leg-orig 3
+  expect_code 0 "$(twin_value "$dir" leg-orig 3 lock.rc)" "the lock was not reclaimed once the recorded front-end stopped: $(cat "$dir/state/leg-orig-3/lock.out")"
   [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$orig" ] || fail "the reclaim left line 1 at $(cat "$dir/state/.lock")"
   anchored_sidecar "$dir/state/.lock-session" S1 "$orig" \
     || fail "the reclaim did not record its anchor: $(cat "$dir/state/.lock-session")"
-  fire_twin "$dir" leg-dup 2
-  expect_code 1 "$(twin_value "$dir" leg-dup 2 lock.rc)" "the other loop took the reclaimed lock: $(cat "$dir/state/leg-dup-2/lock.out")"
+  fire_twin "$dir" leg-dup 3
+  expect_code 1 "$(twin_value "$dir" leg-dup 3 lock.rc)" "the other loop took the reclaimed lock: $(cat "$dir/state/leg-dup-3/lock.out")"
   : > "$dir/state/stop-leg-orig"
   : > "$dir/state/stop-leg-dup"
   pass "session-lock e2e: an id-only sidecar beside a shared front-end refuses whichever loop claims first, and clears once that front-end stops"
