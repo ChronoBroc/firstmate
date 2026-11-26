@@ -64,12 +64,12 @@
 # (docs/turnend-guard.md records the 2026-07-21 incident). In --claude mode this
 # guard ignores stop_hook_active and instead cooperates with the Stop-owned
 # auto-arm (bin/fm-claude-stop-autoarm.sh), which fires on the same Stop event:
-#   1. a live identity-matched watcher with a fresh beacon - or, in away mode, a
+#   1. a session the shared ownership decision refuses (fm_session_lock_decide:
+#      a live or unverifiable holder it does not own) exits with a read-only
+#      diagnostic before anything else is read or written, instead of blocking
+#      a session that cannot repair supervision without stealing ownership;
+#   2. a live identity-matched watcher with a fresh beacon - or, in away mode, a
 #      live identity-matched daemon with a fresh beacon - allows immediately;
-#   2. an unhealthy session with a live session-lock owner it does not
-#      own under the shared ancestry-or-trusted-id verdict exits with a read-only
-#      diagnostic instead of blocking a session that cannot repair supervision
-#      without stealing ownership;
 #   3. otherwise wait briefly (FM_CLAUDE_AUTOARM_SYNC_WAIT_MS, default 800ms)
 #      for the auto-arm to claim this home (a live OPEN generation claim in the
 #      state/.claude-autoarm-epoch ledger - fm_autoarm_claim_open - or a legacy

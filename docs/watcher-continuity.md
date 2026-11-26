@@ -107,7 +107,7 @@ The hook handles the session lock as follows:
 
 Whether the session owns that lock is the shared `fm_session_lock_owned_by_self` verdict in `bin/fm-session-lock-lib.sh`, one ordered rule that [`turnend-guard.md`](turnend-guard.md#foreign-session-lock-owner) states in full: a recorded model-loop anchor still running outside the current harness ancestry refuses ownership first, and only then does a recorded pid inside that ancestry, or a live lock recorded under this same trusted Claude session id whose recorded anchor is in that ancestry, grant it.
 
-With that verdict, a background session keeps arming after its transient helper chain is recycled.
+With that verdict, a background session keeps arming after its transient helper chain is recycled only while the ordered rule still proves continuity: its recorded anchor is in its ancestry and matches its recorded start time, and line 1 is still a live harness. A sidecar that records no anchor or no anchor start time proves none, so such a session is a non-owner and does not arm while line 1 stays a live harness outside its ancestry.
 [`turnend-guard.md`](turnend-guard.md#guard-predicates) owns the Claude guard's behavior when that live owner is genuinely another session.
 The stale-owner claim occurs only after the existing AFK and supervision-need gates pass.
 

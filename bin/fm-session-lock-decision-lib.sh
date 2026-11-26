@@ -24,16 +24,6 @@ _fm_session_lock_session_id_in() {  # <sidecar-text>
   printf '%s\n' "$recorded"
 }
 
-# Print the model-loop anchor recorded in state dir $1's sidecar, or return 1.
-# bin/fm-lock.sh writes the second sidecar line `anchor=<pid>` beside every
-# trusted id: the recording session's own anchor pid (its CLAUDE_PID, or that
-# pid tagged on Windows).
-fm_session_lock_recorded_anchor() {  # <state>
-  local text
-  text=$(_fm_session_lock_sidecar_text "$1") || return 1
-  _fm_session_lock_anchor_in "$text"
-}
-
 # Print state dir $1's sidecar text, or return 1 when it is absent, a symlink,
 # not a regular file, or cannot be read.
 _fm_session_lock_sidecar_text() {  # <state>
@@ -42,6 +32,9 @@ _fm_session_lock_sidecar_text() {  # <state>
 }
 
 # Print the valid anchor pid on line 2 of sidecar text $1, or return 1.
+# bin/fm-lock.sh writes the second sidecar line `anchor=<pid>` beside every
+# trusted id: the recording session's own anchor pid (its CLAUDE_PID, or that
+# pid tagged on Windows).
 _fm_session_lock_anchor_in() {  # <sidecar-text>
   local line
   line=$(printf '%s\n' "$1" | sed -n '2p')
@@ -52,21 +45,14 @@ _fm_session_lock_anchor_in() {  # <sidecar-text>
 }
 
 # Print the anchor start time on line 3 of sidecar text $1, or return 1.
+# bin/fm-lock.sh writes it as the third line `anchor-start=<start>`
+# (fm_pid_start_time of the anchor) whenever that start time is readable; a
+# sidecar without it, as for a tagged Windows anchor, records none.
 _fm_session_lock_anchor_start_in() {  # <sidecar-text>
   local line
   line=$(printf '%s\n' "$1" | sed -n '3p')
   case "$line" in anchor-start=?*) ;; *) return 1 ;; esac
   printf '%s\n' "${line#anchor-start=}"
-}
-
-# Print the anchor's process start time recorded in state dir $1's sidecar, or
-# return 1. bin/fm-lock.sh writes it as the third line `anchor-start=<start>`
-# (fm_pid_start_time of the anchor) whenever that start time is readable; a
-# sidecar without it, as for a tagged Windows anchor, records none.
-fm_session_lock_recorded_anchor_start() {  # <state>
-  local text
-  text=$(_fm_session_lock_sidecar_text "$1") || return 1
-  _fm_session_lock_anchor_start_in "$text"
 }
 
 # Classify the model-loop anchor recorded in state dir $1's sidecar. Sets

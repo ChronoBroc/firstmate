@@ -201,9 +201,9 @@ remember_lock_session() {
 # fails the publication and leaves the sidecar as it was. A second line
 # `anchor=<pid>` records the CLAUDE_PID the trusted id was verified against in
 # this same ancestry walk, tagged when the
-# walk lists it tagged (fm_session_lock_recorded_anchor), and a third line
+# walk lists it tagged (_fm_session_lock_anchor_in), and a third line
 # `anchor-start=<start>` its process start time (fm_pid_start_time) when that is
-# readable (fm_session_lock_recorded_anchor_start); when it is not, a start
+# readable (_fm_session_lock_anchor_start_in); when it is not, a start
 # time already recorded beside this same anchor is kept, across a re-key too.
 # An existing sidecar is read once, and a failed read fails the publication and
 # leaves it as it was. Called only while the claim lock is held. A sidecar that already has exactly this content
