@@ -752,14 +752,14 @@ test_windows_clear_rekeys_the_lock_under_the_same_pid() {
   }
   out=$(win_lock S1) || fail "the Windows session could not acquire its lock: $out"
   [ "$(cat "$home/state/.lock")" = 'win:7204' ] || fail "the lock names '$(cat "$home/state/.lock")', not win:7204"
-  [ "$(cat "$home/state/.lock-session" 2>/dev/null)" = S1 ] \
+  [ "$(sed -n 1p "$home/state/.lock-session" 2>/dev/null)" = S1 ] \
     || fail "the Windows session did not record its session id beside the lock"
 
   # /clear keeps the Claude process, so CLAUDE_PID stays while the session id
   # changes. As on POSIX the session keeps its lock and the sidecar is re-keyed.
   out=$(win_lock S2) || fail "the Windows session was refused its own lock after /clear: $out"
   [ "$(cat "$home/state/.lock")" = 'win:7204' ] || fail "the /clear re-key rewrote the lock to '$(cat "$home/state/.lock")'"
-  [ "$(cat "$home/state/.lock-session")" = S2 ] || fail "the /clear re-key did not record the new session id"
+  [ "$(sed -n 1p "$home/state/.lock-session")" = S2 ] || fail "the /clear re-key did not record the new session id"
   FM_TEST_WIN_TABLE="$WIN_TABLE" FM_TEST_SESSION_ID=S2 FM_TEST_CLAUDE_PID=7204 owned "$fakebin" "$home/state" \
     || fail "the Windows session did not own its lock after /clear"
   if FM_TEST_WIN_TABLE="$WIN_TABLE" FM_TEST_SESSION_ID=S2 FM_TEST_CLAUDE_PID=7204 foreign_owner "$fakebin" "$home/state" >/dev/null; then
@@ -1062,7 +1062,7 @@ while [ "$i" -lt 200 ] && [ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" != 1 
   i=$((i + 1))
 done
 printf '%s\n' "$$" > "$FM_HOME/state/frontend-pid"
-CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$ "$FM_HOME/bin/fm-lock.sh" > "$FM_HOME/state/frontend-lock.out" 2>&1
+CLAUDE_CODE_SESSION_ID=S1 "$FM_HOME/bin/fm-lock.sh" > "$FM_HOME/state/frontend-lock.out" 2>&1
 printf '%s\n' "$?" > "$FM_HOME/state/frontend-lock.rc"
 "$FM_FIXTURE_CLAUDE" "$FM_HOME/daemon.sh" &
 disown
@@ -1148,14 +1148,13 @@ arm_count() {  # <dir>
 }
 
 # The recycled chain must still be treated as the owner: arm, no diagnostic,
-# lock accepted, line 1 naming <expected-lock-pid>, and the sidecar either
-# byte-identical to the one the owner wrote or, when <expected-session-id> is
-# given, re-keyed to that id. An owned actionable close records two arm
+# lock accepted, line 1 naming <expected-lock-pid>, and the sidecar naming
+# <expected-session-id>. An owned actionable close records two arm
 # invocations - the foreground arm plus the handling successor the hook starts
 # before the rewake - so the cumulative <expected-arms> grows by two for every
 # owned phase.
-expect_phase_owned() {  # <dir> <n> <expected-arms> <expected-lock-pid> <label> [<expected-session-id>]
-  local dir=$1 n=$2 arms=$3 lock_pid=$4 label=$5 session_id=${6:-}
+expect_phase_owned() {  # <dir> <n> <expected-arms> <expected-lock-pid> <label> <expected-session-id>
+  local dir=$1 n=$2 arms=$3 lock_pid=$4 label=$5 session_id=$6
   expect_code 2 "$(phase_value "$dir" "$n" hook.rc)" "$label: the Stop auto-arm did not rewake"
   [ "$(arm_count "$dir")" = "$arms" ] || fail "$label: expected $arms arm(s), got $(arm_count "$dir")"
   [ "$(epoch_outcome "$dir")" = rewake ] || fail "$label: no rewake claim was recorded, got: $(epoch_outcome "$dir")"
@@ -1166,13 +1165,8 @@ expect_phase_owned() {  # <dir> <n> <expected-arms> <expected-lock-pid> <label> 
   expect_code 0 "$(phase_value "$dir" "$n" lock.rc)" "$label: fm-lock.sh refused the session's own lock: $(cat "$dir/state/phase-$n/lock.out")"
   [ "$(phase_value "$dir" "$n" lock-after)" = "$lock_pid" ] \
     || fail "$label: lock line 1 is $(phase_value "$dir" "$n" lock-after), expected $lock_pid"
-  if [ -n "$session_id" ]; then
-    [ "$(phase_value "$dir" "$n" session-after)" = "$session_id" ] \
-      || fail "$label: the session sidecar names $(phase_value "$dir" "$n" session-after), expected $session_id"
-  else
-    cmp -s "$dir/state/phase-$n/session-after" "$dir/sidecar-initial" \
-      || fail "$label: the session sidecar is not byte-identical to the one the owner wrote"
-  fi
+  [ "$(sed -n 1p "$dir/state/phase-$n/session-after")" = "$session_id" ] \
+    || fail "$label: the session sidecar names $(cat "$dir/state/phase-$n/session-after"), expected $session_id"
 }
 
 # Not the owner: no arm, the guard's foreign-owner diagnostic naming the live
@@ -1208,14 +1202,17 @@ test_e2e_background_session_keeps_its_lock_across_a_recycled_chain() {
   expect_code 0 "$(tr -d '[:space:]' < "$dir/state/frontend-lock.rc")" "the front-end could not acquire the lock: $(cat "$dir/state/frontend-lock.out")"
   [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$frontend" ] \
     || fail "the front-end's lock names $(cat "$dir/state/.lock"), expected its own pid $frontend"
-  [ "$(tr -d '[:space:]' < "$dir/state/.lock-session")" = S1 ] \
-    || fail "the front-end did not record its trusted session id beside the lock"
-  cp "$dir/state/.lock-session" "$dir/sidecar-initial"
+  [ ! -e "$dir/state/.lock-session" ] \
+    || fail "the front-end, which is not the model loop, recorded a trusted session id: $(cat "$dir/state/.lock-session")"
 
-  # Phase 1: the healthy contiguous chain, the session's own id.
+  # Phase 1: the healthy contiguous chain, the session's own id. Line 1 stays on
+  # the front-end, an ancestor, and the sidecar records the id without a
+  # model-loop anchor, because line 1 is not the spare's CLAUDE_PID.
   fire_phase "$dir" 1 'export CLAUDE_CODE_SESSION_ID=S1; export CLAUDE_PID=$$'
   grep -qx "$frontend" "$dir/state/phase-1/ancestry" || fail "the healthy chain did not reach the front-end"
-  expect_phase_owned "$dir" 1 2 "$frontend" "healthy chain"
+  expect_phase_owned "$dir" 1 2 "$frontend" "healthy chain" S1
+  [ "$(sed -n 2p "$dir/state/.lock-session")" = '' ] \
+    || fail "a sidecar beside a front-end line 1 recorded a model-loop anchor: $(cat "$dir/state/.lock-session")"
 
   # Recycle the bridge: the daemon ends, the pty-host is reparented to init, and
   # the front-end that holds the lock stays alive.
@@ -1246,7 +1243,9 @@ test_e2e_background_session_keeps_its_lock_across_a_recycled_chain() {
   # confirmation re-anchors line 1 from the live non-ancestor front-end onto the
   # spare - the model-loop process - not onto the outermost pty-host.
   fire_phase "$dir" 5 'export CLAUDE_CODE_SESSION_ID=S1; export CLAUDE_PID=$$'
-  expect_phase_owned "$dir" 5 4 "$spare" "recycled chain, same session"
+  expect_phase_owned "$dir" 5 4 "$spare" "recycled chain, same session" S1
+  [ "$(sed -n 2p "$dir/state/phase-5/session-after")" = "anchor=$spare" ] \
+    || fail "the re-anchor did not record the spare as the model-loop anchor: $(cat "$dir/state/phase-5/session-after")"
   [ "$spare" != "$ptyhost" ] || fail "fixture collapsed the spare into the pty-host"
   kill -0 "$frontend" 2>/dev/null || fail "the front-end exited, so the re-anchor was not over a live owner"
 
@@ -1259,6 +1258,145 @@ test_e2e_background_session_keeps_its_lock_across_a_recycled_chain() {
   : > "$dir/state/stop-frontend"
   : > "$dir/state/stop-spare"
   pass "session-lock e2e: a background session keeps its lock and its supervision across a recycled helper chain and a same-process session-id change"
+}
+
+# A running session resumed a second time under the same Claude session id is a
+# live twin: two real orphaned fake-claude processes, each its own CLAUDE_PID
+# under one id. The twin's acquisition is refused with the duplicate diagnostic
+# and leaves line 1 on the original; while the lock names a live twin, the
+# original's guarded fleet action refuses before it mutates; once the original
+# is dead, the same session reclaims the lock as before.
+make_twin_home() {  # <dir>
+  local dir=$1
+  mkdir -p "$dir/state"
+  git init -q "$dir"
+  git -C "$dir" commit -q --allow-empty -m init
+  cat > "$dir/twin.sh" <<'SH'
+#!/usr/bin/env bash
+role=$1
+i=0
+while [ "$i" -lt 200 ] && [ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" != 1 ]; do
+  sleep 0.05
+  i=$((i + 1))
+done
+export CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$
+printf '%s\n' "$$" > "$FM_HOME/state/$role-pid"
+n=1
+while [ ! -e "$FM_HOME/state/stop-$role" ]; do
+  req="$FM_HOME/state/$role-fire-$n"
+  if [ -f "$req" ]; then
+    out="$FM_HOME/state/$role-$n"
+    mkdir -p "$out"
+    "$FM_BIN/fm-lock.sh" > "$out/lock.out" 2>&1
+    printf '%s\n' "$?" > "$out/lock.rc"
+    (
+      . "$FM_BIN/fm-session-lock-lib.sh"
+      fm_session_lock_owned_by_self "$FM_HOME/state"
+      printf '%s\n' "$?" > "$out/owned.rc"
+      fm_session_lock_foreign_owner_live "$FM_HOME/state"
+      printf '%s\n' "$?" > "$out/foreign.rc"
+    )
+    "$FM_BIN/fm-pr-merge.sh" twin-task https://github.com/example/twin/pull/1 > "$out/merge.out" 2>&1
+    printf '%s\n' "$?" > "$out/merge.rc"
+    cp "$FM_HOME/state/.lock" "$out/lock-after"
+    : > "$out/done"
+    n=$((n + 1))
+  fi
+  sleep 0.05
+done
+exit 0
+SH
+  chmod +x "$dir/twin.sh"
+}
+
+start_twin_role() {  # <dir> <role>
+  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID FM_HOME="$1" FM_BIN="$ROOT/bin" \
+    bash -c '"$0" "$1" "$2" &' "$NAMED_CLAUDE" "$1/twin.sh" "$2"
+  wait_for_file "$1/state/$2-pid" "the $2 session"
+  BG_FIXTURE_PIDS+=("$(tr -d '[:space:]' < "$1/state/$2-pid")")
+}
+
+fire_twin() {  # <dir> <role> <n>
+  : > "$1/state/$2-fire-$3"
+  local i=0
+  while [ "$i" -lt 600 ] && [ ! -e "$1/state/$2-$3/done" ]; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  [ -e "$1/state/$2-$3/done" ] || fail "the $2 session never finished step $3"
+}
+
+twin_value() {  # <dir> <role> <n> <file>
+  tr -d '[:space:]' < "$1/state/$2-$3/$4"
+}
+
+test_e2e_live_twin_of_a_session_never_takes_the_lock() {
+  local dir orig twin i
+  dir="$TMP_ROOT/e2e-live-twin"
+  make_twin_home "$dir"
+  start_twin_role "$dir" orig
+  orig=$(tr -d '[:space:]' < "$dir/state/orig-pid")
+
+  fire_twin "$dir" orig 1
+  expect_code 0 "$(twin_value "$dir" orig 1 lock.rc)" "the original could not acquire the lock: $(cat "$dir/state/orig-1/lock.out")"
+  [ "$(twin_value "$dir" orig 1 lock-after)" = "$orig" ] || fail "the original's lock names $(cat "$dir/state/orig-1/lock-after"), expected $orig"
+  if grep -q 'does not hold this home' "$dir/state/orig-1/merge.out"; then
+    fail "the lock holder's own fleet action was refused: $(cat "$dir/state/orig-1/merge.out")"
+  fi
+
+  start_twin_role "$dir" twin
+  twin=$(tr -d '[:space:]' < "$dir/state/twin-pid")
+  [ "$twin" != "$orig" ] || fail "fixture collapsed the twin into the original"
+  fire_twin "$dir" twin 1
+  kill -0 "$orig" 2>/dev/null || fail "the original exited, so the twin was not checked against a live holder"
+  expect_code 1 "$(twin_value "$dir" twin 1 lock.rc)" "the twin took the lock from the live original: $(cat "$dir/state/twin-1/lock.out")"
+  grep -q "another live process of this same session holds the lock (pid $orig, session S1)" "$dir/state/twin-1/lock.out" \
+    || fail "the twin's refusal is not the duplicate diagnostic: $(cat "$dir/state/twin-1/lock.out")"
+  [ "$(twin_value "$dir" twin 1 lock-after)" = "$orig" ] || fail "the twin rewrote the lock to $(cat "$dir/state/twin-1/lock-after")"
+  expect_code 1 "$(twin_value "$dir" twin 1 owned.rc)" "the twin reads the original's lock as its own"
+  expect_code 0 "$(twin_value "$dir" twin 1 foreign.rc)" "the twin does not see the original as a live foreign owner"
+  expect_code 1 "$(twin_value "$dir" twin 1 merge.rc)" "the twin's fleet action was not refused"
+  grep -q "PR merge (fm-pr-merge) refused - this session does not hold this home's session lock: it names live harness pid $orig" "$dir/state/twin-1/merge.out" \
+    || fail "the twin's fleet action did not name the live holder: $(cat "$dir/state/twin-1/merge.out")"
+  [ "$(sed -n '1p' "$dir/state/.lock-session")" = S1 ] || fail "the original did not record its session id"
+  [ "$(sed -n '2p' "$dir/state/.lock-session")" = "anchor=$orig" ] \
+    || fail "the original did not record its model-loop anchor: $(cat "$dir/state/.lock-session")"
+
+  # The original still owns its lock after the twin's attempt.
+  fire_twin "$dir" orig 2
+  expect_code 0 "$(twin_value "$dir" orig 2 lock.rc)" "the original lost its own lock: $(cat "$dir/state/orig-2/lock.out")"
+  expect_code 0 "$(twin_value "$dir" orig 2 owned.rc)" "the original no longer reads its lock as its own"
+
+  # A lock that names the live twin, as a takeover would leave it: the
+  # original's next guarded fleet action refuses instead of carrying on.
+  printf '%s\n' "$twin" > "$dir/state/.lock"
+  printf 'S1\nanchor=%s\n' "$twin" > "$dir/state/.lock-session"
+  fire_twin "$dir" orig 3
+  expect_code 1 "$(twin_value "$dir" orig 3 merge.rc)" "the original kept acting after losing the lock: $(cat "$dir/state/orig-3/merge.out")"
+  grep -q "PR merge (fm-pr-merge) refused - this session does not hold this home's session lock: it names live harness pid $twin" "$dir/state/orig-3/merge.out" \
+    || fail "the original's refusal did not name the live holder: $(cat "$dir/state/orig-3/merge.out")"
+  expect_code 1 "$(twin_value "$dir" orig 3 lock.rc)" "the original took the lock back from a live twin: $(cat "$dir/state/orig-3/lock.out")"
+  [ "$(twin_value "$dir" orig 3 lock-after)" = "$twin" ] || fail "the original rewrote a lock held by its live twin"
+
+  # A genuinely dead holder is still reclaimed by the same session.
+  printf '%s\n' "$orig" > "$dir/state/.lock"
+  printf 'S1\nanchor=%s\n' "$orig" > "$dir/state/.lock-session"
+  : > "$dir/state/stop-orig"
+  i=0
+  while [ "$i" -lt 200 ] && kill -0 "$orig" 2>/dev/null; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  kill -0 "$orig" 2>/dev/null && fail "the original did not exit"
+  fire_twin "$dir" twin 2
+  expect_code 0 "$(twin_value "$dir" twin 2 lock.rc)" "the same session could not reclaim a dead holder's lock: $(cat "$dir/state/twin-2/lock.out")"
+  [ "$(twin_value "$dir" twin 2 lock-after)" = "$twin" ] || fail "the reclaim left line 1 at $(cat "$dir/state/twin-2/lock-after")"
+  [ "$(sed -n '2p' "$dir/state/.lock-session")" = "anchor=$twin" ] || fail "the reclaim did not record the new anchor"
+  if grep -q 'does not hold this home' "$dir/state/twin-2/merge.out"; then
+    fail "the new holder's fleet action was refused: $(cat "$dir/state/twin-2/merge.out")"
+  fi
+  : > "$dir/state/stop-twin"
+  pass "session-lock e2e: a live twin of a session never takes its lock, the holder refuses fleet actions once the lock names a live twin, and a dead holder is still reclaimed"
 }
 
 # A same-session confirmation must refresh a /clear re-key even while another
@@ -1329,7 +1467,7 @@ SH
   wait_for_file "$dir/state/acquire.rc" "the initial lock acquisition"
   expect_code 0 "$(tr -d '[:space:]' < "$dir/state/acquire.rc")" \
     "the session could not acquire its lock: $(cat "$dir/state/acquire.out")"
-  [ "$(tr -d '[:space:]' < "$dir/state/sidecar-after-acquire")" = S1 ] \
+  [ "$(sed -n 1p "$dir/state/sidecar-after-acquire")" = S1 ] \
     || fail "the initial acquire did not record S1"
   wait_for_file "$dir/state/holder-pid" "the claim-lock holder pid"
   holder_pid=$(tr -d '[:space:]' < "$dir/state/holder-pid")
@@ -1341,7 +1479,7 @@ SH
   wait "$session_pid" || true
   expect_code 0 "$(tr -d '[:space:]' < "$dir/state/confirm.rc")" \
     "the same-session confirmation failed while the claim lock was held: $(cat "$dir/state/confirm.out")"
-  [ "$(tr -d '[:space:]' < "$dir/state/.lock-session")" = S2 ] \
+  [ "$(sed -n 1p "$dir/state/.lock-session")" = S2 ] \
     || fail "the sidecar still names $(cat "$dir/state/.lock-session"), expected the re-keyed id S2"
   [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$(tr -d '[:space:]' < "$dir/state/session-pid")" ] \
     || fail "the confirmation rewrote lock line 1"
@@ -1451,7 +1589,7 @@ SH
   wait "$session_pid" || true
   [ "$(tr -d '[:space:]' < "$dir/state/confirm.rc")" != 0 ] \
     || fail "the waiter reported success after another live session published: $(cat "$dir/state/confirm.out")"
-  [ "$(tr -d '[:space:]' < "$dir/state/.lock-session")" = OTHER ] \
+  [ "$(sed -n 1p "$dir/state/.lock-session")" = OTHER ] \
     || fail "the waiter overwrote the other session's sidecar to $(cat "$dir/state/.lock-session")"
   [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$other_pid" ] \
     || fail "the waiter rewrote lock line 1 off the other live session"
@@ -1475,7 +1613,7 @@ test_failed_lock_write_restores_previous_sidecar() {
     '
   expect_code 0 "$(tr -d '[:space:]' < "$dir/state/acquire.rc")" \
     "the first session could not acquire its lock: $(cat "$dir/state/acquire.out")"
-  [ "$(tr -d '[:space:]' < "$dir/state/.lock-session")" = S1 ] \
+  [ "$(sed -n 1p "$dir/state/.lock-session")" = S1 ] \
     || fail "the first session did not record S1"
   stale_pid=$(tr -d '[:space:]' < "$dir/state/stale-pid")
   cp "$dir/state/.lock" "$dir/state/lock-before-reclaim"
@@ -1491,7 +1629,7 @@ test_failed_lock_write_restores_previous_sidecar() {
     || fail "a read-only stale lock was overwritten: $(cat "$dir/state/reclaim.out")"
   grep -q 'cannot write session lock' "$dir/state/reclaim.out" \
     || fail "the reclaim did not fail on the lock write: $(cat "$dir/state/reclaim.out")"
-  [ "$(tr -d '[:space:]' < "$dir/state/.lock-session")" = S1 ] \
+  [ "$(sed -n 1p "$dir/state/.lock-session")" = S1 ] \
     || fail "the failed reclaim left sidecar $(cat "$dir/state/.lock-session"), expected the previous id S1"
   [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$stale_pid" ] \
     || fail "the failed reclaim rewrote lock line 1"
@@ -1543,7 +1681,7 @@ test_verified_reclaim_keeps_new_sidecar() {
     '
   expect_code 0 "$(tr -d '[:space:]' < "$dir/state/reclaim.rc")" \
     "the reclaim failed: $(cat "$dir/state/reclaim.out")"
-  [ "$(tr -d '[:space:]' < "$dir/state/.lock-session")" = S2 ] \
+  [ "$(sed -n 1p "$dir/state/.lock-session")" = S2 ] \
     || fail "the verified reclaim left sidecar $(cat "$dir/state/.lock-session"), expected S2"
   [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$(tr -d '[:space:]' < "$dir/state/new-pid")" ] \
     || fail "the verified reclaim did not record the new anchor pid"
@@ -1680,6 +1818,7 @@ test_e2e_version_named_session_claims_the_home
 test_e2e_daemon_parented_session_claims_the_home
 test_e2e_daemon_parented_version_named_session_keeps_its_lock
 test_e2e_background_session_keeps_its_lock_across_a_recycled_chain
+test_e2e_live_twin_of_a_session_never_takes_the_lock
 test_same_session_confirmation_refreshes_rekeyed_id_under_claim_lock
 test_same_session_confirmation_does_not_steal_after_wait
 test_failed_lock_write_restores_previous_sidecar

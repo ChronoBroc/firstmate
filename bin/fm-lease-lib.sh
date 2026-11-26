@@ -55,6 +55,9 @@
 # tracked as separate follow-up design work. The branch's shell prelude makes
 # the actor variables readonly (see the Pi branch extension), so an
 # ACCIDENTAL override fails loudly inside the branch's own shell as well.
+#   - Session-lock check (fm_lease_require_session_lock): fm_lease_guard and
+#     fm_lease_forbid_branch first refuse a main-actor fleet action whose
+#     harness session no longer holds this home's session lock.
 #   - Guard semantics (fm_lease_guard): no lease, a same-actor lease, or a
 #     provably stale lease passes; a live lease held by the OTHER actor
 #     refuses with exit FM_LEASE_REFUSE_EXIT. Whenever the guard engages - a
@@ -133,6 +136,28 @@ fm_lease_tagged_holder_live() {
   fi
   fm_session_pid_valid "$1" || return 1
   fm_harness_pid_alive "$1"
+}
+
+# fm_lease_require_session_lock <action-label>: exit 1 when the main actor's
+# fleet action runs in a harness session while this home's session lock names
+# another live session, including a live twin of this same session
+# (fm_session_lock_foreign_owner_live in bin/fm-session-lock-lib.sh). The branch
+# actor, a caller with no harness ancestry, and a home whose lock is absent,
+# dead, or this session's own pass untouched. fm_lease_guard and
+# fm_lease_forbid_branch call it first, so every script guarded by either one
+# refuses before its first mutation.
+fm_lease_require_session_lock() {
+  local action=$1
+  [ "${FM_SUPERVISION_ACTOR:-main}" = main ] || return 0
+  [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 0
+  if ! command -v fm_session_lock_foreign_owner_live >/dev/null 2>&1; then
+    # Kept an analysis boundary for the same reason as fm-wake-lib.sh above.
+    # shellcheck source=/dev/null
+    . "$FM_LEASE_LIB_DIR/fm-session-lock-lib.sh"
+  fi
+  fm_session_lock_foreign_owner_live "$STATE" || return 0
+  echo "error: $action refused - this session does not hold this home's session lock: it names live harness pid $FM_SESSION_LOCK_FOREIGN_OWNER_PID, another session or another running copy of this one; operate read-only and check bin/fm-lock.sh status" >&2
+  exit 1
 }
 
 # fm_lease_home_runs_host: 0 iff this home runs the supervision host
@@ -265,6 +290,7 @@ fm_lease_clear_stale() {
 # EXIT cleanup. This closes the check/use race with a concurrent claim.
 fm_lease_guard() {
   local task=$1 action=$2 actor lock lease_actor
+  fm_lease_require_session_lock "$action"
   fm_lease_valid_id "$task" || return 0
   actor=$(fm_lease_actor) || exit "$FM_LEASE_REFUSE_EXIT"
   case "${PI_CODING_AGENT:-}:${FM_SUPERVISION_ACTOR:-}" in
@@ -323,7 +349,10 @@ fm_lease_away_relocated() {
 fm_lease_forbid_branch() {
   local action=$1 relocatable=${2:-} actor
   actor=$(fm_lease_actor) || exit "$FM_LEASE_REFUSE_EXIT"
-  [ "$actor" = branch ] || return 0
+  if [ "$actor" != branch ]; then
+    fm_lease_require_session_lock "$action"
+    return 0
+  fi
   if [ "$relocatable" = --away-relocated ] && fm_lease_away_relocated; then
     echo "note: $action proceeds for the supervision branch under the away-posture record: main is parked and its standing authority is relocated; this script's own gate still applies (docs/pi-supervision-branch.md \"Postures\")" >&2
     return 0

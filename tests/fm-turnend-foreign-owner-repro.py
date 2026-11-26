@@ -209,12 +209,17 @@ try:
     require(healthy.returncode == 0, "a replacement owning session must still recover supervision")
     stop(replacement)
 
-    # Positive control: a live harness-shaped process outside the owner's
-    # ancestry that carries the owner's own trusted session id is the same
-    # session, so the lock accepts it and re-anchors line 1 onto that process's
-    # CLAUDE_PID, keeping the recorded id; its Stop is held to the owner's own
-    # guard instead of ending as a foreign session. A different id against the
-    # re-anchored lock keeps the refusal and names the recorded id.
+    # A live harness-shaped process outside the owner's ancestry that carries
+    # the owner's own trusted session id, while the sidecar records the owner as
+    # that session's model-loop anchor, is a live twin: a second running copy of
+    # the session. Its acquisition is refused with the duplicate diagnostic and
+    # its Stop ends safely as a non-owner.
+    # Positive control: once line 1 is a pid of the session's chain rather than
+    # its recorded anchor (the sidecar carries the id alone), the same id is
+    # the same session, so its Stop is held to the owner's own guard instead of
+    # ending as a foreign session, and the lock accepts it and re-anchors line 1
+    # onto that process's CLAUDE_PID, keeping the recorded id. A different id
+    # against the re-anchored lock keeps the refusal and names the recorded id.
     same, same_env = make("same-session")
     same_env["CLAUDE_CODE_SESSION_ID"] = "synthetic-same"
     same_owner = start(
@@ -233,13 +238,33 @@ try:
         message="same-session owner published state/.lock but did not reach owner-ready",
     )
     same_lock_owner = session_lock_text(same_lock)
-    require(
-        (same / "state/.lock-session").read_text().strip() == "synthetic-same",
-        "the owner did not record its trusted session id beside the lock",
-    )
     same_beat = same / "state/.last-watcher-beat"
     same_beat.touch()
     os.utime(same_beat, (old_time, old_time))
+    twin = run(
+        same_env,
+        'export CLAUDE_PID=$$; "$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; rc=$?; printf "lock_rc=%s\\n" "$rc"; true',
+    )
+    print("live-twin acquisition", "rc=" + str(twin.returncode), "stdout=" + repr(twin.stdout), "stderr=" + repr(twin.stderr), flush=True)
+    require("lock_rc=1" in twin.stdout, "a live twin of the owner's session took its lock")
+    require(
+        f"another live process of this same session holds the lock (pid {same_lock_owner}, session synthetic-same)" in twin.stderr,
+        "the live-twin refusal did not name the owner pid and the shared session id",
+    )
+    require(session_lock_text(same_lock) == same_lock_owner, "a live twin moved the lock line")
+    require(
+        (same / "state/.lock-session").read_text().splitlines() == ["synthetic-same", "anchor=" + same_lock_owner],
+        "the owner did not record its trusted session id and model-loop anchor beside the lock",
+    )
+    twin_stop = guard(same_env, "live-twin stop", prefix="export CLAUDE_PID=$$; ")
+    require(twin_stop.returncode == 0, "a live twin's Stop must end safely")
+    require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" in twin_stop.stdout, "a live twin's Stop lost the foreign-owner diagnostic")
+    print("FIXED a live twin of the owner's session is refused and its Stop ends safely", flush=True)
+    (same / "state/.lock-session").write_text("synthetic-same\n")
+    same_stop = guard(same_env, "same-session stop", prefix="export CLAUDE_PID=$$; ")
+    require(same_stop.returncode == 2, "a same-session Stop must be held to the owner's own guard, not ended as a foreign session")
+    require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" not in same_stop.stdout, "a same-session Stop took the foreign-owner exit")
+    require(session_lock_text(same_lock) == same_lock_owner, "a same-session Stop moved the lock line")
     accepted = start(
         same_env,
         'export CLAUDE_PID=$$; printf "%s\\n" "$$" > "$FM_HOME/state/accepted-pid"; '
@@ -259,7 +284,7 @@ try:
     require(same_owner.poll() is None, "the original owner exited, so the re-anchor proves nothing over a live line 1")
     require(accepted_pid != same_lock_owner, "the same-session acquisition ran as the original owner")
     require(session_lock_text(same_lock) == accepted_pid, "a same-session confirmation outside the owner's ancestry did not re-anchor line 1 onto its own CLAUDE_PID")
-    require((same / "state/.lock-session").read_text().strip() == "synthetic-same", "a same-session confirmation changed the recorded id")
+    require((same / "state/.lock-session").read_text().splitlines()[0] == "synthetic-same", "a same-session confirmation changed the recorded id")
     refused = run(
         same_env | {"CLAUDE_CODE_SESSION_ID": "synthetic-other"},
         'export CLAUDE_PID=$$; "$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; rc=$?; printf "lock_rc=%s\\n" "$rc"; true',
@@ -267,9 +292,6 @@ try:
     print("other-session acquisition", "rc=" + str(refused.returncode), "stdout=" + repr(refused.stdout), "stderr=" + repr(refused.stderr), flush=True)
     require("lock_rc=1" in refused.stdout, "a different session id acquired the re-anchored lock")
     require(f"pid {accepted_pid}, session synthetic-same" in refused.stderr, "the refusal did not name the re-anchored pid and the recorded session id")
-    same_stop = guard(same_env, "same-session stop", prefix="export CLAUDE_PID=$$; ")
-    require(same_stop.returncode == 2, "a same-session Stop must be held to the owner's own guard, not ended as a foreign session")
-    require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" not in same_stop.stdout, "a same-session Stop took the foreign-owner exit")
     other_stop = guard(same_env | {"CLAUDE_CODE_SESSION_ID": "synthetic-other"}, "other-session stop", prefix="export CLAUDE_PID=$$; ")
     require(other_stop.returncode == 0, "a different-session Stop must still end safely")
     require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" in other_stop.stdout, "a different-session Stop lost the foreign-owner diagnostic")
