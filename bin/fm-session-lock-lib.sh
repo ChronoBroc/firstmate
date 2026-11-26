@@ -854,15 +854,14 @@ fm_session_lock_recorded_anchor() {  # <state>
 }
 
 # True when this process continues the session that recorded state dir $1's
-# sidecar: the recorded model-loop anchor is a member of ancestry $2, or it is
-# no longer a process that could hold the lock, as when a background helper
-# was replaced. A missing anchor, or an anchor that is live or unreadable
-# outside this ancestry - a second running copy of the session - is false.
+# sidecar: the recorded model-loop anchor is a member of ancestry $2. A missing
+# anchor, or one outside this ancestry - live, exited, or unreadable - is no
+# proof of continuity, because a second running copy of the session carries
+# the same id.
 fm_session_lock_anchor_continues() {  # <state> <ancestry-pids>
   local anchor
   anchor=$(fm_session_lock_recorded_anchor "$1") || return 1
-  fm_harness_pid_listed "$anchor" "$2" && return 0
-  ! fm_session_lock_pid_blocks_reclaim "$anchor"
+  fm_harness_pid_listed "$anchor" "$2"
 }
 
 # True when the lock in state dir $1 was recorded by this same Claude session:
@@ -944,37 +943,6 @@ fm_session_lock_foreign_owner_live() {
   fi
   # shellcheck disable=SC2034 # Output global, read by the sourcing guard caller.
   FM_SESSION_LOCK_FOREIGN_OWNER_PID=$lock_pid
-  return 0
-}
-
-# True when this process runs the trusted Claude session whose id is recorded
-# beside state dir $1's lock but does not own that lock
-# (fm_session_lock_owned_by_self): the lock is missing, names a dead or
-# unverifiable pid, or names another running copy of this session. Sets
-# FM_SESSION_LOCK_LOST_DETAIL for a diagnostic caller. A process with no
-# trusted id, or one whose id is not the recorded one, is not this home's
-# recorded session and is false, as is an ancestry that cannot be resolved.
-# shellcheck disable=SC2034 # Output global, read by the sourcing guard caller.
-FM_SESSION_LOCK_LOST_DETAIL=
-# shellcheck disable=SC2034 # Output global, read by the sourcing guard caller.
-fm_session_lock_lost_by_self() {  # <state>
-  local state=$1 lock_pid pids
-  FM_SESSION_LOCK_LOST_DETAIL=
-  pids=$(fm_harness_ancestry_pids) || return 1
-  fm_session_lock_same_session "$state" "$pids" || return 1
-  fm_session_lock_owned_by_self "$state" && return 1
-  if [ ! -f "$state/.lock" ] || [ -L "$state/.lock" ]; then
-    FM_SESSION_LOCK_LOST_DETAIL="it is missing"
-    return 0
-  fi
-  lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
-  if fm_harness_pid_alive "$lock_pid"; then
-    FM_SESSION_LOCK_LOST_DETAIL="it names live harness pid $lock_pid, another running copy of this session"
-  elif fm_session_lock_pid_blocks_reclaim "$lock_pid"; then
-    FM_SESSION_LOCK_LOST_DETAIL="it names pid $lock_pid, whose identity this session cannot verify"
-  else
-    FM_SESSION_LOCK_LOST_DETAIL="it names pid $lock_pid, which is not a live harness"
-  fi
   return 0
 }
 

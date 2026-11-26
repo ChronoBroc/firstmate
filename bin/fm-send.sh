@@ -299,9 +299,6 @@ fi
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
 # shellcheck source=bin/fm-idle-stop-lib.sh
 . "$SCRIPT_DIR/fm-idle-stop-lib.sh"
-# shellcheck source=bin/fm-lease-lib.sh
-. "$SCRIPT_DIR/fm-lease-lib.sh"
-fm_lease_require_session_lock "steer (fm-send)"
 
 FM_GUARD_CONTINUE_LINE='This is a supervision warning only; the requested message WILL still be sent.' "$SCRIPT_DIR/fm-guard.sh" || true
 
@@ -525,6 +522,8 @@ shift
 # supervision actors, so refuse while the OTHER actor holds this task's live
 # lease. A home with no supervision branch has no lease files and passes
 # untouched (contract: bin/fm-lease-lib.sh).
+# shellcheck source=bin/fm-lease-lib.sh
+. "$SCRIPT_DIR/fm-lease-lib.sh"
 if [ -n "$TARGET_META" ]; then
   LEASE_GUARD_TASK=$(fm_send_id_from_meta "$TARGET_META")
   if [ -n "$LEASE_GUARD_TASK" ]; then

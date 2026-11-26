@@ -111,7 +111,6 @@ case "$CMD" in
       echo "error: claim refused - the $CALLER supervision actor cannot claim a lease as $ACTOR on '$TASK'" >&2
       exit "$FM_LEASE_REFUSE_EXIT"
     fi
-    fm_lease_require_session_lock "lease claim (fm-lease)"
     LEASE=$(fm_lease_path "$TASK")
     if fm_lease_live "$TASK" && [ "$FM_LEASE_ACTOR" != "$ACTOR" ]; then
       echo "error: claim refused - task '$TASK' is leased to the $FM_LEASE_ACTOR supervision actor (state/.lease-$TASK)" >&2
@@ -175,7 +174,6 @@ case "$CMD" in
       echo "error: release refused - the $CALLER supervision actor cannot release a lease as $ACTOR on '$TASK'" >&2
       exit "$FM_LEASE_REFUSE_EXIT"
     fi
-    fm_lease_require_session_lock "lease release (fm-lease)"
     if fm_lease_read "$TASK" && { [ "$FM_LEASE_ACTOR" = "$ACTOR" ] || [ -z "$FM_LEASE_ACTOR" ]; }; then
       rm -f -- "$(fm_lease_path "$TASK")"
     fi
@@ -191,7 +189,6 @@ case "$CMD" in
       echo "error: release-actor refused - the $CALLER supervision actor cannot release leases as $ACTOR" >&2
       exit "$FM_LEASE_REFUSE_EXIT"
     fi
-    fm_lease_require_session_lock "lease release (fm-lease)"
     for LEASE in "$STATE"/.lease-*; do
       [ -e "$LEASE" ] || continue
       case "$LEASE" in *.lock) continue ;; esac

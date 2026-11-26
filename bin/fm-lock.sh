@@ -27,7 +27,7 @@
 # and left byte-identical when it already has the content this acquisition
 # would write. Its second line `anchor=<pid>` records the acquiring session's
 # own anchor pid beside the id, so a same-id caller outside the lock's ancestry
-# owns the lock only when that recorded anchor is its own process or has exited
+# owns the lock only when that recorded anchor is in its own ancestry
 # (fm_session_lock_anchor_continues in bin/fm-session-lock-lib.sh); any other
 # same-id caller, including one beside a sidecar with no anchor line, is
 # refused as a duplicate and never re-anchors the lock. A same-session

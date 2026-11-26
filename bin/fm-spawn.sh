@@ -2290,8 +2290,6 @@ fi
 . "$SCRIPT_DIR/fm-lease-lib.sh"
 if [ "$RELAUNCH" -ne 1 ]; then
   fm_lease_forbid_branch "new-task spawn (fm-spawn)" --away-relocated
-else
-  fm_lease_require_session_lock "relaunch (fm-spawn)"
 fi
 spawn_refuse_if_away_spend_cap() {
   [ "$KIND" != secondmate ] || return 0

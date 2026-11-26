@@ -103,7 +103,7 @@ Ownership is the shared `fm_session_lock_owned_by_self` verdict in `bin/fm-sessi
 The current session owns the lock when either of these holds:
 
 - The recorded pid is a member of the current session's contiguous harness ancestry.
-- The trusted Claude session id recorded beside the lock in `state/.lock-session` matches this hook's own environment, the model-loop anchor recorded beside that id is this hook's own process or has exited, and the recorded pid is still a live harness.
+- The trusted Claude session id recorded beside the lock in `state/.lock-session` matches this hook's own environment, the model-loop anchor recorded beside that id is in this hook's own ancestry, and the recorded pid is still a live harness.
 
 That second signal keeps a background Claude session owning its own lock after the transient helper chain between its hooks and its recorded owner is recycled.
 A recorded anchor that is still alive outside the hook's ancestry is a second running copy of the same session, such as a running session resumed again under another terminal server, and a sidecar that records no anchor proves no continuity, so either copy is a non-owner and its turns end through this diagnostic.

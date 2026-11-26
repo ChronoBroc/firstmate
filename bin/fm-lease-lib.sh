@@ -55,11 +55,6 @@
 # tracked as separate follow-up design work. The branch's shell prelude makes
 # the actor variables readonly (see the Pi branch extension), so an
 # ACCIDENTAL override fails loudly inside the branch's own shell as well.
-#   - Session-lock check (fm_lease_require_session_lock): fm_lease_guard,
-#     fm_lease_forbid_branch, and the lease-free main-session entry points
-#     (PR registration, scout promotion, the wake drain, every steer, a
-#     relaunch, and lease claim and release) refuse a main-actor fleet action
-#     from this home's recorded session once it no longer holds the lock.
 #   - Guard semantics (fm_lease_guard): no lease, a same-actor lease, or a
 #     provably stale lease passes; a live lease held by the OTHER actor
 #     refuses with exit FM_LEASE_REFUSE_EXIT. Whenever the guard engages - a
@@ -102,8 +97,7 @@
 #
 # Sourced by bin/fm-send.sh, bin/fm-control.sh, bin/fm-teardown.sh,
 # bin/fm-pr-merge.sh, bin/fm-merge-local.sh, bin/fm-spawn.sh, bin/fm-lock.sh,
-# bin/fm-lease.sh, bin/fm-pr-check.sh, bin/fm-promote.sh, and
-# bin/fm-wake-drain.sh. Callers must have $STATE resolved before calling. No side
+# and bin/fm-lease.sh. Callers must have $STATE resolved before calling. No side
 # effects on source. set -u / set -e safe.
 
 # Distinct from usage errors (2), the gate refusal (3), and fm-send's
@@ -139,31 +133,6 @@ fm_lease_tagged_holder_live() {
   fi
   fm_session_pid_valid "$1" || return 1
   fm_harness_pid_alive "$1"
-}
-
-# fm_lease_require_session_lock <action-label>: exit 1 before a main-actor
-# fleet action when this process is the home's recorded main session - its
-# trusted Claude session id is the one recorded beside state/.lock - but no
-# longer owns the lock: the lock is missing, names a dead or unverifiable pid,
-# or names another running copy of this session
-# (fm_session_lock_lost_by_self in bin/fm-session-lock-lib.sh). Reclaiming a
-# dead holder stays with bin/fm-lock.sh, which bin/fm-session-start.sh runs.
-# The branch actor, a caller with no harness ancestry, and a caller whose
-# session is not the recorded one - a worker, a secondmate, the supervision
-# host, the watcher - pass untouched. fm_lease_guard and fm_lease_forbid_branch
-# call it first; the main-session entry points that take no lease call it
-# directly before their first mutation.
-fm_lease_require_session_lock() {
-  local action=$1
-  [ "${FM_SUPERVISION_ACTOR:-main}" = main ] || return 0
-  if ! command -v fm_session_lock_lost_by_self >/dev/null 2>&1; then
-    # Kept an analysis boundary for the same reason as fm-wake-lib.sh above.
-    # shellcheck source=/dev/null
-    . "$FM_LEASE_LIB_DIR/fm-session-lock-lib.sh"
-  fi
-  fm_session_lock_lost_by_self "$STATE" || return 0
-  echo "error: $action refused - this session does not hold this home's session lock: $FM_SESSION_LOCK_LOST_DETAIL; operate read-only, or re-run bin/fm-session-start.sh to reacquire the lock, which succeeds only while no other running copy of this session holds it" >&2
-  exit 1
 }
 
 # fm_lease_home_runs_host: 0 iff this home runs the supervision host
@@ -296,7 +265,6 @@ fm_lease_clear_stale() {
 # EXIT cleanup. This closes the check/use race with a concurrent claim.
 fm_lease_guard() {
   local task=$1 action=$2 actor lock lease_actor
-  fm_lease_require_session_lock "$action"
   fm_lease_valid_id "$task" || return 0
   actor=$(fm_lease_actor) || exit "$FM_LEASE_REFUSE_EXIT"
   case "${PI_CODING_AGENT:-}:${FM_SUPERVISION_ACTOR:-}" in
@@ -355,10 +323,7 @@ fm_lease_away_relocated() {
 fm_lease_forbid_branch() {
   local action=$1 relocatable=${2:-} actor
   actor=$(fm_lease_actor) || exit "$FM_LEASE_REFUSE_EXIT"
-  if [ "$actor" != branch ]; then
-    fm_lease_require_session_lock "$action"
-    return 0
-  fi
+  [ "$actor" = branch ] || return 0
   if [ "$relocatable" = --away-relocated ] && fm_lease_away_relocated; then
     echo "note: $action proceeds for the supervision branch under the away-posture record: main is parked and its standing authority is relocated; this script's own gate still applies (docs/pi-supervision-branch.md \"Postures\")" >&2
     return 0

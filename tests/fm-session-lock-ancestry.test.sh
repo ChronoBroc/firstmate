@@ -1281,22 +1281,17 @@ test_e2e_background_session_keeps_its_lock_across_a_recycled_chain() {
 
 # A running session resumed a second time under the same Claude session id is a
 # live twin: real orphaned fake-claude processes, each its own CLAUDE_PID under
-# one id. The twin's acquisition is refused with the duplicate diagnostic and
-# leaves line 1 on the original, also beside a pre-anchor sidecar that records
-# the id alone, which the original upgrades by re-running the lock. Every
-# main-session fleet entry point refuses before it mutates once this session no
-# longer holds the lock - a live twin holds it, the holder that took it has
-# exited, or the lock is gone - and the original's own lock run reclaims a dead
-# holder. A caller whose session is not the recorded one, and a detached
-# process that merely inherited the session's environment, are never refused.
+# one id. The twin's acquisition is refused with the duplicate diagnostic naming
+# the live holder and leaves line 1 on the original, beside an anchored sidecar,
+# beside a pre-anchor sidecar that records the id alone, and beside one whose
+# recorded anchor has exited. The original keeps its lock and upgrades an
+# id-only sidecar by re-running it; once the original is dead, a later process
+# of the same session reclaims the lock.
 make_twin_home() {  # <dir>
   local dir=$1
-  mkdir -p "$dir/state" "$dir/stub"
+  mkdir -p "$dir/state"
   git init -q "$dir"
   git -C "$dir" commit -q --allow-empty -m init
-  cp -R "$ROOT/bin" "$dir/bin"
-  printf '#!/bin/sh\nexit 1\n' > "$dir/stub/gh"
-  chmod +x "$dir/stub/gh"
   cat > "$dir/twin.sh" <<'SH'
 #!/usr/bin/env bash
 role=$1
@@ -1305,53 +1300,24 @@ while [ "$i" -lt 200 ] && [ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" != 1 
   sleep 0.05
   i=$((i + 1))
 done
-cd "$FM_HOME" || exit 1
-export CLAUDE_CODE_SESSION_ID=$FM_TWIN_SESSION_ID
-CLAUDE_PID=${FM_TWIN_CLAUDE_PID:-$$}
-export CLAUDE_PID
+export CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$
 printf '%s\n' "$$" > "$FM_HOME/state/$role-pid"
-entry() {  # <name> <script> <args...>
-  local name=$1 script=$2
-  shift 2
-  "$FM_HOME/bin/$script" "$@" > "$out/$name.out" 2>&1 < /dev/null
-  printf '%s\n' "$?" > "$out/$name.rc"
-}
-url=https://github.com/example/twin/pull/1
 n=1
 while [ ! -e "$FM_HOME/state/stop-$role" ]; do
   req="$FM_HOME/state/$role-fire-$n"
   if [ -f "$req" ]; then
     out="$FM_HOME/state/$role-$n"
     mkdir -p "$out"
-    for action in $(cat "$req"); do
-      case "$action" in
-        lock)
-          "$FM_HOME/bin/fm-lock.sh" > "$out/lock.out" 2>&1
-          printf '%s\n' "$?" > "$out/lock.rc"
-          (
-            . "$FM_HOME/bin/fm-session-lock-lib.sh"
-            fm_session_lock_owned_by_self "$FM_HOME/state"
-            printf '%s\n' "$?" > "$out/owned.rc"
-            fm_session_lock_foreign_owner_live "$FM_HOME/state"
-            printf '%s\n' "$?" > "$out/foreign.rc"
-          )
-          ;;
-        fleet)
-          entry merge fm-pr-merge.sh twin-task "$url"
-          entry prcheck fm-pr-check.sh twin-task "$url"
-          entry promote fm-promote.sh twin-task --mode direct-PR --yolo off
-          entry drain fm-wake-drain.sh
-          entry claim fm-lease.sh claim twin-task
-          entry release fm-lease.sh release twin-task
-          entry steer fm-send.sh twin:0 hello
-          entry relaunch fm-spawn.sh twin-task --relaunch
-          ;;
-        drain) entry drain fm-wake-drain.sh ;;
-        steer) entry steer fm-send.sh twin:0 hello ;;
-        pending) entry pending fm-wake-drain.sh --pending-for-main ;;
-      esac
-    done
-    cp "$FM_HOME/state/.lock" "$out/lock-after" 2>/dev/null || : > "$out/lock-after"
+    "$FM_BIN/fm-lock.sh" > "$out/lock.out" 2>&1
+    printf '%s\n' "$?" > "$out/lock.rc"
+    (
+      . "$FM_BIN/fm-session-lock-lib.sh"
+      fm_session_lock_owned_by_self "$FM_HOME/state"
+      printf '%s\n' "$?" > "$out/owned.rc"
+      fm_session_lock_foreign_owner_live "$FM_HOME/state"
+      printf '%s\n' "$?" > "$out/foreign.rc"
+    )
+    cp "$FM_HOME/state/.lock" "$out/lock-after"
     : > "$out/done"
     n=$((n + 1))
   fi
@@ -1362,31 +1328,17 @@ SH
   chmod +x "$dir/twin.sh"
 }
 
-start_twin_role() {  # <dir> <role> <session-id> [<interpreter> [<claude-pid>]]
-  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID -u NO_MISTAKES_GATE \
-    FM_HOME="$1" PATH="$1/stub:$PATH" FM_TWIN_SESSION_ID="$3" FM_TWIN_CLAUDE_PID="${5:-}" \
-    bash -c '"$0" "$1" "$2" &' "${4:-$NAMED_CLAUDE}" "$1/twin.sh" "$2"
+start_twin_role() {  # <dir> <role>
+  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID FM_HOME="$1" FM_BIN="$ROOT/bin" \
+    bash -c '"$0" "$1" "$2" &' "$NAMED_CLAUDE" "$1/twin.sh" "$2"
   wait_for_file "$1/state/$2-pid" "the $2 session"
   BG_FIXTURE_PIDS+=("$(tr -d '[:space:]' < "$1/state/$2-pid")")
 }
 
-stop_twin_role() {  # <dir> <role>
-  local pid i=0
-  pid=$(tr -d '[:space:]' < "$1/state/$2-pid")
-  : > "$1/state/stop-$2"
-  while [ "$i" -lt 200 ] && kill -0 "$pid" 2>/dev/null; do
-    sleep 0.05
-    i=$((i + 1))
-  done
-  kill -0 "$pid" 2>/dev/null && fail "the $2 session did not exit"
-  return 0
-}
-
-fire_twin() {  # <dir> <role> <n> <actions>
-  printf '%s\n' "$4" > "$1/state/$2-fire-$3.tmp"
-  mv "$1/state/$2-fire-$3.tmp" "$1/state/$2-fire-$3"
+fire_twin() {  # <dir> <role> <n>
+  : > "$1/state/$2-fire-$3"
   local i=0
-  while [ "$i" -lt 2400 ] && [ ! -e "$1/state/$2-$3/done" ]; do
+  while [ "$i" -lt 600 ] && [ ! -e "$1/state/$2-$3/done" ]; do
     sleep 0.05
     i=$((i + 1))
   done
@@ -1397,146 +1349,82 @@ twin_value() {  # <dir> <role> <n> <file>
   tr -d '[:space:]' < "$1/state/$2-$3/$4"
 }
 
-TWIN_FLEET_ENTRIES='merge:PR merge (fm-pr-merge)
-prcheck:PR registration (fm-pr-check)
-promote:scout promotion (fm-promote)
-drain:wake drain (fm-wake-drain)
-claim:lease claim (fm-lease)
-release:lease release (fm-lease)
-steer:steer (fm-send)
-relaunch:relaunch (fm-spawn)'
-
-# Every fleet entry point of step <n> exited 1 with the session-lock refusal
-# naming <detail> and the reacquire command.
-expect_fleet_refused() {  # <dir> <role> <n> <detail> <label>
-  local name action out
-  while IFS=: read -r name action; do
-    out="$1/state/$2-$3/$name.out"
-    expect_code 1 "$(twin_value "$1" "$2" "$3" "$name.rc")" "$5: $action was not refused: $(cat "$out")"
-    grep -qF "$action refused - this session does not hold this home's session lock: $4; operate read-only, or re-run bin/fm-session-start.sh to reacquire the lock" "$out" \
-      || fail "$5: $action did not refuse with the session-lock diagnostic naming '$4': $(cat "$out")"
-  done <<EOF
-$TWIN_FLEET_ENTRIES
-EOF
+# The twin's step <n> was refused as a duplicate naming the live holder <orig>
+# and left both the lock and the sidecar exactly as they were.
+expect_twin_refused() {  # <dir> <n> <orig> <label>
+  local dir=$1 n=$2 orig=$3 label=$4
+  expect_code 1 "$(twin_value "$dir" twin "$n" lock.rc)" "$label: the twin took the lock from the live original: $(cat "$dir/state/twin-$n/lock.out")"
+  grep -q "another live process of this same session holds the lock (pid $orig, session S1)" "$dir/state/twin-$n/lock.out" \
+    || fail "$label: the twin's refusal is not the duplicate diagnostic naming pid $orig: $(cat "$dir/state/twin-$n/lock.out")"
+  [ "$(twin_value "$dir" twin "$n" lock-after)" = "$orig" ] || fail "$label: the twin rewrote the lock to $(cat "$dir/state/twin-$n/lock-after")"
+  expect_code 1 "$(twin_value "$dir" twin "$n" owned.rc)" "$label: the twin reads the original's lock as its own"
+  expect_code 0 "$(twin_value "$dir" twin "$n" foreign.rc)" "$label: the twin does not see the original as a live foreign owner"
 }
-
-# No entry point <names> of step <n> was refused for the session lock.
-expect_not_lock_refused() {  # <dir> <role> <n> <label> <name>...
-  local dir=$1 role=$2 n=$3 label=$4 name
-  shift 4
-  for name in "$@"; do
-    [ -f "$dir/state/$role-$n/$name.rc" ] || fail "$label: $name did not run"
-    if grep -q "does not hold this home's session lock" "$dir/state/$role-$n/$name.out"; then
-      fail "$label: $name was refused for the session lock: $(cat "$dir/state/$role-$n/$name.out")"
-    fi
-  done
-}
-
-TWIN_FLEET_NAMES='merge prcheck promote drain claim release steer relaunch'
 
 test_e2e_live_twin_of_a_session_never_takes_the_lock() {
-  local dir orig twin late dead_twin
+  local dir orig twin late exited
   dir="$TMP_ROOT/e2e-live-twin"
   make_twin_home "$dir"
-  start_twin_role "$dir" orig S1
+  start_twin_role "$dir" orig
   orig=$(tr -d '[:space:]' < "$dir/state/orig-pid")
 
-  fire_twin "$dir" orig 1 'lock fleet'
+  fire_twin "$dir" orig 1
   expect_code 0 "$(twin_value "$dir" orig 1 lock.rc)" "the original could not acquire the lock: $(cat "$dir/state/orig-1/lock.out")"
   [ "$(twin_value "$dir" orig 1 lock-after)" = "$orig" ] || fail "the original's lock names $(cat "$dir/state/orig-1/lock-after"), expected $orig"
   [ "$(cat "$dir/state/.lock-session")" = "$(printf 'S1\nanchor=%s' "$orig")" ] \
     || fail "the original did not record its id and its own pid as the anchor: $(cat "$dir/state/.lock-session")"
-  # shellcheck disable=SC2086 # Deliberate word splitting of the entry names.
-  expect_not_lock_refused "$dir" orig 1 "the lock holder" $TWIN_FLEET_NAMES
 
-  start_twin_role "$dir" twin S1
+  start_twin_role "$dir" twin
   twin=$(tr -d '[:space:]' < "$dir/state/twin-pid")
   [ "$twin" != "$orig" ] || fail "fixture collapsed the twin into the original"
-  fire_twin "$dir" twin 1 'lock fleet'
+  cp "$dir/state/.lock-session" "$dir/sidecar-before-twin"
+  fire_twin "$dir" twin 1
   kill -0 "$orig" 2>/dev/null || fail "the original exited, so the twin was not checked against a live holder"
-  expect_code 1 "$(twin_value "$dir" twin 1 lock.rc)" "the twin took the lock from the live original: $(cat "$dir/state/twin-1/lock.out")"
-  grep -q "another live process of this same session holds the lock (pid $orig, session S1)" "$dir/state/twin-1/lock.out" \
-    || fail "the twin's refusal is not the duplicate diagnostic: $(cat "$dir/state/twin-1/lock.out")"
-  [ "$(twin_value "$dir" twin 1 lock-after)" = "$orig" ] || fail "the twin rewrote the lock to $(cat "$dir/state/twin-1/lock-after")"
-  expect_code 1 "$(twin_value "$dir" twin 1 owned.rc)" "the twin reads the original's lock as its own"
-  expect_code 0 "$(twin_value "$dir" twin 1 foreign.rc)" "the twin does not see the original as a live foreign owner"
-  expect_fleet_refused "$dir" twin 1 "it names live harness pid $orig, another running copy of this session" "the twin"
+  expect_twin_refused "$dir" 1 "$orig" "anchored sidecar"
+  cmp -s "$dir/sidecar-before-twin" "$dir/state/.lock-session" \
+    || fail "the refused twin changed the sidecar: $(cat "$dir/state/.lock-session")"
 
-  # A sidecar written before anchors existed records the id alone. It proves
-  # no continuity, so the twin is still refused; the original, whose own pid
-  # is line 1, still owns the lock and upgrades the sidecar by re-running it.
+  # A sidecar written before anchors existed records the id alone, and proves
+  # no continuity: the twin is still refused.
   printf 'S1\n' > "$dir/state/.lock-session"
-  fire_twin "$dir" twin 2 'lock fleet'
-  expect_code 1 "$(twin_value "$dir" twin 2 lock.rc)" "the twin took the lock beside an id-only sidecar: $(cat "$dir/state/twin-2/lock.out")"
-  grep -q "another live process of this same session holds the lock (pid $orig, session S1)" "$dir/state/twin-2/lock.out" \
-    || fail "the twin's refusal beside an id-only sidecar is not the duplicate diagnostic: $(cat "$dir/state/twin-2/lock.out")"
-  [ "$(twin_value "$dir" twin 2 lock-after)" = "$orig" ] || fail "the twin rewrote the lock beside an id-only sidecar"
-  expect_code 1 "$(twin_value "$dir" twin 2 owned.rc)" "the twin owns the lock through an id-only sidecar"
-  expect_fleet_refused "$dir" twin 2 "it names live harness pid $orig, another running copy of this session" "the twin beside an id-only sidecar"
-  fire_twin "$dir" orig 2 'fleet lock'
-  # shellcheck disable=SC2086 # Deliberate word splitting of the entry names.
-  expect_not_lock_refused "$dir" orig 2 "the original beside an id-only sidecar" $TWIN_FLEET_NAMES
+  fire_twin "$dir" twin 2
+  expect_twin_refused "$dir" 2 "$orig" "id-only sidecar"
+
+  # A recorded anchor that has exited proves no continuity either, so a live
+  # line 1 is never handed to a same-id process outside its ancestry.
+  exited=$(bash -c 'printf "%s\n" "$$"')
+  printf 'S1\nanchor=%s\n' "$exited" > "$dir/state/.lock-session"
+  fire_twin "$dir" twin 3
+  expect_twin_refused "$dir" 3 "$orig" "exited recorded anchor"
+
+  # The original, whose own pid is line 1, still owns its lock beside an
+  # id-only sidecar, and its lock run records its anchor.
+  printf 'S1\n' > "$dir/state/.lock-session"
+  fire_twin "$dir" orig 2
   expect_code 0 "$(twin_value "$dir" orig 2 lock.rc)" "the original lost its own lock beside an id-only sidecar: $(cat "$dir/state/orig-2/lock.out")"
   expect_code 0 "$(twin_value "$dir" orig 2 owned.rc)" "the original no longer reads its lock as its own"
   [ "$(cat "$dir/state/.lock-session")" = "$(printf 'S1\nanchor=%s' "$orig")" ] \
     || fail "the original's lock run did not upgrade the id-only sidecar: $(cat "$dir/state/.lock-session")"
 
-  # A lock that names the live twin, as a takeover would leave it: the
-  # original's next fleet action refuses instead of carrying on, and its lock
-  # run is refused as the duplicate. Callers that are not this home's recorded
-  # session keep working: another session's steer, and a detached process that
-  # inherited this session's environment, as the supervision host and the
-  # watcher do. The supervision host's own main query still answers.
-  printf '%s\n' "$twin" > "$dir/state/.lock"
-  printf 'S1\nanchor=%s\n' "$twin" > "$dir/state/.lock-session"
-  fire_twin "$dir" orig 3 'fleet pending lock'
-  expect_fleet_refused "$dir" orig 3 "it names live harness pid $twin, another running copy of this session" "the displaced original"
-  expect_not_lock_refused "$dir" orig 3 "the displaced original's pending-for-main query" pending
-  expect_code 1 "$(twin_value "$dir" orig 3 lock.rc)" "the original took the lock back from a live twin: $(cat "$dir/state/orig-3/lock.out")"
-  [ "$(twin_value "$dir" orig 3 lock-after)" = "$twin" ] || fail "the original rewrote a lock held by its live twin"
-  start_twin_role "$dir" worker W1
-  fire_twin "$dir" worker 1 'steer drain'
-  expect_not_lock_refused "$dir" worker 1 "another session" steer drain
-  start_twin_role "$dir" host S1 bash "$orig"
-  fire_twin "$dir" host 1 'drain pending steer'
-  expect_not_lock_refused "$dir" host 1 "a detached process with the session's environment" drain pending steer
-
-  # The twin that took the lock exits before the original's next action: a dead
-  # holder still refuses that action, and the original's own lock run - the
-  # command the refusal names - reclaims it.
-  stop_twin_role "$dir" twin
-  dead_twin=$twin
-  fire_twin "$dir" orig 4 'fleet'
-  expect_fleet_refused "$dir" orig 4 "it names pid $dead_twin, which is not a live harness" "the original after its twin exited"
-  [ "$(twin_value "$dir" orig 4 lock-after)" = "$dead_twin" ] || fail "a refused fleet action rewrote the lock"
-  fire_twin "$dir" orig 5 'lock fleet'
-  expect_code 0 "$(twin_value "$dir" orig 5 lock.rc)" "the original could not reclaim its exited twin's lock: $(cat "$dir/state/orig-5/lock.out")"
-  [ "$(twin_value "$dir" orig 5 lock-after)" = "$orig" ] || fail "the reclaim left line 1 at $(cat "$dir/state/orig-5/lock-after")"
-  # shellcheck disable=SC2086 # Deliberate word splitting of the entry names.
-  expect_not_lock_refused "$dir" orig 5 "the original after reclaiming" $TWIN_FLEET_NAMES
-
-  # A missing lock is not ownership either.
-  rm -f "$dir/state/.lock"
-  fire_twin "$dir" orig 6 'fleet'
-  expect_fleet_refused "$dir" orig 6 "it is missing" "the original after its lock was removed"
-
   # A genuinely dead holder is still reclaimed by a later process of the same
-  # session, whose fleet actions then proceed.
-  printf '%s\n' "$orig" > "$dir/state/.lock"
-  stop_twin_role "$dir" orig
-  start_twin_role "$dir" late S1
+  # session.
+  : > "$dir/state/stop-orig"
+  : > "$dir/state/stop-twin"
+  local i=0
+  while [ "$i" -lt 200 ] && { kill -0 "$orig" 2>/dev/null || kill -0 "$twin" 2>/dev/null; }; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  kill -0 "$orig" 2>/dev/null && fail "the original did not exit"
+  start_twin_role "$dir" late
   late=$(tr -d '[:space:]' < "$dir/state/late-pid")
-  fire_twin "$dir" late 1 'lock fleet'
+  fire_twin "$dir" late 1
   expect_code 0 "$(twin_value "$dir" late 1 lock.rc)" "the same session could not reclaim a dead holder's lock: $(cat "$dir/state/late-1/lock.out")"
   [ "$(twin_value "$dir" late 1 lock-after)" = "$late" ] || fail "the reclaim left line 1 at $(cat "$dir/state/late-1/lock-after")"
   [ "$(cat "$dir/state/.lock-session")" = "$(printf 'S1\nanchor=%s' "$late")" ] \
     || fail "the reclaim did not record the new anchor: $(cat "$dir/state/.lock-session")"
-  # shellcheck disable=SC2086 # Deliberate word splitting of the entry names.
-  expect_not_lock_refused "$dir" late 1 "the new holder" $TWIN_FLEET_NAMES
   : > "$dir/state/stop-late"
-  : > "$dir/state/stop-worker"
-  : > "$dir/state/stop-host"
-  pass "session-lock e2e: a live twin of a session never takes its lock, even beside an id-only sidecar; every main-session fleet entry point refuses once the session no longer holds the lock; other callers are untouched; a dead holder is still reclaimed"
+  pass "session-lock e2e: a live twin of a session never takes its lock, beside an anchored, an id-only, or an exited-anchor sidecar, and a dead holder is still reclaimed"
 }
 
 # A same-session confirmation must refresh a /clear re-key even while another
@@ -1835,7 +1723,7 @@ test_verified_reclaim_keeps_new_sidecar() {
 # A re-anchor moves leases recorded against the old live line 1 onto the new
 # anchor, so the other supervision actor still cannot claim a held task.
 test_reanchor_keeps_task_leases_live() {
-  local dir front_pid model_pid lease_rc exited_anchor
+  local dir front_pid model_pid lease_rc
   dir="$TMP_ROOT/reanchor-leases"
   mkdir -p "$dir/state"
   "$NAMED_CLAUDE" -c '
@@ -1846,8 +1734,7 @@ test_reanchor_keeps_task_leases_live() {
   wait_for_file "$dir/state/front-pid" "the front-end pid"
   front_pid=$(tr -d '[:space:]' < "$dir/state/front-pid")
   printf '%s\n' "$front_pid" > "$dir/state/.lock"
-  exited_anchor=$(bash -c 'printf "%s\n" "$$"')
-  printf 'S1\nanchor=%s\n' "$exited_anchor" > "$dir/state/.lock-session"
+  printf 'S1\n' > "$dir/state/.lock-session"
   printf 'branch\t%s\t100\n' "$front_pid" > "$dir/state/.lease-t1"
   printf 'main\t%s\t200\n' "$front_pid" > "$dir/state/.lease-t2"
   printf 'branch\t%s\t300\n' "$$" > "$dir/state/.lease-t3"
@@ -1855,6 +1742,7 @@ test_reanchor_keeps_task_leases_live() {
   env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
     FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
     "$NAMED_CLAUDE" -c '
+      printf "S1\nanchor=%s\n" "$$" > "$FM_HOME/state/.lock-session"
       CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/reanchor.out" 2>&1
       printf "%s\n" "$?" > "$FM_HOME/state/reanchor.rc"
       printf "%s\n" "$$" > "$FM_HOME/state/model-pid"
@@ -1894,7 +1782,7 @@ autoarm_midturn_healthy() {  # <state-dir>
 # auto-arm ledger's session_pid with line 1 and keeps the ledger's other bytes
 # and mtime, so the mid-turn guard still sees healthy supervision.
 test_reanchor_keeps_autoarm_midturn_healthy() {
-  local dir front_pid model_pid exited_anchor
+  local dir front_pid model_pid
   dir="$TMP_ROOT/reanchor-autoarm"
   mkdir -p "$dir/state"
   "$NAMED_CLAUDE" -c '
@@ -1905,8 +1793,7 @@ test_reanchor_keeps_autoarm_midturn_healthy() {
   wait_for_file "$dir/state/front-pid" "the front-end pid"
   front_pid=$(tr -d '[:space:]' < "$dir/state/front-pid")
   printf '%s\n' "$front_pid" > "$dir/state/.lock"
-  exited_anchor=$(bash -c 'printf "%s\n" "$$"')
-  printf 'S1\nanchor=%s\n' "$exited_anchor" > "$dir/state/.lock-session"
+  printf 'S1\n' > "$dir/state/.lock-session"
   printf 'epoch=7 owner_pid=1 outcome=rewake updated_at=1 session_pid=%s recovery_generation=g1\nidentity-1\n' \
     "$front_pid" > "$dir/state/.claude-autoarm-epoch"
   printf 'acked:handling:g1\n' > "$dir/state/.watcher-down"
@@ -1916,6 +1803,7 @@ test_reanchor_keeps_autoarm_midturn_healthy() {
   env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
     FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
     "$NAMED_CLAUDE" -c '
+      printf "S1\nanchor=%s\n" "$$" > "$FM_HOME/state/.lock-session"
       CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/reanchor.out" 2>&1
       printf "%s\n" "$?" > "$FM_HOME/state/reanchor.rc"
       printf "%s\n" "$$" > "$FM_HOME/state/model-pid"

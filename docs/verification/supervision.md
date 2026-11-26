@@ -401,14 +401,13 @@ That inertness result is scoped to the builds it exercised: it did not establish
 The secondmate-home scope and manual-repair wake path were measured with Claude Code 2.1.207 on 2026-07-12, when a native background completion re-invoked the idle model with no human input.
 The current Stop-owned main/secondmate inclusion and child-worktree exclusion are covered deterministically by `tests/fm-claude-stop-autoarm.test.sh`.
 Session-lock ownership in `bin/fm-session-lock-lib.sh` is decided against a session's whole contiguous harness ancestry rather than one chosen pid, so the Stop auto-arm reaches its lock owner wherever that owner sits: a pid of Claude Code's multi-level `bg-spare` hook worker chain, or an inner pid when a harness-named daemon parents the session.
-A background Claude session whose transient helper chain is recycled loses that contiguity while its recorded owner stays alive, so the library also accepts a trusted same-session id: `CLAUDE_CODE_SESSION_ID` counts only when `CLAUDE_PID` is a Claude-shaped member of the current run, it must equal the id `bin/fm-lock.sh` recorded in `state/.lock-session`, the model-loop anchor the sidecar records beside that id must be the caller's own process or have exited, and the recorded pid must still be a live harness, while every weaker combination (no id, no sidecar, an untrusted id, a different id, no recorded anchor, a dead recorded pid) leaves the ancestry verdict unchanged.
-`bin/fm-lock.sh` records that anchor, the acquiring session's own `CLAUDE_PID`, as the sidecar's second line `anchor=<pid>` beside every trusted id, so a recorded anchor still alive outside a same-id caller's ancestry is a second running copy of the session: its acquisition is refused with the duplicate diagnostic, it never re-anchors line 1, and its Stop takes the foreign-owner exit. A sidecar written before the anchor existed proves no continuity; the original whose own pid is line 1 still owns through ancestry, and its next lock run records the anchor.
-A main-actor fleet action from the session whose id the sidecar records - the guarded scripts in `bin/fm-lease-lib.sh`, PR registration, scout promotion, the wake drain, every steer, a relaunch, and lease claim and release - refuses with a diagnostic naming `bin/fm-session-start.sh` once that session no longer owns the lock: the lock is missing, names a dead or unverifiable pid, or names another running copy of the session. Callers of another session, and processes outside the session's harness ancestry, are unaffected.
+A background Claude session whose transient helper chain is recycled loses that contiguity while its recorded owner stays alive, so the library also accepts a trusted same-session id: `CLAUDE_CODE_SESSION_ID` counts only when `CLAUDE_PID` is a Claude-shaped member of the current run, it must equal the id `bin/fm-lock.sh` recorded in `state/.lock-session`, the model-loop anchor the sidecar records beside that id must be in the caller's own ancestry, and the recorded pid must still be a live harness, while every weaker combination (no id, no sidecar, an untrusted id, a different id, no recorded anchor, a dead recorded pid) leaves the ancestry verdict unchanged.
+`bin/fm-lock.sh` records that anchor, the acquiring session's own `CLAUDE_PID`, as the sidecar's second line `anchor=<pid>` beside every trusted id, so a same-id caller outside both the lock's and the recorded anchor's ancestry may be a second running copy of the session: its acquisition is refused with the duplicate diagnostic, it never re-anchors line 1, and its Stop takes the foreign-owner exit. A sidecar written before the anchor existed proves no continuity; the original whose own pid is line 1 still owns through ancestry, and its next lock run records the anchor.
 For such a session `bin/fm-lock.sh` records `CLAUDE_PID` on lock line 1 instead of the outermost chain pid, so a shared daemon or front-end that outlives the session never keeps a dead session's lock alive, and a same-session confirmation over a live line 1 outside the current ancestry rewrites line 1 to `CLAUDE_PID` and moves task leases and a Claude auto-arm rewake recorded against the old pid with it, so a later `/clear` re-key in the same process is still proven by ancestry, a held lease stays live, and the mid-turn guard still accepts that rewake.
 Harness identity is read from the executable path and `argv[0]` as well as the command basename, because Claude Code's native installer names the per-session executable by its version (`.../share/claude/versions/2.1.220`): `ps -o comm=` reports that path on macOS and the bare version string on Linux, and neither basename names a harness.
 `tests/fm-session-lock-ancestry.test.sh` pins both platforms' reporting semantics behind a deterministic process table and runs the real Stop auto-arm in version-named, daemon-parented, and combined real process trees.
 The same suite drives the ancestry and session-id signals apart in that table, asserting the divergence itself so no case is vacuous, and runs a real orphaned front-end, daemon, pty-host, and bg-spare tree whose daemon is ended mid-run: before the spare proves anything, a different id, an untrusted id, and no id each keep the live-owner refusal naming the recorded id; the same id then keeps arming through the real `bin/fm-lock.sh`, `bin/fm-claude-stop-autoarm.sh`, and `bin/fm-turnend-guard.sh --claude` with the sidecar untouched and lock line 1 moved off the live front-end onto the spare's pid rather than the outermost pty-host; and a new id from that same spare, with the front-end still alive, stays owned and re-keys the sidecar.
-`tests/fm-turnend-foreign-owner-repro.py` keeps the genuinely foreign live owner as the negative control, and its same-id positive control is a live process outside the owner's ancestry that re-anchors line 1 onto its own `CLAUDE_PID` while a different id stays refused against the re-anchored pid.
+`tests/fm-turnend-foreign-owner-repro.py` keeps the genuinely foreign live owner as the negative control, and its same-id controls are a live process outside the owner's ancestry that is refused as a duplicate, both beside an anchored sidecar and beside one recording the id alone, and whose Stop ends as a non-owner.
 The unit cases ran on 2026-09-18 on macOS with bash 3.2.57 as the fake harness interpreter:
 
 ```sh
@@ -454,23 +453,21 @@ ok - a claim pinned before a re-anchor records the live lock holder; a dead pin 
 FM_TEST_SUMMARY total=2 failed=0 skipped_gate=0 duration_ms=43472
 ```
 
-The live-twin refusal and the lost-lock fleet-action refusal ran on 2026-11-26 on macOS with bash 3.2.57 as the fake harness interpreter:
+The live-twin refusal ran on 2026-11-26 on macOS with bash 3.2.57 as the fake harness interpreter:
 
 ```sh
 bin/fm-test-run.sh tests/fm-session-lock-ancestry.test.sh
-bin/fm-test-run.sh --jobs 2 tests/fm-session-start.test.sh tests/fm-wake-drain-open-decisions.test.sh
 ```
 
 Observed output, bounded to the lines that coverage adds:
 
 ```text
 ok - session-lock: a trusted same-session id keeps owning a recycled background chain, and nothing weaker does
-ok - session-lock e2e: a live twin of a session never takes its lock, even beside an id-only sidecar; every main-session fleet entry point refuses once the session no longer holds the lock; other callers are untouched; a dead holder is still reclaimed
-FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=118701
-FM_TEST_SUMMARY total=2 failed=0 skipped_gate=0 duration_ms=468103
+ok - session-lock e2e: a live twin of a session never takes its lock, beside an anchored, an id-only, or an exited-anchor sidecar, and a dead holder is still reclaimed
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=73410
 ```
 
-On the same machine `tests/fm-turnend-foreign-owner-repro.py` stopped at its earlier replacement-watcher counterfactual (`replacement owner did not publish state/.watch.lock/pid`) both with and without this change, so its live-twin, id-only-sidecar, and exited-anchor sections were run from a copy with only that counterfactual removed and printed `FIXED a live twin beside an id-only sidecar is refused and its Stop ends safely` and `COMPLETE`.
+On the same machine `tests/fm-turnend-foreign-owner-repro.py` stopped at its earlier replacement-watcher counterfactual (`replacement owner did not publish state/.watch.lock/pid`) both with and without this change, so its live-twin, id-only-sidecar, exited-anchor, and re-anchor sections were run from a copy with only that counterfactual removed and printed `FIXED a same-id process beside an exited recorded anchor is refused and its Stop ends safely` and `COMPLETE`.
 
 No live unattended Claude background session ran on the verifying machine: that topology is documented by the real process listings in issues #3902, #2314, #3398, and #4066, and the coverage above is the structural predicate plus those executable fixtures, not a live pass.
 [`sessionstart-nudge.md`](../sessionstart-nudge.md#shared-wrapper-and-safety) owns the nudge wrapper's separate ancestry check and its redundant-nudge behavior after helper-chain recycling.
