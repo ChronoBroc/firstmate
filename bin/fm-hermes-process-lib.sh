@@ -4,14 +4,21 @@
 # never a later prompt argument or a working-directory path. Linux argv fields
 # preserve spaces; the ps fallback conservatively rejects ambiguous paths.
 fm_hermes_process_matches() {  # <args> [pid]
-  local args=${1:-} pid=${2:-} word first=1 interpreter='' module=0
+  local args=${1:-} pid=${2:-} word
   local words=()
   if [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ]; then
     while IFS= read -r -d '' word; do words+=("$word"); done < "/proc/$pid/cmdline"
   else
     read -r -a words <<< "$args"
   fi
-  for word in ${words[@]+"${words[@]}"}; do
+  fm_hermes_argv_matches ${words[@]+"${words[@]}"}
+}
+
+# fm_hermes_argv_matches <argv...>: the Hermes rule over an argument vector
+# whose boundaries are intact.
+fm_hermes_argv_matches() {  # <argv...>
+  local word first=1 interpreter='' module=0
+  for word in "$@"; do
     if [ "$first" = 1 ]; then
       first=0
       case "${word##*/}" in

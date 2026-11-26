@@ -301,6 +301,7 @@ run_control() {  # <case-dir> <args...>
     FM_REAL_GIT="${FM_REAL_GIT:-}" FM_FAKE_GIT_FAILURE="${FM_FAKE_GIT_FAILURE:-}" \
     FM_REAL_MV="${FM_REAL_MV:-}" FM_FAKE_COMPLETE_JOURNAL_MV_FAIL="${FM_FAKE_COMPLETE_JOURNAL_MV_FAIL:-}" \
     FM_FAKE_META_PUBLISH_MV_FAIL="${FM_FAKE_META_PUBLISH_MV_FAIL:-}" \
+    FM_FAKE_JOURNAL_PHASE_MV_FAIL="${FM_FAKE_JOURNAL_PHASE_MV_FAIL:-}" \
     FM_FAKE_TRACE_PREPARE="${FM_FAKE_TRACE_PREPARE:-}" \
     FM_FAKE_TRACE_RELEASE="${FM_FAKE_TRACE_RELEASE:-}" \
     FM_FAKE_META_WRITER_READY="${FM_FAKE_META_WRITER_READY:-}" \
@@ -348,6 +349,13 @@ make_mv_failure_stub() {  # <case-dir>
 if [ -n "${FM_FAKE_COMPLETE_JOURNAL_MV_FAIL:-}" ]; then
   for path in "$@"; do
     if [ -f "$path" ] && grep -Fqx 'phase=complete' "$path"; then
+      exit 1
+    fi
+  done
+fi
+if [ -n "${FM_FAKE_JOURNAL_PHASE_MV_FAIL:-}" ]; then
+  for path in "$@"; do
+    if [ -f "$path" ] && grep -Fqx "phase=$FM_FAKE_JOURNAL_PHASE_MV_FAIL" "$path"; then
       exit 1
     fi
   done
@@ -3811,9 +3819,16 @@ start_dir_process() {
 # child it forked, reap it, and drop it from LIVE_PIDS so nothing signals the
 # number again.
 stop_dir_process() {
-  local p kept=()
   pkill -P "$1" 2>/dev/null
   kill "$1" 2>/dev/null
+  reap_dir_process "$1"
+}
+
+# reap_dir_process <pid>: for a started process that ends on its own (or was
+# ended by a helper that owns its signal): reap it and drop it from LIVE_PIDS
+# without signalling it.
+reap_dir_process() {
+  local p kept=()
   wait "$1" 2>/dev/null
   for p in "${LIVE_PIDS[@]:-}"; do
     [ -n "$p" ] && [ "$p" != "$1" ] && kept+=("$p")
@@ -3846,7 +3861,7 @@ wait_probe_rc() {
 }
 
 test_worktree_agent_probe_finds_only_agents_working_there() {
-  local dir agent out rc agent_pid other_pid sub_pid shell_pid omp_pid
+  local dir agent out rc agent_pid other_pid sub_pid shell_pid
   dir="$TMP_ROOT/probe-$RANDOM"
   mkdir -p "$dir/wt/sub"
   agent=$(agent_standin_named "$dir" claude) || {
@@ -3900,17 +3915,26 @@ test_worktree_agent_probe_finds_only_agents_working_there() {
   [ "$(fm_agent_process_live_in_dir "$dir/back\\tslash" | cut -f1)" = "$agent_pid" ] \
     || fail "the probe must name the agent in the backslash-named folder ($agent_pid)"
   stop_dir_process "$agent_pid"
-  # A bun-installed omp runs as `bun <path>/omp` (docs/verification/runtime-backends.md).
+  # Interpreter-hosted harnesses carry their identity in the script argument,
+  # so the interpreter path and the script path both hold spaces here: a bun
+  # omp (docs/verification/runtime-backends.md), a node Gemini
+  # (bin/fm-gemini-lib.sh), and a node Hermes TUI (bin/fm-hermes-process-lib.sh).
   if [ ! -L "$dir/standin/standin" ]; then
-    mkdir -p "$dir/ompdist"
-    : > "$dir/ompdist/omp"
-    ln -sf "$dir/standin/standin" "$dir/agentbin/bun"
-    start_dir_process "$dir/wt" "$dir/agentbin/bun" "$dir/ompdist/omp"; omp_pid=$STARTED_PID
-    wait_probe_rc "$dir/wt" 0 || fail "a bun-hosted omp working in the worktree was never found"
-    [ "$(fm_agent_process_live_in_dir "$dir/wt" | cut -f1)" = "$omp_pid" ] \
-      || fail "the probe must name the bun-hosted omp ($omp_pid)"
-    stop_dir_process "$omp_pid"
-    wait_probe_rc "$dir/wt" 1 || fail "once omp exits the probe must find nothing"
+    mkdir -p "$dir/Bun Dir" "$dir/Node Dir" "$dir/omp dist" "$dir/Crew User/bin" "$dir/Crew User/hermes_cli/tui_dist"
+    : > "$dir/omp dist/omp"
+    : > "$dir/Crew User/bin/gemini"
+    : > "$dir/Crew User/hermes_cli/tui_dist/entry.js"
+    ln -sf "$dir/standin/standin" "$dir/Bun Dir/bun"
+    ln -sf "$dir/standin/standin" "$dir/Node Dir/node"
+    local hosted
+    for hosted in "$dir/Bun Dir/bun|$dir/omp dist/omp" "$dir/Node Dir/node|$dir/Crew User/bin/gemini" "$dir/Node Dir/node|$dir/Crew User/hermes_cli/tui_dist/entry.js"; do
+      start_dir_process "$dir/wt" "${hosted%%|*}" "${hosted#*|}" -y; agent_pid=$STARTED_PID
+      wait_probe_rc "$dir/wt" 0 || fail "the interpreter-hosted harness ${hosted#*|} was never found"
+      [ "$(fm_agent_process_live_in_dir "$dir/wt" | cut -f1)" = "$agent_pid" ] \
+        || fail "the probe must name the interpreter-hosted harness ${hosted#*|} ($agent_pid)"
+      stop_dir_process "$agent_pid"
+      wait_probe_rc "$dir/wt" 1 || fail "once ${hosted#*|} exits the probe must find nothing"
+    done
   fi
   rc=0; out=$(fm_agent_process_live_in_dir "$dir/missing") || rc=$?
   expect_code 2 "$rc" "a directory that does not resolve is inconclusive, never empty"
@@ -3977,8 +4001,8 @@ test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
   waiter_pid=$!
   LIVE_PIDS+=("$waiter_pid")
   out=$(RUN_CONTROL_EXIT_WAIT=10 run_control "$dir" rl91 relaunch --note "stopped mid-refactor"); rc=$?
-  stop_dir_process "$waiter_pid"
-  stop_dir_process "$agent_pid"
+  reap_dir_process "$waiter_pid"
+  reap_dir_process "$agent_pid"
   expect_code 0 "$rc" "an agent the relaunch stopped must be waited for until it leaves the worktree"$'\n'"$out"
   assert_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "the replacement should have been launched"
   pass "fm-control relaunch: the agent it stopped is waited for until it exits, then replaced"
@@ -4007,16 +4031,60 @@ test_relaunch_waits_only_for_the_agent_it_stopped() {
   LIVE_PIDS+=("$waiter_pid")
   started=$SECONDS
   out=$(RUN_CONTROL_EXIT_WAIT=30 run_control "$dir" rl94 relaunch --note "beside an unrelated agent"); rc=$?
-  stop_dir_process "$waiter_pid"
+  reap_dir_process "$waiter_pid"
+  reap_dir_process "$stopped_pid"
   [ $((SECONDS - started)) -lt 20 ] \
     || fail "the relaunch must wait only for the agent it stopped, never the exit wait for an unrelated one (took $((SECONDS - started))s)"
   [ "$rc" -ne 0 ] || fail "a relaunch beside an unrelated live agent must refuse"$'\n'"$out"
   assert_contains "$out" "pid $other_pid (claude)" "the refusal must name the unrelated agent still in the worktree"
   assert_not_contains "$out" "pid $stopped_pid (claude)" "the stopped agent was waited for and is gone"
   ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no replacement agent may be launched"
-  stop_dir_process "$stopped_pid"
   stop_dir_process "$other_pid"
   pass "fm-control relaunch: waits for the agent it stopped, not for an unrelated one, then refuses naming it"
+}
+
+test_relaunch_stopping_rollback_reports_a_survivor_in_the_worktree() {
+  local dir agent out rc agent_pid real_mv
+  dir=$(new_case survivor rl95)
+  add_ship_task "$dir" rl95 claude
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "fm-control relaunch stopping rollback beside a survivor: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  cp -p "$dir/home/data/rl95/brief.md" "$dir/brief.orig"
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  # The endpoint's own agent stops, but the transaction cannot record that it
+  # did, so the rollback runs from `stopping` while another agent survives.
+  real_mv=$(command -v mv)
+  make_mv_failure_stub "$dir"
+  out=$(FM_REAL_MV="$real_mv" FM_FAKE_JOURNAL_PHASE_MV_FAIL=exited \
+    run_control "$dir" rl95 relaunch --note "survivor in the worktree"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch whose exited phase cannot be recorded must fail"$'\n'"$out"
+  [ "$(journal_field "$dir" rl95 phase)" = failed:stopping ] \
+    || fail "the rollback should run from the stopping phase, got $(journal_field "$dir" rl95 phase)"
+  assert_contains "$out" "pid $agent_pid (claude)" "the stopping rollback must name the agent still in the worktree"
+  assert_not_contains "$out" "no agent is running" "an agent is running in the worktree"
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl95/brief.md" \
+    || fail "the surviving agent's instructions must be restored byte-exact"
+  stop_dir_process "$agent_pid"
+  pass "fm-control relaunch: a rollback from stopping reports and restores for an agent surviving in the worktree"
+}
+
+test_relaunch_rollback_never_restores_an_earlier_relaunch_backup() {
+  local dir out rc
+  dir=$(new_case stalebrief rl96)
+  add_ship_task "$dir" rl96 claude
+  cp -p "$dir/home/data/rl96/brief.md" "$dir/brief.orig"
+  # An earlier relaunch left its backup behind; this one fails before it
+  # takes its own, because its progress note cannot be written.
+  printf '# an earlier relaunch'"'"'s instructions\n' > "$dir/home/state/rl96.control-relaunch.brief-prior"
+  mkdir -p "$dir/home/state/rl96.control-relaunch.note"
+  out=$(run_control "$dir" rl96 relaunch --note "cannot be written"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch whose note cannot be written must fail"$'\n'"$out"
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl96/brief.md" \
+    || fail "the current instructions must never be replaced by an earlier relaunch's backup"$'\n'"$(cat "$dir/home/data/rl96/brief.md")"
+  pass "fm-control relaunch: a rollback never restores a backup it did not take"
 }
 
 test_relaunch_refusal_of_an_unprovable_absence_names_the_worktree_agent() {
@@ -4217,6 +4285,8 @@ test_worktree_agent_probe_finds_only_agents_working_there
 test_relaunch_refuses_an_agent_still_working_in_the_worktree
 test_relaunch_waits_for_a_stopping_agent_to_finish_exiting
 test_relaunch_waits_only_for_the_agent_it_stopped
+test_relaunch_stopping_rollback_reports_a_survivor_in_the_worktree
+test_relaunch_rollback_never_restores_an_earlier_relaunch_backup
 test_relaunch_refusal_of_an_unprovable_absence_names_the_worktree_agent
 test_spawn_relaunch_refuses_when_the_worktree_probe_is_inconclusive
 test_secondmate_respawn_refuses_an_agent_still_working_in_its_home

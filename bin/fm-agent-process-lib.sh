@@ -15,6 +15,7 @@
 
 _FM_AGENT_PROCESS_LIB_DIR=${BASH_SOURCE[0]%/*}
 [ "$_FM_AGENT_PROCESS_LIB_DIR" != "${BASH_SOURCE[0]}" ] || _FM_AGENT_PROCESS_LIB_DIR=.
+_FM_AGENT_PROCESS_PROCINFO=$(cd "${_FM_AGENT_PROCESS_LIB_DIR:-/}" 2>/dev/null && pwd)/fm-procinfo.py
 # shellcheck source=bin/fm-session-lock-lib.sh
 . "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-session-lock-lib.sh"
 # shellcheck source=bin/fm-gemini-lib.sh
@@ -231,25 +232,49 @@ fm_agent_process_live_in_dir() {  # <dir>
   return 0
 }
 
+# fm_agent_process_classify_argv: fm_agent_process_classify for a process
+# whose argument vector is known with its boundaries intact, so no rule ever
+# re-splits a flattened command line.
+fm_agent_process_classify_argv() {  # <name> <argv...> -> agent|shell|other
+  local name=${1:-} by_name by_argv0
+  shift
+  by_name=$(fm_agent_process_classify_name "$name" "${1:-}")
+  [ "$by_name" != agent ] || { printf 'agent'; return 0; }
+  by_argv0=$(fm_agent_process_classify_name "${1:-}" "${1:-}")
+  [ "$by_argv0" != agent ] || { printf 'agent'; return 0; }
+  if fm_hermes_argv_matches "$@" || fm_gemini_argv_is_gemini "$@" || fm_omp_argv_matches "$name" "$@"; then
+    printf 'agent'
+  elif [ "$by_name" = shell ] && [ "$by_argv0" = shell ]; then
+    printf 'shell'
+  else
+    printf 'other'
+  fi
+}
+
 # _fm_agent_process_identify <pid>: classify a live process from its kernel
-# name and command line into FM_AGENT_PROCESS_KIND (agent|shell|other) and
-# FM_AGENT_PROCESS_NAME; returns 1 when either could not be read.
+# name and its argument vector (/proc/<pid>/cmdline on Linux, the kernel argv
+# through bin/fm-procinfo.py elsewhere) into FM_AGENT_PROCESS_KIND
+# (agent|shell|other) and FM_AGENT_PROCESS_NAME; returns 1 when either could
+# not be read.
 _fm_agent_process_identify() {  # <pid>
-  local pid=$1 name args argv0
+  local pid=$1 name word argv_file rc=0
+  local argv=()
   FM_AGENT_PROCESS_KIND=
   FM_AGENT_PROCESS_NAME=
   name=$(LC_ALL=C ps -o comm= -p "$pid" 2>/dev/null) || return 1
-  args=$(LC_ALL=C ps -o args= -p "$pid" 2>/dev/null) || return 1
   name=${name#"${name%%[![:space:]]*}"}
-  args=${args#"${args%%[![:space:]]*}"}
-  [ -n "$name" ] && [ -n "$args" ] || return 1
-  argv0=${args%%[[:space:]]*}
+  [ -n "$name" ] || return 1
   if [ -r "/proc/$pid/cmdline" ]; then
-    argv0=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | head -n 1)
-    [ -n "$argv0" ] || return 1
+    while IFS= read -r -d '' word; do argv+=("$word"); done < "/proc/$pid/cmdline"
+  else
+    argv_file=$(mktemp "${TMPDIR:-/tmp}/fm-agent-argv.XXXXXX") || return 1
+    python3 "$_FM_AGENT_PROCESS_PROCINFO" --argv "$pid" > "$argv_file" 2>/dev/null || rc=$?
+    [ "$rc" -eq 0 ] && while IFS= read -r -d '' word; do argv+=("$word"); done < "$argv_file"
+    rm -f "$argv_file"
   fi
+  [ "${#argv[@]}" -gt 0 ] && [ -n "${argv[0]}" ] || return 1
   FM_AGENT_PROCESS_NAME=$name
-  FM_AGENT_PROCESS_KIND=$(fm_agent_process_classify "$name" "$argv0" "$args" "$pid")
+  FM_AGENT_PROCESS_KIND=$(fm_agent_process_classify_argv "$name" "${argv[@]}")
 }
 
 # fm_agent_process_format_live <probe-output>: fm_agent_process_live_in_dir's

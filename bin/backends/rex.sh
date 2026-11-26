@@ -824,6 +824,17 @@ fm_backend_rex_live_pids() {  # <target>
     | jq -Rsc 'split("\n") | map(select(test("^[0-9]+$")) | tonumber)' 2>/dev/null
 }
 
+# fm_backend_rex_foreground_pid: the pid of <target>'s foreground process
+# from the block's process view; fails when the block cannot be read or has
+# no foreground process.
+fm_backend_rex_foreground_pid() {  # <target>
+  local role pid rest
+  fm_backend_rex_process_chain "$1" || return 1
+  IFS=$'\t' read -r role pid rest <<< "$FM_BACKEND_REX_CHAIN"
+  [ "$role" = foreground ] && [ -n "$pid" ] || return 1
+  printf '%s\n' "$pid"
+}
+
 # fm_backend_rex_owner_trusted: THE trust rule for an OSC 7501 record. A record
 # counts only while its reporting process is the block's foreground process,
 # one of its ancestors, or a harness running below a shell foreground: without

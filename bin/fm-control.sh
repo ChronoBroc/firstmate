@@ -489,13 +489,17 @@ wait_agent_state() {  # <timeout> <wanted>...
 }
 
 # endpoint_agent_pids: the agent processes working in the task's worktree
-# that belong to its recorded endpoint (the pane's own process or one of its
-# descendants), one pid per line; nothing where the backend cannot name the
-# endpoint's process or the worktree probe finds none.
+# that belong to its recorded endpoint - the endpoint's own process (the tmux
+# pane process, the Herdr pane shell, the Rex block's foreground process) or
+# one of its descendants - one pid per line; nothing where the endpoint's
+# process cannot be read or the worktree probe finds none.
 endpoint_agent_pids() {
   local root out pid p
+  fm_backend_source "$BACKEND" >/dev/null 2>&1 || return 0
   case "$BACKEND" in
-    tmux) fm_backend_source tmux >/dev/null 2>&1 && root=$(fm_backend_tmux_pane_pid "$T") || return 0 ;;
+    tmux) root=$(fm_backend_tmux_pane_pid "$T") || return 0 ;;
+    herdr) root=$(fm_backend_herdr_pane_shell_pid "$T") || return 0 ;;
+    rex) root=$(fm_backend_rex_foreground_pid "$T") || return 0 ;;
     *) return 0 ;;
   esac
   case "$root" in ''|*[!0-9]*) return 0 ;; esac
@@ -981,6 +985,7 @@ RELAUNCH_META_PUBLISHED=0
 RELAUNCH_AGENT_CONFIRMED=0
 RELAUNCH_TX=
 RELAUNCH_BRIEF=
+RELAUNCH_BRIEF_SAVED=0
 PRIOR_HARNESS=$HARNESS
 PRIOR_RECORDED_HARNESS=$RECORDED_HARNESS
 CONFIG_HARNESS=
@@ -1024,10 +1029,11 @@ journal_write() {  # <phase> [extra-line]...
 
 # relaunch_restore_brief: put the preserved instructions back byte-exact and
 # record the outcome in RELAUNCH_RESTORE: restored, failed, or untouched when
-# this relaunch never rewrote them (a secondmate's charter).
+# this relaunch never preserved and rewrote them (a secondmate's charter, or a
+# failure before this transaction's own backup was taken).
 relaunch_restore_brief() {
   RELAUNCH_RESTORE=untouched
-  [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ] || return 0
+  [ "$RELAUNCH_BRIEF_SAVED" = 1 ] && [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ] || return 0
   if cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null; then
     RELAUNCH_RESTORE=restored
   else
@@ -1041,6 +1047,29 @@ relaunch_restore_text() {
     failed) printf 'its original instructions could NOT be restored to %s; restore them from the saved copy %s' "$RELAUNCH_BRIEF" "$BRIEF_PRIOR" ;;
     *) printf 'its instructions were never rewritten' ;;
   esac
+}
+
+# relaunch_rollback_endpoint_agent_free <tag> <message>: roll back once the
+# recorded endpoint holds no agent. Only a worktree that holds no agent
+# process either keeps the progress note under <tag> and <message>; an agent
+# still working there, or a probe that cannot decide, gets its instructions
+# restored and is reported.
+relaunch_rollback_endpoint_agent_free() {  # <tag> <message>
+  local live_rc=0 live_out
+  live_out=$(fm_agent_process_live_in_dir "$WT") || live_rc=$?
+  if [ "$live_rc" -eq 1 ]; then
+    journal_write "failed:$RELAUNCH_PHASE" "rollback=$1" || true
+    echo "$2" >&2
+    return 0
+  fi
+  relaunch_restore_brief
+  if [ "$live_rc" -eq 0 ]; then
+    journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-in-worktree" || true
+    echo "error: $ID's recorded endpoint holds no agent now, but no replacement was launched because an agent is still working in its local copy $WT (pid $(fm_agent_process_format_live "$live_out")); $(relaunch_restore_text) and the durable record was retained" >&2
+  else
+    journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-in-worktree-unproven" || true
+    echo "error: $ID's recorded endpoint holds no agent now, but the replacement did not launch and whether an agent still works in its local copy $WT could not be established ($live_out); $(relaunch_restore_text) and the durable record was retained" >&2
+  fi
 }
 
 relaunch_rollback() {
@@ -1069,8 +1098,8 @@ relaunch_rollback() {
           echo "error: relaunch of $ID failed while stopping the old agent, which is still running; $(relaunch_restore_text)" >&2
           ;;
         dead)
-          journal_write "failed:$RELAUNCH_PHASE" "rollback=prior-record-kept-agent-dead" || true
-          echo "error: $ID's agent stopped but relaunch did not reach replacement launch; no agent is running, and its work plus progress note are preserved at $WT" >&2
+          relaunch_rollback_endpoint_agent_free prior-record-kept-agent-dead \
+            "error: $ID's agent stopped but relaunch did not reach replacement launch; no agent is running, and its work plus progress note are preserved at $WT"
           ;;
         *)
           # The old agent was NOT proven stopped, so no replacement is coming
@@ -1099,21 +1128,8 @@ relaunch_rollback() {
         journal_write "failed:$RELAUNCH_PHASE" "rollback=none-new-record-kept" || true
         echo "error: $ID was relaunched on $TARGET_HARNESS but no running agent could be confirmed; its work is preserved at $WT" >&2
       else
-        local live_rc=0 live_out
-        live_out=$(fm_agent_process_live_in_dir "$WT") || live_rc=$?
-        if [ "$live_rc" -eq 1 ]; then
-          journal_write "failed:$RELAUNCH_PHASE" "rollback=prior-record-kept" || true
-          echo "error: $ID's agent was stopped but the replacement did not launch; no agent is running, and its work plus the recorded progress note are preserved at $WT" >&2
-        else
-          relaunch_restore_brief
-          if [ "$live_rc" -eq 0 ]; then
-            journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-in-worktree" || true
-            echo "error: $ID's recorded endpoint holds no agent now, but no replacement was launched because an agent is still working in its local copy $WT (pid $(fm_agent_process_format_live "$live_out")); $(relaunch_restore_text) and the durable record was retained" >&2
-          else
-            journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-in-worktree-unproven" || true
-            echo "error: $ID's recorded endpoint holds no agent now, but the replacement did not launch and whether an agent still works in its local copy $WT could not be established ($live_out); $(relaunch_restore_text) and the durable record was retained" >&2
-          fi
-        fi
+        relaunch_rollback_endpoint_agent_free prior-record-kept \
+          "error: $ID's agent was stopped but the replacement did not launch; no agent is running, and its work plus the recorded progress note are preserved at $WT"
       fi
       ;;
   esac
@@ -1336,6 +1352,7 @@ record_note() {
     ship|scout)
       cp -p "$RELAUNCH_BRIEF" "$BRIEF_PRIOR" \
         || die "could not preserve task $ID's instructions before recording the progress note"
+      RELAUNCH_BRIEF_SAVED=1
       {
         echo
         echo "## Progress note ($stamp)"

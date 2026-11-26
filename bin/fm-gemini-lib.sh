@@ -47,24 +47,30 @@ fm_gemini_path_is_gemini() {  # <path>
 # argv as NUL-delimited fields, which preserves a script path containing spaces
 # that `ps -o args=` necessarily flattens into an ambiguous string.
 fm_gemini_pid_is_gemini() {  # <pid>
-  local pid=$1 token argv0='' index=0
+  local pid=$1 token
+  local argv=()
   [ -r "/proc/$pid/cmdline" ] || return 1
-  while IFS= read -r -d '' token; do
-    if [ "$index" -eq 0 ]; then
-      argv0=$token
-      fm_gemini_path_is_gemini "$argv0" && return 0
-      case "${argv0##*/}" in
-        node|node-*|node[0-9]*|MainThread) ;;
-        *) return 1 ;;
-      esac
-    else
-      case "$token" in
-        -*) ;;
-        *) fm_gemini_path_is_gemini "$token" && return 0; return 1 ;;
-      esac
-    fi
-    index=$((index + 1))
-  done < "/proc/$pid/cmdline"
+  while IFS= read -r -d '' token; do argv+=("$token"); done < "/proc/$pid/cmdline"
+  fm_gemini_argv_is_gemini ${argv[@]+"${argv[@]}"}
+}
+
+# True when the argument vector "$@" (argv[0] first, boundaries intact) is a
+# Gemini process: the same structural rule as fm_gemini_pid_is_gemini.
+fm_gemini_argv_is_gemini() {  # <argv...>
+  local token argv0=${1:-}
+  [ "$#" -gt 0 ] || return 1
+  fm_gemini_path_is_gemini "$argv0" && return 0
+  case "${argv0##*/}" in
+    node|node-*|node[0-9]*|MainThread) ;;
+    *) return 1 ;;
+  esac
+  shift
+  for token in "$@"; do
+    case "$token" in
+      -*) ;;
+      *) fm_gemini_path_is_gemini "$token" && return 0; return 1 ;;
+    esac
+  done
   return 1
 }
 

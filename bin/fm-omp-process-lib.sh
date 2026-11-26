@@ -32,5 +32,18 @@ fm_omp_process_matches() {  # <comm> <args>
     script+=" ${words[i]}"
   done
   [ -f "$script" ] || script=${words[1]}
-  [ "${script##*/}" = omp ]
+  fm_omp_argv_matches "$comm" "${words[0]}" "$script"
+}
+
+# fm_omp_argv_matches <comm> <argv...>: the same rule over an argument vector
+# whose boundaries are intact.
+fm_omp_argv_matches() {  # <comm> <argv...>
+  local comm=${1:-}
+  shift
+  case "${comm##*/}" in
+    omp) return 0 ;;
+    bun) ;;
+    *) return 1 ;;
+  esac
+  [ "$#" -ge 2 ] && [ "${1##*/}" = bun ] && [ "${2##*/}" = omp ]
 }
