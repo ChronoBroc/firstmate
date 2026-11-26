@@ -911,8 +911,10 @@ EOF
   printf 'S1\nanchor=%s\nanchor-start=%s\n' "$holder_pid" "$holder_start" > "$home/state/.lock-session"
 
   status=0
+  mkdir -p "$TMP_ROOT/same-session-twin-no-proc"
   out=$(CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID="$SESSION_START_TEST_HARNESS_PID" \
     FM_FAKE_HARNESS_PID="$SESSION_START_TEST_HARNESS_PID" FM_FAKE_LIVE_HOLDER_PID="$holder_pid" \
+    FM_PROC_ROOT_OVERRIDE="$TMP_ROOT/same-session-twin-no-proc" \
     run_session_start "$home" "$root" "$fakebin:$BASE_PATH") || status=$?
   kill -0 "$holder_pid" 2>/dev/null || fail "the holder exited, so the refusal was not checked against a live holder"
   kill "$holder_pid" 2>/dev/null || true

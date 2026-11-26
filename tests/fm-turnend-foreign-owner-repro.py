@@ -24,6 +24,9 @@ OUT.mkdir()
 FAKE = LAB / "claude"
 FAKE.symlink_to("/bin/bash")
 PROCS = []
+HOLD = (
+    "while kill -0 " + str(os.getpid()) + ' 2>/dev/null && [ "$SECONDS" -lt 600 ]; do sleep 1; done; kill -TERM 0'
+)
 
 # The suite may itself run inside a Claude session. Its CLAUDE_CODE_SESSION_ID
 # and CLAUDE_PID are scrubbed so the foreign-owner negative control below is
@@ -148,7 +151,7 @@ try:
     root, env = make("nonowner")
     owner = start(
         env,
-        '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh" && touch "$FM_HOME/state/owner-ready" && while :; do sleep 1; done',
+        '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh" && touch "$FM_HOME/state/owner-ready" && ' + HOLD,
         "owner-idle.txt",
     )
     lock_path = root / "state/.lock"
@@ -213,7 +216,7 @@ try:
     same_env["CLAUDE_CODE_SESSION_ID"] = "synthetic-same"
     same_owner = start(
         same_env,
-        'export CLAUDE_PID=$$; "$FM_ROOT_OVERRIDE/bin/fm-lock.sh" && touch "$FM_HOME/state/owner-ready" && while :; do sleep 1; done',
+        'export CLAUDE_PID=$$; "$FM_ROOT_OVERRIDE/bin/fm-lock.sh" && touch "$FM_HOME/state/owner-ready" && ' + HOLD,
         "same-owner.txt",
     )
     same_lock = same / "state/.lock"
@@ -301,7 +304,7 @@ try:
         'printf "synthetic-same\\nanchor=%s\\nanchor-start=%s\\n" "$$" "$(fm_pid_start_time "$$")" > "$FM_HOME/state/.lock-session"; '
         '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; printf "%s\\n" "$?" > "$FM_HOME/state/accepted-rc.tmp"; '
         'mv "$FM_HOME/state/accepted-rc.tmp" "$FM_HOME/state/accepted-rc"; '
-        "while :; do sleep 1; done",
+        + HOLD,
         "same-accepted.txt",
     )
     until(
@@ -348,9 +351,9 @@ try:
         env,
         '{ printf \'%s\\n\' \'{"session_id":"replacement","stop_hook_active":true}\' | "$FM_ROOT_OVERRIDE/bin/fm-claude-stop-autoarm.sh"; printf "replacement_rc=%s\\n" "$?"; } & '
         'until [ -e "$FM_HOME/state/replacement-guard-go" ] || ! kill -0 ' + str(os.getpid()) + ' 2>/dev/null || [ "$SECONDS" -ge 120 ]; do sleep 0.1; done; '
-        '[ -e "$FM_HOME/state/replacement-guard-go" ] || exit 1; '
+        '[ -e "$FM_HOME/state/replacement-guard-go" ] || kill -TERM 0; '
         'printf \'%s\\n\' \'' + PAYLOAD + '\' | "$FM_ROOT_OVERRIDE/bin/fm-turnend-guard.sh" --claude; printf "replacement_guard_rc=%s\\n" "$?"; '
-        'while kill -0 ' + str(os.getpid()) + ' 2>/dev/null && [ "$SECONDS" -lt 240 ]; do sleep 0.5; done',
+        + HOLD,
         "replacement.txt",
     )
     until(
