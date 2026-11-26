@@ -95,6 +95,14 @@ case "${1:-}" in
           [ -z "${FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP:-}" ] || exit 1
           ;;
         *'encode launch-brief'* | *'Firstmate operational input waiting: read'*)
+          # The replacement's arrival records whether the process named in
+          # watch-pid is still running then (a zombie has exited).
+          if [ -f "$D/watch-pid" ]; then
+            case "$(ps -o stat= -p "$(cat "$D/watch-pid")" 2>/dev/null)" in
+              ''|*Z*) echo exited ;;
+              *) echo running ;;
+            esac > "$D/watch-pid-at-launch"
+          fi
           cat "$D/becomes" > "$D/command"
           [ -z "${FM_FAKE_LAUNCH_TRANSPORT_FAIL_AFTER_START:-}" ] || exit 1
           ;;

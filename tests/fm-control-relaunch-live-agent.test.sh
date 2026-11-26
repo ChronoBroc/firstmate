@@ -223,22 +223,47 @@ test_worktree_agent_probe_survives_a_denied_ps_and_a_partial_listing() {
 }
 
 test_relaunch_refuses_a_raw_launch_worker_still_in_the_worktree() {
-  local dir agent out rc raw_pid
+  local dir out rc raw_pid
   dir=$(new_case rawworker rl98)
   add_ship_task "$dir" rl98 custom-agent
-  agent=$(agent_standin_named "$dir" custom-agent) || {
-    pass "fm-spawn --relaunch beside a raw-launch worker: skipped - no stand-in survives a rename on this host"
-    return 0
-  }
+  # `custom-agent --flag` as a shebang script: its kernel argv is the
+  # interpreter followed by the script path, never the script's own name.
+  mkdir -p "$dir/rawbin"
+  printf '#!/bin/sh\nsleep 600\n' > "$dir/rawbin/custom-agent"
+  chmod +x "$dir/rawbin/custom-agent"
   printf 'zsh' > "$dir/fake/command"
-  start_dir_process "$dir/wt" "$agent" 600; raw_pid=$STARTED_PID
-  wait_dir_process_alive "$raw_pid" || fail "the raw-launch stand-in must keep running"
+  start_dir_process "$dir/wt" "$dir/rawbin/custom-agent" --flag; raw_pid=$STARTED_PID
+  wait_dir_process_alive "$raw_pid" || fail "the raw-launch script must keep running"
   out=$(run_spawn "$dir" rl98 --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "a relaunch beside the task's surviving raw-launch worker must refuse"$'\n'"$out"
-  assert_contains "$out" "pid $raw_pid (custom-agent)" "the refusal must name the raw-launch worker"
+  assert_contains "$out" "pid $raw_pid (" "the refusal must name the raw-launch script's process"
   ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no replacement agent may be launched"
   stop_dir_process "$raw_pid"
   pass "fm-spawn --relaunch: refuses and names a raw-launch worker still working in the worktree"
+}
+
+test_relaunch_on_an_incomplete_process_view_refuses_before_the_stop() {
+  local dir agent out rc agent_pid=
+  dir=$(new_case winview rl99)
+  add_ship_task "$dir" rl99 claude
+  cp -p "$dir/home/data/rl99/brief.md" "$dir/brief.orig"
+  if agent=$(agent_standin_named "$dir" claude); then
+    start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+    wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  fi
+  # Git for Windows: the replacement's launch could only refuse after a stop.
+  printf '#!/bin/sh\necho MINGW64_NT-10.0\n' > "$dir/fakebin/uname"
+  chmod +x "$dir/fakebin/uname"
+  out=$(run_control "$dir" rl99 relaunch --note "on windows"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch whose replacement could only be refused must refuse first"$'\n'"$out"
+  assert_contains "$out" "native Windows processes" "the refusal should name the incomplete process view"
+  ! grep -Fqx /exit "$dir/fake/literal" || fail "the running agent must not be stopped"
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl99/brief.md" || fail "the instructions must be left untouched"
+  if [ -n "$agent_pid" ]; then
+    assert_contains "$out" "pid $agent_pid (claude)" "the refusal should name the agent it can see"
+    stop_dir_process "$agent_pid"
+  fi
+  pass "fm-control relaunch: an incomplete process view refuses before the agent is stopped"
 }
 
 test_relaunch_refuses_a_brief_backup_it_cannot_take() {
@@ -301,6 +326,7 @@ test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
   }
   start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
   printf '%s' "$agent_pid" > "$dir/fake/pane-pid"
+  printf '%s' "$agent_pid" > "$dir/fake/watch-pid"
   wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
   # The stand-in outlives the stop by a few seconds, as a real harness can
   # while it shuts down, so the replacement is due while it still runs.
@@ -318,6 +344,8 @@ test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
   reap_dir_process "$agent_pid"
   expect_code 0 "$rc" "an agent the relaunch stopped must be waited for until it leaves the worktree"$'\n'"$out"
   assert_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "the replacement should have been launched"
+  [ "$(cat "$dir/fake/watch-pid-at-launch" 2>/dev/null)" = exited ] \
+    || fail "the replacement must arrive only after the stopped agent exited, got: $(cat "$dir/fake/watch-pid-at-launch" 2>/dev/null || echo none)"
   pass "fm-control relaunch: the agent it stopped is waited for until it exits, then replaced"
 }
 
@@ -488,6 +516,7 @@ test_worktree_agent_probe_finds_only_agents_working_there
 test_worktree_agent_probe_names_an_agent_beside_an_unreadable_process
 test_worktree_agent_probe_counts_only_what_the_task_launched
 test_worktree_agent_probe_survives_a_denied_ps_and_a_partial_listing
+test_relaunch_on_an_incomplete_process_view_refuses_before_the_stop
 test_relaunch_refuses_a_brief_backup_it_cannot_take
 test_relaunch_refuses_a_raw_launch_worker_still_in_the_worktree
 test_relaunch_refuses_an_agent_still_working_in_the_worktree

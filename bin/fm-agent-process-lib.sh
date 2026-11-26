@@ -22,8 +22,6 @@ _FM_AGENT_PROCESS_PROCINFO=$(cd "${_FM_AGENT_PROCESS_LIB_DIR:-/}" 2>/dev/null &&
 . "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-gemini-lib.sh"
 # shellcheck source=bin/fm-hermes-process-lib.sh
 . "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-hermes-process-lib.sh"
-# shellcheck source=bin/fm-omp-process-lib.sh
-. "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-omp-process-lib.sh"
 unset _FM_AGENT_PROCESS_LIB_DIR
 
 # fm_agent_process_classify_name: the single owner of the process-name
@@ -167,7 +165,9 @@ _fm_agent_process_verdict() {  # <name> <argv0> <argv...> -> agent|shell|other
 # listing still has its complete records checked. Under a Cygwin-family
 # userspace (Git for Windows) a native Windows harness lives outside the
 # process table this reads, and this probe does not enumerate Windows
-# processes, so there it can name an agent it sees but never proves absence.
+# processes, so there it can name an agent it sees but never proves absence;
+# the same holds inside a private Linux pid namespace
+# (fm_agent_process_view_incomplete).
 #
 # Prints and returns:
 #   0  one `<pid>\t<process name>` line per live agent process found; a
@@ -183,9 +183,7 @@ fm_agent_process_live_in_dir() {  # <dir> [launch-exe]
   local dir=${1:-} exe=${2:-} dir_real dir_id uid pid cwd self selves found='' undecided='' lsof_out lsof_rc p candidates=''
   exe=${exe##*/}
   [ "$(fm_agent_process_classify_name "$exe")" != shell ] || exe=
-  if fm_win_boundary_applies; then
-    undecided='native Windows processes are outside the process table this probe reads, so their absence cannot be proven'
-  fi
+  undecided=$(fm_agent_process_view_incomplete) || undecided=
   dir_real=$(cd "$dir" 2>/dev/null && pwd -P) || {
     printf 'the directory %s does not resolve\n' "${dir:-<empty>}"
     return 2
@@ -275,6 +273,7 @@ _fm_agent_process_identify() {  # <pid>
   FM_AGENT_PROCESS_KIND=
   FM_AGENT_PROCESS_NAME=
   FM_AGENT_PROCESS_ARGV0=
+  FM_AGENT_PROCESS_SCRIPT=
   if [ -r "/proc/$pid/cmdline" ]; then
     IFS= read -r name < "/proc/$pid/comm" 2>/dev/null || return 1
     while IFS= read -r -d '' word; do argv+=("$word"); done < "/proc/$pid/cmdline"
@@ -292,16 +291,61 @@ _fm_agent_process_identify() {  # <pid>
   [ -n "$name" ] && [ "${#argv[@]}" -gt 0 ] && [ -n "${argv[0]}" ] || return 1
   FM_AGENT_PROCESS_NAME=$name
   FM_AGENT_PROCESS_ARGV0=${argv[0]}
+  FM_AGENT_PROCESS_SCRIPT=$(_fm_agent_process_script_operand "${argv[@]}")
   FM_AGENT_PROCESS_KIND=$(_fm_agent_process_verdict "$name" "${argv[0]}" "${argv[@]}")
 }
 
 # _fm_agent_process_counts [launch-exe]: after _fm_agent_process_identify,
 # whether that process counts as an agent: a verified harness, or a process
-# running the task's own raw launch executable.
+# running the task's own raw launch executable - as its process name, its
+# argv[0], or the script a known interpreter runs (a shebang script's kernel
+# argv is the interpreter followed by the script path).
 _fm_agent_process_counts() {  # [launch-exe]
   [ "$FM_AGENT_PROCESS_KIND" != agent ] || return 0
   [ -n "${1:-}" ] || return 1
-  [ "${FM_AGENT_PROCESS_NAME##*/}" = "$1" ] || [ "${FM_AGENT_PROCESS_ARGV0##*/}" = "$1" ]
+  [ "${FM_AGENT_PROCESS_NAME##*/}" = "$1" ] || [ "${FM_AGENT_PROCESS_ARGV0##*/}" = "$1" ] \
+    || { [ -n "$FM_AGENT_PROCESS_SCRIPT" ] && [ "${FM_AGENT_PROCESS_SCRIPT##*/}" = "$1" ]; }
+}
+
+# _fm_agent_process_script_operand <argv...>: the script a known interpreter
+# (a shell, env, node, bun, or python) runs - its first argument that is
+# neither an option nor, for env, a variable assignment - or nothing.
+_fm_agent_process_script_operand() {  # <argv...>
+  local interp=${1:-} arg
+  case "${interp##*/}" in
+    env|node|node-*|node[0-9]*|bun|python|python[0-9]*) ;;
+    *) [ "$(fm_agent_process_classify_name "$interp")" = shell ] || return 0 ;;
+  esac
+  shift
+  for arg in "$@"; do
+    case "$arg" in
+      -*) continue ;;
+      *=*) [ "${interp##*/}" = env ] && continue ;;
+    esac
+    printf '%s' "$arg"
+    return 0
+  done
+}
+
+# fm_agent_process_view_incomplete: print why this host's process view cannot
+# prove a worktree agent-free and succeed, or fail when it can. Under a
+# Cygwin-family userspace native Windows harnesses live outside the process
+# table; inside a private Linux pid namespace (a sandboxed command whose
+# /proc/self/status NSpid has more than one level) host processes are hidden.
+# Neither is reached into: the probe can still name what it sees, never
+# absence.
+fm_agent_process_view_incomplete() {
+  local levels
+  if fm_win_boundary_applies; then
+    printf 'native Windows processes are outside the process table this probe reads, so their absence cannot be proven\n'
+    return 0
+  fi
+  levels=$(awk '/^NSpid:/ { print NF - 1; exit }' /proc/self/status 2>/dev/null) || levels=
+  if [ -n "$levels" ] && [ "$levels" -gt 1 ] 2>/dev/null; then
+    printf 'this process runs in a private pid namespace that hides host processes, so their absence cannot be proven\n'
+    return 0
+  fi
+  return 1
 }
 
 # fm_agent_process_format_live <probe-output>: fm_agent_process_live_in_dir's

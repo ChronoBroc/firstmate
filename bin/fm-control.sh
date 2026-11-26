@@ -552,7 +552,7 @@ wait_pids_gone() {  # <timeout> <pid>...
 
 require_state_verified_backend() {  # <verb>
   fm_control_backend_state_verified "$BACKEND" && return 0
-  die "task $ID runs on the $BACKEND backend, which has no recovery-grade agent-state classifier, so '$1' cannot prove the agent actually stopped; refusing rather than reporting an unproven transition as done"
+  die "task $ID runs on the $BACKEND backend, which has no recovery-grade agent-state classifier, so '$1' cannot prove the agent actually stopped; refusing rather than reporting an unproven transition as done.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
 }
 
 # refuse_blocking_prompt: the screen is a dialog a confirming Enter would
@@ -1113,7 +1113,7 @@ relaunch_rollback() {
         alive)
           relaunch_restore_brief
           journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-alive" || true
-          echo "error: relaunch of $ID failed while stopping the old agent, which is still running; $(relaunch_restore_text)" >&2
+          echo "error: relaunch of $ID failed while stopping the old agent, which is still running; $(relaunch_restore_text).$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")" >&2
           ;;
         dead)
           relaunch_rollback_endpoint_agent_free prior-record-kept-agent-dead \
@@ -1127,7 +1127,7 @@ relaunch_rollback() {
           # running task. Restore byte-exact, exactly as the alive case does.
           relaunch_restore_brief
           journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-state-$state" || true
-          echo "error: relaunch of $ID failed while stopping the old agent and its state is '$state', so it was not proven stopped; $(relaunch_restore_text) and the durable record was retained for recovery" >&2
+          echo "error: relaunch of $ID failed while stopping the old agent and its state is '$state', so it was not proven stopped; $(relaunch_restore_text) and the durable record was retained for recovery.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")" >&2
           ;;
       esac
       ;;
@@ -1392,12 +1392,15 @@ record_note() {
 }
 
 do_relaunch() {
-  local exit_result state note_line
+  local exit_result state note_line view_gap
   local -a spawn_args
 
   require_state_verified_backend relaunch
   fm_control_backend_relaunch_supported "$BACKEND" \
-    || die "task $ID runs on the $BACKEND backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch"
+    || die "task $ID runs on the $BACKEND backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
+  if view_gap=$(fm_agent_process_view_incomplete); then
+    die "relaunch of $ID refused before its agent was touched: ${view_gap}, and the replacement's launch would refuse on that after the stop.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
+  fi
   resolve_relaunch_profile
 
   # The away spend cap is decided here, while the old agent still runs: once it
