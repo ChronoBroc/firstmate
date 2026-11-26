@@ -346,9 +346,11 @@ try:
     stop(owner)
     replacement = start(
         env,
-        'printf \'%s\\n\' \'{"session_id":"replacement","stop_hook_active":true}\' | "$FM_ROOT_OVERRIDE/bin/fm-claude-stop-autoarm.sh"; printf "replacement_rc=%s\\n" "$?"; '
-        'until [ -e "$FM_HOME/state/replacement-guard-go" ]; do sleep 0.1; done; '
-        'printf \'%s\\n\' \'' + PAYLOAD + '\' | "$FM_ROOT_OVERRIDE/bin/fm-turnend-guard.sh" --claude; printf "replacement_guard_rc=%s\\n" "$?"; sleep 30',
+        '{ printf \'%s\\n\' \'{"session_id":"replacement","stop_hook_active":true}\' | "$FM_ROOT_OVERRIDE/bin/fm-claude-stop-autoarm.sh"; printf "replacement_rc=%s\\n" "$?"; } & '
+        'until [ -e "$FM_HOME/state/replacement-guard-go" ] || ! kill -0 ' + str(os.getpid()) + ' 2>/dev/null || [ "$SECONDS" -ge 120 ]; do sleep 0.1; done; '
+        '[ -e "$FM_HOME/state/replacement-guard-go" ] || exit 1; '
+        'printf \'%s\\n\' \'' + PAYLOAD + '\' | "$FM_ROOT_OVERRIDE/bin/fm-turnend-guard.sh" --claude; printf "replacement_guard_rc=%s\\n" "$?"; '
+        'while kill -0 ' + str(os.getpid()) + ' 2>/dev/null && [ "$SECONDS" -lt 240 ]; do sleep 0.5; done',
         "replacement.txt",
     )
     until(

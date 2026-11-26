@@ -253,6 +253,10 @@ case "$*" in
     [ -n "${FM_FAKE_HARNESS_PID:-}" ] || exit 1
     /bin/ps -o ppid= -p "$pid"
     ;;
+  *"lstart="*)
+    [ -n "${FM_FAKE_HARNESS_PID:-}" ] || exit 1
+    exec /bin/ps "$@"
+    ;;
 esac
 exit 1
 SH
@@ -887,7 +891,7 @@ EOF
 # digest names the live holder pid and the unverified continuity, the session is
 # read-only, and a queued wake is left byte-for-byte in place.
 test_same_session_twin_lock_refusal_read_only_path() {
-  local rec root home fakebin holder_pid out status
+  local rec root home fakebin holder_pid holder_start out status
   rec=$(new_world same-session-twin-refusal)
   IFS='|' read -r root home fakebin <<EOF
 $rec
@@ -900,7 +904,11 @@ EOF
   sleep 300 &
   holder_pid=$!
   printf '%s\n' "$holder_pid" > "$home/state/.lock"
-  printf 'S1\nanchor=%s\n' "$holder_pid" > "$home/state/.lock-session"
+  holder_start=$(LC_ALL=C TZ=UTC0 /bin/ps -p "$holder_pid" -o lstart=)
+  holder_start=${holder_start#"${holder_start%%[![:space:]]*}"}
+  holder_start=${holder_start%"${holder_start##*[![:space:]]}"}
+  [ -n "$holder_start" ] || fail "could not read the holder's start time"
+  printf 'S1\nanchor=%s\nanchor-start=%s\n' "$holder_pid" "$holder_start" > "$home/state/.lock-session"
 
   status=0
   out=$(CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID="$SESSION_START_TEST_HARNESS_PID" \
@@ -912,8 +920,8 @@ EOF
 
   expect_code 0 "$status" "fm-session-start.sh must exit 0 even on a same-session lock refusal"
   assert_contains "$out" "READ-ONLY SESSION" "read-only banner missing on a same-session lock refusal"
-  assert_contains "$out" "whether the lock holder is still running could not be verified (pid $holder_pid): the recorded model-loop anchor has not been shown to have exited, but its identity cannot be confirmed" \
-    "the digest did not name the live holder pid and the unverified continuity"
+  assert_contains "$out" "another live process holds the lock under this same session id (pid $holder_pid, session S1)" \
+    "the digest did not name the live holder pid and the shared session id"
   assert_not_contains "$out" "lock acquired" "the duplicate reported acquiring the lock"
   assert_contains "$out" "skipped (read-only session)" "wake-queue section did not report itself skipped"
   [ "$(tr -d '[:space:]' < "$home/state/.lock")" = "$holder_pid" ] || fail "the duplicate rewrote the lock to $(cat "$home/state/.lock")"

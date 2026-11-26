@@ -2500,7 +2500,7 @@ test_hook_claude_refused_caller_never_touches_owner_records() {
   for path in idle healthy daemon stale; do
     dir=$(make_refusal_path_home "$TMP_ROOT/refused-$path" "$path")
     home=$(cd "$dir" && pwd)
-    "$claude" -c 'while :; do sleep 1; done' &
+    "$claude" -c 'while kill -0 "$1" 2>/dev/null && [ "$SECONDS" -lt 600 ]; do sleep 1; done' refusal-holder "$$" &
     holder=$!
     printf '%s\n' "$holder" > "$dir/state/.lock"
     before=$(refusal_records "$dir")
@@ -2533,7 +2533,14 @@ test_hook_claude_refused_caller_never_touches_owner_records() {
   cat > "$failcat/cat" <<SH
 #!/bin/sh
 for arg in "\$@"; do
-  case "\$arg" in */state/.lock) exit 1 ;; esac
+  case "\$arg" in
+    */state/.lock)
+      if [ ! -e "\$FM_TEST_LOCK_READ_FAILED" ]; then
+        : > "\$FM_TEST_LOCK_READ_FAILED"
+        exit 1
+      fi
+      ;;
+  esac
 done
 exec $(command -v cat) "\$@"
 SH
@@ -2541,7 +2548,7 @@ SH
   for variant in nojq unreadable-lock lock-directory lock-dangling-symlink; do
     dir=$(make_refusal_path_home "$TMP_ROOT/refused-$variant" stale)
     home=$(cd "$dir" && pwd)
-    "$claude" -c 'while :; do sleep 1; done' &
+    "$claude" -c 'while kill -0 "$1" 2>/dev/null && [ "$SECONDS" -lt 600 ]; do sleep 1; done' refusal-holder "$$" &
     holder=$!
     case "$variant" in
       lock-directory) mkdir "$dir/state/.lock" ;;
@@ -2558,9 +2565,12 @@ SH
             "$nojq/bash" "$dir/bin/fm-turnend-guard.sh" --claude 2>&1) || status=$?
         ;;
       unreadable-lock)
+        # shellcheck disable=SC2016 # the fake harness expands FM_HOME inside its child shell.
         out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
-          | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID PATH="$failcat:$PATH" CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
-            bash "$dir/bin/fm-turnend-guard.sh" --claude 2>&1) || status=$?
+          | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID PATH="$failcat:$PATH" FM_TEST_LOCK_READ_FAILED="$dir/lock-read-failed" \
+            CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+            "$claude" -c 'printf "%s\n" "$$" > "$FM_HOME/state/.lock"; bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude' 2>&1) || status=$?
+        [ -e "$dir/lock-read-failed" ] || fail "unreadable-lock: the injected first lock read never happened"
         ;;
       *)
         out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \

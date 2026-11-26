@@ -255,9 +255,11 @@ fm_primary_scope_matches "$FM_ROOT" "$STATE" || exit 0
 # may ever clear.
 # Defer the mutating claim until after the unchanged AFK and need gates, so an
 # idle or away home remains byte-for-byte inert. Missing or malformed locks are
-# uncertainty rather than stale-owner evidence and remain inert.
+# uncertainty rather than stale-owner evidence and remain inert, as does a
+# holder the shared decision refuses (foreign or unknown), which is never read.
 RECOVER_SESSION_LOCK=0
 if ! fm_session_lock_owned_by_self "$STATE"; then
+  case "$FM_SESSION_LOCK_DECISION" in foreign|unknown) exit 0 ;; esac
   LOCK_PID=$(cat "$STATE/.lock" 2>/dev/null || true)
   fm_session_pid_valid "$LOCK_PID" || exit 0
   fm_session_lock_pid_blocks_reclaim "$LOCK_PID" && exit 0
