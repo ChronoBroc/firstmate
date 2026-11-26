@@ -1,0 +1,9 @@
+# lock state with original running
+== state/.lock
+95119
+== state/.lock-session
+9ee744f9-4769-4ffa-b755-5c8bf5773b07
+anchor=95119
+anchor-start=Thu Nov 26 18:13:36 2026
+  PID  PPID STARTED                      COMM
+95119 95085 Thu Nov 26 12:13:36 2026     claude

@@ -1,0 +1,13 @@
+❯ Run exactly this shell command with the Bash tool and paste its full output and exit code verbatim: bin/fm-lease.sh claim labtask; echo rc=$?; bin/fm-lease.sh check labtask; echo rc=$?
+  Ran 1 shell command
+⏺ rc=0
+  main 17230 1795717115 live
+  rc=0
+  The claim printed nothing and exited 0. The check exited 0 and printed one line: main 17230 1795717115 live.
+✻ Cogitated for 7s · done 12:18 PM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 5.5  context 6%
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent
+(lab setup: state/.lock overwritten to duplicate pid 17230 to reproduce the pre-fix displaced state; original pid 95119 still alive)

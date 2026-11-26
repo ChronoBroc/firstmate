@@ -1,0 +1,14 @@
+❯ Run exactly this shell command with the Bash tool and paste the first 8 lines of its output verbatim: bin/fm-session-start.sh 2>&1 | head -40
+  Ran 1 shell command
+⏺ Captain, here are the first 8 lines of the output, exactly as printed:
+  ================================================================================
+  SESSION START - /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.pGR5PE
+  ================================================================================
+  LOCK
+  --------------------------------------------------------------------------------
+  error: another live firstmate session holds the lock (pid 17230, session 9ee744f9-4769-4ffa-b755-5c8bf5773b07); operate read-only until resolved
+  ●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Another firstmate session already holds control, so this one is read-only. I won't start, steer or merge any work from here, and it left the notification queue alone (nothing was waiting in it).
+✻ Cogitated for 11s · done 12:21 PM
+== state/.lock after third session
+17230

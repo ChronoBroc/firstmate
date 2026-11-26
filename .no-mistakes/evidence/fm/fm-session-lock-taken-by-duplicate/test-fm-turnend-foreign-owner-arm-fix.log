@@ -1,0 +1,27 @@
+SETUP live synthetic owner= 30794 lock= 30794
+second-session acquisition rc=0 stdout='lock_rc=1\n' stderr='error: another live firstmate session holds the lock (pid 30794); operate read-only until resolved\n'
+nonowner autoarm rc=0 stdout='autoarm_rc=0\n' stderr=''
+nonowner stop 1 rc=0 stdout='{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid 30794). Allowing this turn to end safely; the owning session must restore supervision."}\n' stderr=''
+nonowner stop 2 rc=0 stdout='{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid 30794). Allowing this turn to end safely; the owning session must restore supervision."}\n' stderr=''
+nonowner stop 3 rc=0 stdout='{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid 30794). Allowing this turn to end safely; the owning session must restore supervision."}\n' stderr=''
+nonowner stop 4 rc=0 stdout='{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid 30794). Allowing this turn to end safely; the owning session must restore supervision."}\n' stderr=''
+nonowner stop 5 rc=0 stdout='{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid 30794). Allowing this turn to end safely; the owning session must restore supervision."}\n' stderr=''
+FIXED repeated non-owner Stops: all five ended safely
+fresh-beat-only counterfactual rc=0 stdout='{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid 30794). Allowing this turn to end safely; the owning session must restore supervision."}\n' stderr=''
+live-twin acquisition rc=0 stdout='lock_rc=1\n' stderr="error: another live process holds the lock under this same session id (pid 38142, session synthetic-same) and this session's continuity with that holder could not be verified; operate read-only until resolved\n"
+live-twin stop rc=0 stdout='{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid 38142). Allowing this turn to end safely; the owning session must restore supervision."}\n' stderr=''
+FIXED a live twin of the owner's session is refused and its Stop ends safely
+id-only sidecar twin acquisition rc=0 stdout='lock_rc=1\n' stderr="error: another live process holds the lock under this same session id (pid 38142, session synthetic-same) and this session's continuity with that holder could not be verified; operate read-only until resolved\n"
+id-only twin stop rc=0 stdout='{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid 38142). Allowing this turn to end safely; the owning session must restore supervision."}\n' stderr=''
+FIXED a live twin beside an id-only sidecar is refused and its Stop ends safely
+exited-anchor twin acquisition rc=0 stdout='lock_rc=1\n' stderr="error: another live process holds the lock under this same session id (pid 38142, session synthetic-same) and this session's continuity with that holder could not be verified; operate read-only until resolved\n"
+exited-anchor stop rc=0 stdout='{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid 38142). Allowing this turn to end safely; the owning session must restore supervision."}\n' stderr=''
+FIXED a same-id process beside an exited recorded anchor is refused and its Stop ends safely
+same-session acquisition rc=0 pid=44474 output='lock acquired: harness pid 44474\n'
+other-session acquisition rc=0 stdout='lock_rc=1\n' stderr='error: another live firstmate session holds the lock (pid 44474, session synthetic-same); operate read-only until resolved\n'
+other-session stop rc=0 stdout='{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid 44474). Allowing this turn to end safely; the owning session must restore supervision."}\n' stderr=''
+FIXED same-session id re-anchors the lock onto its own process; a different id is still foreign
+single owner, no autoarm firing rc=0 stdout='lock acquired: harness pid 47771\nsingle_owner_verified=1\nsingle_owner_guard_rc=2\n' stderr='●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n●  TURN WOULD END BLIND - SUPERVISION IS OFF\n●  1 task(s) in flight, but no live watcher holds this home lock (last beat: 611s ago).\n●  The Stop-owned auto-arm did not claim this home either, so recovery is NOT already under way.\n●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.\n●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
+COUNTERFACTUAL dead original owner: watcher= 50584
+replacement-owned healthy watcher 'replacement_guard_rc=0\n'
+COMPLETE

@@ -1,0 +1,49 @@
+  ================================================================================
+  IN PROGRESS - the deferred network checks have not finished yet.
+  NOT yet confirmed: GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, project clone refresh with its drift reporting, and inactive terminal-outcome
+  reconciliation.
+  Started 2s ago, bounded at 120s.
+  Only a FAILED or otherwise actionable result arrives as a `check: startup-network` wake; a clean success stays silent.
+  The durable result is readable on demand with {run-worktree}/bin/fm-startup-network.sh report; until it finishes, treat none of it
+  as confirmed.
+
+  ================================================================================
+  CONTEXT
+  ================================================================================
+
+  data/projects.md
+  --------------------------------------------------------------------------------
+  ABSENT
+
+  data/secondmates.md
+  --------------------------------------------------------------------------------
+  ABSENT
+
+  data/captain.md
+  --------------------------------------------------------------------------------
+  ABSENT
+
+  data/captain-shared.md (shared, main-authoritative, read-only in secondmate homes)
+  --------------------------------------------------------------------------------
+  ABSENT
+
+  data/learnings.md
+  --------------------------------------------------------------------------------
+  ABSENT
+
+  ================================================================================
+  NEXT STEP
+  ================================================================================
+  Follow the supervision operating instructions block above for harness 'claude'.
+  This script never starts supervision itself.
+
+  The digest above is complete for this session start. The READ-ONCE CONTRACT
+  section near the top of it governs what may still be read from disk.
+
+✻ Cooked for 39s · done 12:15 PM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ bin/fm-startup-network.sh report
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 5.5  context 6%
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent

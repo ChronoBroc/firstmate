@@ -1,0 +1,1 @@
+ok - fm-turnend-guard: a refused caller ends read-only on every path and never touches the owner's or the parent's records; the owner keeps its ordinary writes

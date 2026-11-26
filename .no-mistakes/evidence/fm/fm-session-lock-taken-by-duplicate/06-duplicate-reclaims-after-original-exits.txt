@@ -1,0 +1,21 @@
+❯ Run exactly this shell command with the Bash tool and paste the first 8 lines of its output verbatim: bin/fm-session-start.sh 2>&1 | head -40
+  Ran 1 shell command
+⏺ ================================================================================
+  SESSION START - /var/folders/3w/swtxkf_x6pd1z2yd06rgwkqm0000gn/T//fm-lab.pGR5PE
+  ================================================================================
+  LOCK
+  --------------------------------------------------------------------------------
+  lock acquired: harness pid 17230
+  Captain, this run got the lock back, this time as pid 17230. The earlier holder, pid 95119, apparently let it go, so this session now holds normal supervision again instead of being read-only.
+✻ Brewed for 12s · done 12:19 PM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 5.5  context 6%
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent
+== state/.lock
+17230
+== state/.lock-session
+9ee744f9-4769-4ffa-b755-5c8bf5773b07
+anchor=17230
+anchor-start=Thu Nov 26 18:16:34 2026
