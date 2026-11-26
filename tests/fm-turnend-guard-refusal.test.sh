@@ -88,6 +88,7 @@ test_hook_claude_refused_caller_never_touches_owner_records() {
   for path in idle healthy daemon stale; do
     dir=$(make_refusal_path_home "$TMP_ROOT/refused-$path" "$path")
     home=$(cd "$dir" && pwd)
+    # shellcheck disable=SC2016
     "$claude" -c 'while kill -0 "$1" 2>/dev/null && [ "$SECONDS" -lt 600 ]; do sleep 1; done' refusal-holder "$$" &
     holder=$!
     printf '%s\n' "$holder" > "$dir/state/.lock"
@@ -156,6 +157,7 @@ SH
   for variant in nojq unreadable-lock lock-directory lock-dangling-symlink sidecar-read-once; do
     dir=$(make_refusal_path_home "$TMP_ROOT/refused-$variant" stale)
     home=$(cd "$dir" && pwd)
+    # shellcheck disable=SC2016
     "$claude" -c 'while kill -0 "$1" 2>/dev/null && [ "$SECONDS" -lt 600 ]; do sleep 1; done' refusal-holder "$$" &
     holder=$!
     case "$variant" in
