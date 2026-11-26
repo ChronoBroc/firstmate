@@ -367,6 +367,7 @@ try:
         try:
             os.kill(int(watcher_pid), 0)
             recorded = (root / "state/.watch.lock/pid-identity").read_text().strip()
+            beat_now = beat.stat().st_mtime
         except (OSError, ValueError):
             return False
         current = subprocess.run(
@@ -375,7 +376,7 @@ try:
             text=True,
             capture_output=True,
         ).stdout.strip()
-        return bool(recorded) and current == recorded and beat.stat().st_mtime > beat_before
+        return bool(recorded) and current == recorded and beat_now > beat_before
 
     until(
         replacement_watcher_healthy,
