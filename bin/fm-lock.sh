@@ -204,7 +204,7 @@ remember_lock_session() {
 # walk lists it tagged (fm_session_lock_recorded_anchor), and a third line
 # `anchor-start=<start>` its process start time (fm_pid_start_time) when that is
 # readable (fm_session_lock_recorded_anchor_start); when it is not, a start
-# time already recorded beside this same id and anchor is kept. Called only
+# time already recorded beside this same anchor is kept, across a re-key too. Called only
 # while the claim lock is held. A sidecar that already has exactly this content
 # is left untouched, so a same-session confirmation keeps it byte-identical; one
 # rewritten under the same recorded id keeps its modification time, which marks
@@ -229,8 +229,7 @@ publish_lock_session() {
     content="$trusted"$'\n'"anchor=$anchor"
     if ! { start=$(fm_pid_start_time "$anchor" 2>/dev/null) && [ -n "$start" ]; }; then
       start=
-      if [ "$(fm_session_lock_recorded_session_id "$STATE" 2>/dev/null)" = "$trusted" ] \
-        && [ "$(fm_session_lock_recorded_anchor "$STATE" 2>/dev/null)" = "$anchor" ]; then
+      if [ "$(fm_session_lock_recorded_anchor "$STATE" 2>/dev/null)" = "$anchor" ]; then
         start=$(fm_session_lock_recorded_anchor_start "$STATE" 2>/dev/null) || start=
       fi
     fi

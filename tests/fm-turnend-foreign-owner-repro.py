@@ -187,7 +187,7 @@ try:
     for number in range(1, 6):
         result = guard(env, f"nonowner stop {number}")
         require(result.returncode == 0, f"foreign-owner Stop {number} must end safely")
-        require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" in result.stdout, "foreign-owner Stop lost its clear diagnostic")
+        require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session" in result.stdout, "foreign-owner Stop lost its clear diagnostic")
         require("cannot and should not arm or repair" in result.stdout, "diagnostic did not explain the safe ownership boundary")
     require(not (root / "state/.turnend-claude-blocks").exists(), "foreign-owner guard must not consume its block budget")
     print("FIXED repeated non-owner Stops: all five ended safely", flush=True)
@@ -253,7 +253,7 @@ try:
     )
     twin_stop = guard(same_env, "live-twin stop", prefix="export CLAUDE_PID=$$; ")
     require(twin_stop.returncode == 0, "a live twin's Stop must end safely")
-    require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" in twin_stop.stdout, "a live twin's Stop lost the foreign-owner diagnostic")
+    require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session" in twin_stop.stdout, "a live twin's Stop lost the foreign-owner diagnostic")
     print("FIXED a live twin of the owner's session is refused and its Stop ends safely", flush=True)
     (same / "state/.lock-session").write_text("synthetic-same\n")
     id_only = run(
@@ -269,7 +269,7 @@ try:
     require(session_lock_text(same_lock) == same_lock_owner, "a twin moved the lock line beside an id-only sidecar")
     id_only_stop = guard(same_env, "id-only twin stop", prefix="export CLAUDE_PID=$$; ")
     require(id_only_stop.returncode == 0, "an id-only twin's Stop must end safely")
-    require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" in id_only_stop.stdout, "an id-only twin's Stop lost the foreign-owner diagnostic")
+    require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session" in id_only_stop.stdout, "an id-only twin's Stop lost the foreign-owner diagnostic")
     print("FIXED a live twin beside an id-only sidecar is refused and its Stop ends safely", flush=True)
     short_lived = start(same_env, "sleep 60", "short-lived-anchor.txt")
     exited = str(short_lived.pid)
@@ -295,7 +295,7 @@ try:
     require((same / "state/.lock-session").read_text() == exited_record, "a refused same-id process changed the exited-anchor record")
     exited_stop = guard(same_env, "exited-anchor stop", prefix="export CLAUDE_PID=$$; ")
     require(exited_stop.returncode == 0, "an exited-anchor twin's Stop must end safely")
-    require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" in exited_stop.stdout, "an exited-anchor twin's Stop lost the foreign-owner diagnostic")
+    require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session" in exited_stop.stdout, "an exited-anchor twin's Stop lost the foreign-owner diagnostic")
     print("FIXED a same-id process beside an exited recorded anchor is refused and its Stop ends safely", flush=True)
     accepted = start(
         same_env,
@@ -328,7 +328,7 @@ try:
     require(f"pid {accepted_pid}, session synthetic-same" in refused.stderr, "the refusal did not name the re-anchored pid and the recorded session id")
     other_stop = guard(same_env | {"CLAUDE_CODE_SESSION_ID": "synthetic-other"}, "other-session stop", prefix="export CLAUDE_PID=$$; ")
     require(other_stop.returncode == 0, "a different-session Stop must still end safely")
-    require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" in other_stop.stdout, "a different-session Stop lost the foreign-owner diagnostic")
+    require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session" in other_stop.stdout, "a different-session Stop lost the foreign-owner diagnostic")
     require(session_lock_text(same_lock) == accepted_pid, "a Stop moved the re-anchored lock line")
     print("FIXED same-session id re-anchors the lock onto its own process; a different id is still foreign", flush=True)
     stop(same_owner)

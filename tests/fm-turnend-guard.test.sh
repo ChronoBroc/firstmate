@@ -2506,15 +2506,16 @@ test_hook_claude_refused_caller_never_touches_owner_records() {
     before=$(refusal_records "$dir")
     cp "$dir/parent-state/sm.busy-state" "$dir/parent-busy-before"
     status=0
+    # shellcheck disable=SC2016 # the fake harness expands FM_HOME inside its child shell.
     out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
       | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
-        bash "$dir/bin/fm-turnend-guard.sh" --claude 2>&1) || status=$?
+        "$claude" -c 'bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude' 2>&1) || status=$?
     kill "$holder" 2>/dev/null || true
     wait "$holder" 2>/dev/null || true
     stop_refusal_helper "$dir"
     expect_code 0 "$status" "$path: a refused caller's Stop did not end read-only: $out"
-    assert_contains "$out" "OWNED BY ANOTHER LIVE SESSION" "$path: a refused caller's Stop lost the read-only diagnostic"
-    assert_contains "$out" "lock owner pid $holder" "$path: the read-only diagnostic does not name the holder"
+    assert_contains "$out" "OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid $holder)" \
+      "$path: a refused caller's Stop did not report the verified live holder $holder"
     [ "$(refusal_records "$dir")" = "$before" ] \
       || fail "$path: a refused caller changed the owner's records: $(refusal_records "$dir")"
     cmp -s "$dir/parent-busy-before" "$dir/parent-state/sm.busy-state" \

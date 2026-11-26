@@ -71,6 +71,9 @@ while [ ! -e "$FM_HOME/state/stop-$role" ] && kill -0 "$FM_TEST_SUITE_PID" 2>/de
     elif [ "$(cat "$req")" = nostart ]; then
       PATH="$FM_HOME/nostart-bin:$PATH" FM_PROC_ROOT_OVERRIDE="$FM_HOME/no-proc" \
         "$FM_BIN/fm-lock.sh" > "$out/lock.out" 2>&1
+    elif [ "$(cat "$req")" = nostart-rekey ]; then
+      CLAUDE_CODE_SESSION_ID=S2 PATH="$FM_HOME/nostart-bin:$PATH" FM_PROC_ROOT_OVERRIDE="$FM_HOME/no-proc" \
+        "$FM_BIN/fm-lock.sh" > "$out/lock.out" 2>&1
     else
       "$FM_BIN/fm-lock.sh" > "$out/lock.out" 2>&1
     fi
@@ -264,12 +267,21 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   fi
 
   # A confirmation whose own start time cannot be read keeps the start time
-  # already recorded beside this same id and anchor.
+  # already recorded beside this same anchor.
   cp "$dir/state/.lock-session" "$dir/sidecar-before-nostart"
   fire_twin "$dir" orig 4 nostart
   expect_code 0 "$(twin_value "$dir" orig 4 lock.rc)" "the original lost its lock when its start time was unreadable: $(cat "$dir/state/orig-4/lock.out")"
   cmp -s "$dir/sidecar-before-nostart" "$dir/state/.lock-session" \
     || fail "an unreadable start time erased the recorded anchor proof: $(cat "$dir/state/.lock-session")"
+
+  # A /clear re-key of that same process while its start time is unreadable
+  # records the new id and keeps the anchor and its recorded start time.
+  fire_twin "$dir" orig 5 nostart-rekey
+  expect_code 0 "$(twin_value "$dir" orig 5 lock.rc)" "the original lost its lock on a re-key with an unreadable start time: $(cat "$dir/state/orig-5/lock.out")"
+  [ "$(sed -n 1p "$dir/state/.lock-session")" = S2 ] || fail "the re-key did not record the new id: $(cat "$dir/state/.lock-session")"
+  [ "$(sed -n '2,3p' "$dir/state/.lock-session")" = "$(sed -n '2,3p' "$dir/sidecar-before-nostart")" ] \
+    || fail "a re-key with an unreadable start time erased the recorded anchor proof: $(cat "$dir/state/.lock-session")"
+  grep -q '^anchor-start=.' "$dir/state/.lock-session" || fail "the re-keyed sidecar records no anchor start time: $(cat "$dir/state/.lock-session")"
 
   # A genuinely dead holder is still reclaimed by a later process of the same
   # session.
@@ -419,7 +431,7 @@ test_e2e_legacy_shared_front_end_refuses_the_first_claimant() {
   for role in leg-dup leg-orig; do
     fire_twin "$dir" "$role" 2 guard
     expect_code 0 "$(twin_value "$dir" "$role" 2 guard.rc)" "$role's Stop was blocked instead of ending read-only: $(cat "$dir/state/$role-2/guard.out")"
-    grep -q "OWNED BY ANOTHER LIVE SESSION.*lock owner pid $front" "$dir/state/$role-2/guard.out" \
+    grep -q "OWNED BY ANOTHER LIVE SESSION OR ITS OWNER CANNOT BE VERIFIED: .*lock owner pid $front; the lock was recorded before model-loop anchors existed" "$dir/state/$role-2/guard.out" \
       || fail "$role's Stop did not take the read-only exit naming front-end $front: $(cat "$dir/state/$role-2/guard.out")"
   done
   [ ! -e "$dir/state/.turnend-claude-blocks" ] || fail "a refused legacy loop's Stop wrote the continuation budget: $(cat "$dir/state/.turnend-claude-blocks")"
