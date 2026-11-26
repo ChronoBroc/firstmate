@@ -71,28 +71,31 @@ CLAUDE_CODE_SESSION_ID=S1 "$FM_HOME/bin/fm-lock.sh" > "$FM_HOME/state/frontend-l
 printf '%s\n' "$?" > "$FM_HOME/state/frontend-lock.rc"
 "$FM_FIXTURE_CLAUDE" "$FM_HOME/daemon.sh" &
 disown
-while [ ! -e "$FM_HOME/state/stop-frontend" ]; do sleep 0.05; done
+while [ ! -e "$FM_HOME/state/stop-frontend" ] && kill -0 "$FM_TEST_SUITE_PID" 2>/dev/null \
+  && [ "$SECONDS" -lt "$FM_TEST_STUB_MAX_BLOCK_SECONDS" ]; do sleep 0.05; done
 exit 0
 SH
   cat > "$dir/daemon.sh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$$" > "$FM_HOME/state/daemon-pid"
 exec -a 'claude bg-pty-host' "$FM_FIXTURE_CLAUDE" "$FM_HOME/ptyhost.sh" &
-while :; do sleep 0.1; done
+while kill -0 "$FM_TEST_SUITE_PID" 2>/dev/null && [ "$SECONDS" -lt "$FM_TEST_STUB_MAX_BLOCK_SECONDS" ]; do sleep 0.1; done
 exit 0
 SH
   cat > "$dir/ptyhost.sh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$$" > "$FM_HOME/state/ptyhost-pid"
 exec -a 'claude bg-spare' "$FM_FIXTURE_CLAUDE" "$FM_HOME/spare.sh" &
-while [ ! -e "$FM_HOME/state/stop-spare" ]; do sleep 0.1; done
+while [ ! -e "$FM_HOME/state/stop-spare" ] && kill -0 "$FM_TEST_SUITE_PID" 2>/dev/null \
+  && [ "$SECONDS" -lt "$FM_TEST_STUB_MAX_BLOCK_SECONDS" ]; do sleep 0.1; done
 exit 0
 SH
   cat > "$dir/spare.sh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$$" > "$FM_HOME/state/spare-pid"
 n=1
-while [ ! -e "$FM_HOME/state/stop-spare" ]; do
+while [ ! -e "$FM_HOME/state/stop-spare" ] && kill -0 "$FM_TEST_SUITE_PID" 2>/dev/null \
+  && [ "$SECONDS" -lt "$FM_TEST_STUB_MAX_BLOCK_SECONDS" ]; do
   req="$FM_HOME/state/fire-$n"
   if [ -f "$req" ]; then
     out="$FM_HOME/state/phase-$n"
@@ -489,6 +492,11 @@ test_failed_lock_write_restores_previous_sidecar() {
   touch -t 202001010000 "$dir/state/.lock-session" "$dir/state/sidecar-time-ref"
   cp -p "$dir/state/.lock-session" "$dir/state/sidecar-before-reclaim"
   chmod a-w "$dir/state/.lock" || fail "could not make the stale lock read-only"
+  if [ -w "$dir/state/.lock" ]; then
+    chmod u+w "$dir/state/.lock" 2>/dev/null || true
+    printf 'skip: this runner can still write a read-only lock, so a lock write failure cannot be produced\n'
+    return 0
+  fi
   env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
     FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
     "$NAMED_CLAUDE" -c '
@@ -520,6 +528,11 @@ test_failed_lock_write_removes_new_sidecar_when_none_existed() {
   mkdir -p "$dir/state"
   printf '1\n' > "$dir/state/.lock"
   chmod a-w "$dir/state/.lock" || fail "could not make the stale lock read-only"
+  if [ -w "$dir/state/.lock" ]; then
+    chmod u+w "$dir/state/.lock" 2>/dev/null || true
+    printf 'skip: this runner can still write a read-only lock, so a lock write failure cannot be produced\n'
+    return 0
+  fi
   env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
     FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
     "$NAMED_CLAUDE" -c '
