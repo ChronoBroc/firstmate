@@ -911,7 +911,7 @@ EOF
 
   expect_code 0 "$status" "fm-session-start.sh must exit 0 even on a same-session lock refusal"
   assert_contains "$out" "READ-ONLY SESSION" "read-only banner missing on a same-session lock refusal"
-  assert_contains "$out" "another live process holds the lock under this same session id (pid $holder_pid, session S1) and this session's continuity with that holder could not be verified" \
+  assert_contains "$out" "whether the lock holder is still running could not be verified (pid $holder_pid): the recorded model-loop anchor still exists but its identity cannot be confirmed" \
     "the digest did not name the live holder pid and the unverified continuity"
   assert_not_contains "$out" "lock acquired" "the duplicate reported acquiring the lock"
   assert_contains "$out" "skipped (read-only session)" "wake-queue section did not report itself skipped"

@@ -50,9 +50,10 @@ fm_session_lock_recorded_anchor_start() {  # <state>
 #   none        no sidecar exists, or it records no anchor.
 #   unreadable  the sidecar exists but cannot be read, so whether it records an
 #               anchor is not known.
-#   gone        positive evidence the recorded process ended: no such pid, or
-#               a readable start time of the same kind that differs from the
-#               recorded one.
+#   gone        positive evidence the recorded process ended: no such pid, a
+#               readable start time of the same kind that differs from the
+#               recorded one, or a tagged Windows pid whose readable executable
+#               is not a verified harness.
 #   alive       the pid's readable start time equals the recorded one.
 #   unknown     the pid still exists but its identity cannot be confirmed: no
 #               start time is recorded, the current one cannot be read, or the
@@ -78,6 +79,15 @@ fm_session_lock_anchor_state() {  # <state>
     FM_SESSION_LOCK_ANCHOR_STATE=gone
     return 0
   fi
+  case "$anchor" in
+    "$FM_WIN_PID_PREFIX"*)
+      if [ "$FM_SESSION_LOCK_PID_VERDICT" = readable ] \
+        && ! fm_harness_process_matches "$FM_PROC_COMM" "$FM_PROC_ARGS"; then
+        FM_SESSION_LOCK_ANCHOR_STATE=gone
+        return 0
+      fi
+      ;;
+  esac
   FM_SESSION_LOCK_ANCHOR_STATE=unknown
   recorded=$(fm_session_lock_recorded_anchor_start "$1") || return 0
   if ! command -v fm_pid_start_time >/dev/null 2>&1; then
@@ -135,10 +145,14 @@ fm_session_lock_anchor_pid() {
 #   1. The sidecar's recorded model-loop anchor
 #      (fm_session_lock_anchor_state) is outside this ancestry and alive, or
 #      unknown because its pid still exists but its identity cannot be
-#      confirmed: a holder may be live, so the verdict is foreign naming that
-#      anchor, even when line 1 is a shared front-end inside this ancestry.
-#      Only gone - no such pid, or a different readable start time - lets the
-#      decision continue past an anchor outside this ancestry.
+#      confirmed: a holder may be live, so the verdict names that anchor, even
+#      when line 1 is a shared front-end inside this ancestry. It is foreign
+#      when the anchor is alive and this ancestry was read to its end
+#      (fm_harness_ancestry_complete); otherwise unknown, with reason
+#      ancestry-incomplete when the walk stopped on a failed read, else
+#      anchor-unverified. Only gone - no such pid, a different readable start
+#      time, or a tagged pid naming a non-harness - lets the decision continue
+#      past an anchor outside this ancestry.
 #   2. The sidecar records a session id but no anchor, as one written before
 #      anchors existed does, this process proves a trusted Claude session whose
 #      CLAUDE_PID is not line 1, and line 1 is a member of this ancestry: line
@@ -209,8 +223,16 @@ fm_session_lock_decide() {  # <state>
   case "$FM_SESSION_LOCK_ANCHOR_STATE" in
     alive|unknown)
       if ! fm_harness_pid_listed "$FM_SESSION_LOCK_ANCHOR_PID" "$pids"; then
-        FM_SESSION_LOCK_DECISION=foreign
         FM_SESSION_LOCK_FOREIGN_OWNER_PID=$FM_SESSION_LOCK_ANCHOR_PID
+        if ! fm_harness_ancestry_complete "$pids"; then
+          FM_SESSION_LOCK_DECISION=unknown
+          FM_SESSION_LOCK_DECISION_REASON=ancestry-incomplete
+        elif [ "$FM_SESSION_LOCK_ANCHOR_STATE" = unknown ]; then
+          FM_SESSION_LOCK_DECISION=unknown
+          FM_SESSION_LOCK_DECISION_REASON='anchor-unverified'
+        else
+          FM_SESSION_LOCK_DECISION=foreign
+        fi
         return 0
       fi
       ;;
@@ -271,6 +293,8 @@ fm_session_lock_decision_reason_text() {
     legacy-front) printf '%s\n' "the lock was recorded before model-loop anchors existed under a front-end this session shares, so the original model loop cannot be told from a duplicate" ;;
     sidecar-unreadable) printf '%s\n' "the session sidecar beside the lock cannot be read" ;;
     ancestry-unresolved) printf '%s\n' "this session's harness ancestry cannot be read" ;;
+    ancestry-incomplete) printf '%s\n' "this session's harness ancestry could not be read to its end, so the recorded model-loop anchor may be this session's own" ;;
+    anchor-unverified) printf '%s\n' "the recorded model-loop anchor still exists but its identity cannot be confirmed by its recorded start time" ;;
     *) printf '%s\n' "whether the holder is still running cannot be verified" ;;
   esac
 }

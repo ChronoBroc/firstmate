@@ -2441,13 +2441,13 @@ refusal_records() {  # <dir>
 }
 
 seed_owner_records() {  # <dir>
-  printf '2\n' > "$1/state/.turnend-claude-blocks"
+  printf 'session=sess-owner\ncount=1\nepoch=\n' > "$1/state/.turnend-claude-blocks"
   printf 'notified\n' > "$1/state/.claude-autoarm-failure-notified"
   printf 'alarmed\n' > "$1/state/.claude-autoarm-failure-alarmed"
 }
 
 make_refusal_path_home() {  # <dir-path> <idle|healthy|daemon|stale> -> prints dir
-  local dir=$1 path=$2 pid
+  local dir=$1 path=$2 pid gen
   dir=$(make_primary_dir "$dir")
   case "$path" in
     idle) ;;
@@ -2474,7 +2474,15 @@ make_refusal_path_home() {  # <dir-path> <idle|healthy|daemon|stale> -> prints d
       ;;
   esac
   seed_owner_records "$dir"
+  printf 'sm-test-1\n' > "$dir/.fm-secondmate-home"
+  mkdir -p "$dir/parent-state"
+  gen=$("$ROOT/bin/fm-busy-event.sh" arm "$dir/parent-state" sm) || return 1
+  printf 'writer=%s\nstate=%s\nid=sm\ngen=%s\n' "$ROOT/bin/fm-busy-event.sh" "$dir/parent-state" "$gen" > "$dir/.fm-busy-stop"
   printf '%s\n' "$dir"
+}
+
+parent_busy_verdict() {  # <dir>
+  sed -n '1s/^.* \(state=[a-z]* source=[a-z-]* event=[a-z-]*\) .*$/\1/p' "$1/parent-state/sm.busy-state"
 }
 
 stop_refusal_helper() {  # <dir>
@@ -2496,6 +2504,7 @@ test_hook_claude_refused_caller_never_touches_owner_records() {
     holder=$!
     printf '%s\n' "$holder" > "$dir/state/.lock"
     before=$(refusal_records "$dir")
+    cp "$dir/parent-state/sm.busy-state" "$dir/parent-busy-before"
     status=0
     out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
       | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
@@ -2508,6 +2517,8 @@ test_hook_claude_refused_caller_never_touches_owner_records() {
     assert_contains "$out" "lock owner pid $holder" "$path: the read-only diagnostic does not name the holder"
     [ "$(refusal_records "$dir")" = "$before" ] \
       || fail "$path: a refused caller changed the owner's records: $(refusal_records "$dir")"
+    cmp -s "$dir/parent-busy-before" "$dir/parent-state/sm.busy-state" \
+      || fail "$path: a refused caller changed the parent's busy record: $(cat "$dir/parent-state/sm.busy-state")"
   done
 
   for path in idle healthy daemon stale; do
@@ -2523,17 +2534,29 @@ test_hook_claude_refused_caller_never_touches_owner_records() {
     case "$path" in
       idle)
         expect_code 0 "$status" "idle: the owner's idle Stop did not end silently: $out"
-        [ "$(refusal_records "$dir")" = "$(printf '.turnend-claude-blocks=2\n.claude-autoarm-failure-notified=notified\n.claude-autoarm-failure-alarmed=alarmed')" ] \
+        [ "$(refusal_records "$dir")" = "$(printf '.turnend-claude-blocks=session=sess-owner\ncount=1\nepoch=\n.claude-autoarm-failure-notified=notified\n.claude-autoarm-failure-alarmed=alarmed')" ] \
           || fail "idle: the owner's idle Stop changed records it keeps while a failure notice is open: $(refusal_records "$dir")"
+        [ "$(parent_busy_verdict "$dir")" = 'state=idle source=claude-hook event=stop' ] \
+          || fail "idle: the owner's allowed Stop did not record idle for the parent: $(cat "$dir/parent-state/sm.busy-state")"
         ;;
       healthy|daemon)
         expect_code 0 "$status" "$path: the owner's supervised Stop did not end: $out"
         [ "$(refusal_records "$dir")" = "$(printf '.turnend-claude-blocks=absent\n.claude-autoarm-failure-notified=absent\n.claude-autoarm-failure-alarmed=absent')" ] \
           || fail "$path: the owner's supervised Stop did not reset its failure episode: $(refusal_records "$dir")"
+        [ "$(parent_busy_verdict "$dir")" = 'state=idle source=claude-hook event=stop' ] \
+          || fail "$path: the owner's allowed Stop did not record idle for the parent: $(cat "$dir/parent-state/sm.busy-state")"
+        ;;
+      stale)
+        expect_code 2 "$status" "stale: the owner's blind Stop was not blocked: $out"
+        assert_contains "$out" "TURN WOULD END BLIND" "stale: the owner's blocked Stop lost its repair diagnostic"
+        [ "$(refusal_records "$dir")" = "$(printf '.turnend-claude-blocks=session=sess-owner\ncount=2\nepoch=\n.claude-autoarm-failure-notified=notified\n.claude-autoarm-failure-alarmed=alarmed')" ] \
+          || fail "stale: the owner's blocked Stop did not charge one continuation and keep its failure markers: $(refusal_records "$dir")"
+        [ "$(parent_busy_verdict "$dir")" = 'state=busy source=claude-hook event=stop-blocked' ] \
+          || fail "stale: the owner's blocked Stop did not record busy for the parent: $(cat "$dir/parent-state/sm.busy-state")"
         ;;
     esac
   done
-  pass "fm-turnend-guard: a refused caller ends read-only on every path and never touches the owner's records; the owner keeps its ordinary writes"
+  pass "fm-turnend-guard: a refused caller ends read-only on every path and never touches the owner's or the parent's records; the owner keeps its ordinary writes"
 }
 
 # --- AWAY MODE: the daemon owns supervision ----------------------------------

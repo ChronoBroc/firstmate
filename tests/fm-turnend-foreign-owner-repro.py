@@ -346,17 +346,27 @@ try:
     stop(owner)
     replacement = start(
         env,
-        'printf \'%s\\n\' \'{"session_id":"replacement","stop_hook_active":true}\' | "$FM_ROOT_OVERRIDE/bin/fm-claude-stop-autoarm.sh"; printf "replacement_rc=%s\\n" "$?"; sleep 1',
+        'printf \'%s\\n\' \'{"session_id":"replacement","stop_hook_active":true}\' | "$FM_ROOT_OVERRIDE/bin/fm-claude-stop-autoarm.sh"; printf "replacement_rc=%s\\n" "$?"; '
+        'until [ -e "$FM_HOME/state/replacement-guard-go" ]; do sleep 0.1; done; '
+        'printf \'%s\\n\' \'' + PAYLOAD + '\' | "$FM_ROOT_OVERRIDE/bin/fm-turnend-guard.sh" --claude; printf "replacement_guard_rc=%s\\n" "$?"; sleep 30',
         "replacement.txt",
     )
     until(
         lambda: (root / "state/.watch.lock/pid").is_file(),
-        message="replacement owner did not publish state/.watch.lock/pid",
+        message=lambda: "replacement owner did not publish state/.watch.lock/pid: " + (OUT / "replacement.txt").read_text(),
     )
     watcher_pid = (root / "state/.watch.lock/pid").read_text().strip()
     print("COUNTERFACTUAL dead original owner: watcher=", watcher_pid, flush=True)
-    healthy = guard(env, "replacement-owned healthy watcher")
-    require(healthy.returncode == 0, "a replacement owning session must still recover supervision")
+    (root / "state/replacement-guard-go").touch()
+    replacement_out = OUT / "replacement.txt"
+    until(
+        lambda: "replacement_guard_rc=" in replacement_out.read_text(),
+        message=lambda: "replacement owner's guard did not finish: " + replacement_out.read_text(),
+    )
+    healthy = replacement_out.read_text()
+    print("replacement-owned healthy watcher", repr(healthy), flush=True)
+    require("replacement_guard_rc=0" in healthy, "a replacement owning session must still recover supervision")
+    require("OWNED BY ANOTHER LIVE SESSION" not in healthy, "the replacement owner took the read-only exit")
     stop(replacement)
 
     print("COMPLETE", flush=True)

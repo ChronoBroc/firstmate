@@ -339,8 +339,11 @@ test_e2e_sibling_model_loops_under_a_shared_front_end() {
   # no evidence it ended, so the duplicate is still refused naming it.
   fire_twin "$dir" sib-dup 2 nostart
   expect_code 1 "$(twin_value "$dir" sib-dup 2 lock.rc)" "the duplicate loop took the lock while the original's start time was unreadable: $(cat "$dir/state/sib-dup-2/lock.out")"
-  grep -qF "another live process holds the lock under this same session id (pid $orig, session S1) and this session's continuity with that holder could not be verified" "$dir/state/sib-dup-2/lock.out" \
-    || fail "the unverified refusal does not name the original loop $orig: $(cat "$dir/state/sib-dup-2/lock.out")"
+  grep -qF "whether the lock holder is still running could not be verified (pid $orig): the recorded model-loop anchor still exists but its identity cannot be confirmed by its recorded start time" "$dir/state/sib-dup-2/lock.out" \
+    || fail "the unverified refusal does not name the original loop $orig with its uncertainty: $(cat "$dir/state/sib-dup-2/lock.out")"
+  if grep -qF "another live" "$dir/state/sib-dup-2/lock.out"; then
+    fail "the unverified refusal claimed a definite live owner: $(cat "$dir/state/sib-dup-2/lock.out")"
+  fi
   cmp -s "$dir/lock-before-dup" "$dir/state/.lock" || fail "the unverified duplicate changed lock line 1"
   cmp -s "$dir/sidecar-before-dup" "$dir/state/.lock-session" \
     || fail "the unverified duplicate changed the sidecar: $(cat "$dir/state/.lock-session")"
@@ -392,8 +395,11 @@ test_e2e_legacy_shared_front_end_refuses_the_first_claimant() {
   local role
   for role in leg-dup leg-orig; do
     expect_code 1 "$(twin_value "$dir" "$role" 1 lock.rc)" "$role took a legacy lock under the shared front-end: $(cat "$dir/state/$role-1/lock.out")"
-    grep -qF "another live process holds the lock under this same session id (pid $front, session S1) and this session's continuity with that holder could not be verified" "$dir/state/$role-1/lock.out" \
+    grep -qF "whether the lock holder is still running could not be verified (pid $front): the lock was recorded before model-loop anchors existed" "$dir/state/$role-1/lock.out" \
       || fail "$role's refusal is not the unverified diagnostic naming front-end $front: $(cat "$dir/state/$role-1/lock.out")"
+    if grep -qF "another live" "$dir/state/$role-1/lock.out"; then
+      fail "$role's refusal claimed a definite live owner: $(cat "$dir/state/$role-1/lock.out")"
+    fi
     grep -qF "clears when front-end pid $front is stopped" "$dir/state/$role-1/lock.out" \
       || fail "$role's refusal does not state how the one-time upgrade state clears: $(cat "$dir/state/$role-1/lock.out")"
     expect_code 1 "$(twin_value "$dir" "$role" 1 owned.rc)" "$role reads an ambiguous legacy lock as its own"

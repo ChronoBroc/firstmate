@@ -332,14 +332,14 @@ refuse_live_owner() {  # <recorded-pid>
       echo "error: whether the lock holder is still running could not be verified (lock pid $1): the session sidecar beside the lock cannot be read; operate read-only until resolved" >&2
       exit 1
       ;;
-    unknown:ancestry-unresolved)
-      echo "error: whether the lock holder is still running could not be verified (pid $1): this session's harness ancestry cannot be read; operate read-only until resolved" >&2
+    unknown:*)
+      if [ "$FM_SESSION_LOCK_DECISION_REASON" = legacy-front ]; then
+        echo "note: the lock was recorded before model-loop anchors existed, by a session under the front-end pid $1 that this session shares, so the original model loop cannot be told from a duplicate; this arises once for a session started before this change, and clears when front-end pid $1 is stopped, after which session start reclaims the lock" >&2
+      fi
+      echo "error: whether the lock holder is still running could not be verified (pid $1): $(fm_session_lock_decision_reason_text); operate read-only until resolved" >&2
       exit 1
       ;;
   esac
-  if [ "${FM_SESSION_LOCK_DECISION_REASON:-}" = legacy-front ]; then
-    echo "note: the lock was recorded before model-loop anchors existed, by a session under the front-end pid $1 that this session shares, so the original model loop cannot be told from a duplicate; this arises once for a session started before this change, and clears when front-end pid $1 is stopped, after which session start reclaims the lock" >&2
-  fi
   if recorded=$(fm_session_lock_recorded_session_id "$STATE") \
     && trusted=$(fm_session_lock_trusted_session_id) && [ "$trusted" = "$recorded" ]; then
     echo "error: another live process holds the lock under this same session id (pid $1, session $recorded) and this session's continuity with that holder could not be verified; operate read-only until resolved" >&2

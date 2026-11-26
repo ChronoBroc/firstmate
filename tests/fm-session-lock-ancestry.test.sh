@@ -701,7 +701,7 @@ test_windows_tagged_holder_is_a_live_foreign_owner() {
 }
 
 test_windows_tagged_lock_acquisition_uses_the_shared_owner_verdict() {
-  local dir fakebin home current_row live_table dead_table reused_table out status record
+  local dir fakebin home current_row live_table dead_table reused_table out status record got
   dir="$TMP_ROOT/win-lock-acquire"
   fakebin=$(cygwin_fakebin "$dir")
   home="$dir/home"
@@ -767,6 +767,18 @@ $current_row"
   if out=$(attempt_lock 7300 S2 "$reused_table" 0 '' 2>&1); then status=0; else status=$?; fi
   [ "$status" -eq 0 ] || fail "fm-lock.sh refused a reused tagged pid naming a non-harness: $out"
   [ "$(cat "$home/state/.lock")" = 'win:7300' ] || fail "a reused non-harness pid was not reclaimed"
+
+  printf 'win:7204\n' > "$home/state/.lock"
+  printf 'S1\nanchor=win:7204\n' > "$home/state/.lock-session"
+  if out=$(attempt_lock 7300 S2 "$live_table" 0 '' 2>&1); then status=0; else status=$?; fi
+  [ "$status" -eq 1 ] || fail "fm-lock.sh acquired over a recorded tagged anchor that still names a harness: $out"
+  [ "$(cat "$home/state/.lock")" = 'win:7204' ] || fail "a live tagged anchor's lock was replaced"
+  got=$(FM_TEST_WIN_TABLE="$reused_table" lib_eval "$fakebin" \
+    "fm_session_lock_inspect '$home/state'; printf '%s %s' \"\$FM_LOCK_INSPECT_STATE\" \"\$FM_LOCK_INSPECT_DETAIL\"")
+  [ "$got" = 'unknown ' ] || fail "a recorded tagged anchor reused by a non-harness was inspected as '$got'"
+  if out=$(attempt_lock 7300 S2 "$reused_table" 0 '' 2>&1); then status=0; else status=$?; fi
+  [ "$status" -eq 0 ] || fail "fm-lock.sh refused a recorded tagged anchor whose pid now names a non-harness: $out"
+  [ "$(cat "$home/state/.lock")" = 'win:7300' ] || fail "a recorded tagged anchor reused by a non-harness was not reclaimed"
 
   for record in '' '   ' not-a-pid 0 00 000 0000 win: win:7abc; do
     printf '%s\n' "$record" > "$home/state/.lock"

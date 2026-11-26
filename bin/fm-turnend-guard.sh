@@ -216,7 +216,8 @@ fi
 # whether the holder is still running cannot be verified. Such a session is
 # read-only and cannot arm or repair supervision without stealing ownership,
 # so blocking its Stop would create an impossible loop, and it must not touch
-# the owner's continuation budget, failure records, or watcher state. Report
+# the owner's continuation budget, failure records, watcher state, or the
+# parent's busy-state record. Report
 # the reason and let this turn end before any of those are read or written;
 # the owning session remains responsible for restoring the watcher.
 if [ "$CLAUDE_MODE" -eq 1 ] && fm_session_lock_foreign_owner_live "$STATE"; then
@@ -227,6 +228,7 @@ if [ "$CLAUDE_MODE" -eq 1 ] && fm_session_lock_foreign_owner_live "$STATE"; then
     printf '{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION OR ITS OWNER CANNOT BE VERIFIED: this read-only session cannot and should not arm or repair the watcher (lock owner pid %s; %s). Allowing this turn to end safely; the owning session must restore supervision."}\n' \
       "$FM_SESSION_LOCK_FOREIGN_OWNER_PID" "$(fm_session_lock_decision_reason_text)"
   fi
+  trap - EXIT
   exit 0
 fi
 
