@@ -20,13 +20,11 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/session-lock-helpers.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-session-lock-twin)
-fm_git_identity fmtest fmtest@example.invalid
 
 FAKEBIN=$(fm_fakebin "$TMP_ROOT/harness-bin")
 ln -s /bin/bash "$FAKEBIN/claude"
 NAMED_CLAUDE="$FAKEBIN/claude"
 
-trap fm_test_cleanup EXIT
 
 wait_for_file() {  # <path> <what>
   local i=0
@@ -40,8 +38,6 @@ wait_for_file() {  # <path> <what>
 make_twin_home() {  # <dir>
   local dir=$1
   mkdir -p "$dir/state" "$dir/nostart-bin"
-  git init -q "$dir"
-  git -C "$dir" commit -q --allow-empty -m init
   cat > "$dir/nostart-bin/ps" <<'SH'
 #!/usr/bin/env bash
 case " $* " in *' lstart= '*) exit 1 ;; esac
@@ -52,7 +48,7 @@ SH
 #!/usr/bin/env bash
 role=$1
 i=0
-while [ "$i" -lt 200 ] && [ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" != 1 ]; do
+while [ "${2:-}" != child ] && [ "$i" -lt 200 ] && [ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" != 1 ]; do
   sleep 0.05
   i=$((i + 1))
 done
@@ -88,6 +84,24 @@ done
 exit 0
 SH
   chmod +x "$dir/twin.sh"
+  cat > "$dir/front.sh" <<'SH'
+#!/usr/bin/env bash
+i=0
+while [ "$i" -lt 200 ] && [ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" != 1 ]; do
+  sleep 0.05
+  i=$((i + 1))
+done
+printf '%s\n' "$$" > "$FM_HOME/state/front-pid"
+for role in "$@"; do
+  "$FM_FIXTURE_CLAUDE" "$FM_HOME/twin.sh" "$role" child &
+done
+while [ ! -e "$FM_HOME/state/stop-front" ] && kill -0 "$FM_TEST_SUITE_PID" 2>/dev/null \
+  && [ "$SECONDS" -lt "$FM_TEST_STUB_MAX_BLOCK_SECONDS" ]; do
+  sleep 0.05
+done
+exit 0
+SH
+  chmod +x "$dir/front.sh"
 }
 
 start_twin_role() {  # <dir> <role>
@@ -222,4 +236,65 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   pass "session-lock e2e: a live twin of a session never takes its lock, beside an anchored, an id-only, an exited-anchor, or a reused-anchor sidecar, the anchor-only upgrade keeps the sidecar time, an unreadable start time keeps the recorded proof, and a dead holder is still reclaimed"
 }
 
+
+# Two model loops of one session id under one shared front-end, the original
+# still live: line 1 is the front-end, which both loops have in their
+# ancestry, and the sidecar records the original's loop as the anchor. The
+# duplicate is refused naming the original's loop and leaves both records
+# byte-for-byte; once the original's loop has exited, the surviving loop under
+# that front-end owns the lock and records itself as the anchor.
+test_e2e_sibling_model_loops_under_a_shared_front_end() {
+  local dir front orig dup
+  dir="$TMP_ROOT/e2e-shared-front"
+  make_twin_home "$dir"
+  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID FM_HOME="$dir" FM_BIN="$ROOT/bin" \
+    FM_FIXTURE_CLAUDE="$NAMED_CLAUDE" \
+    bash -c '"$0" "$1" sib-orig sib-dup &' "$NAMED_CLAUDE" "$dir/front.sh"
+  wait_for_file "$dir/state/front-pid" "the shared front-end"
+  wait_for_file "$dir/state/sib-orig-pid" "the original model loop"
+  wait_for_file "$dir/state/sib-dup-pid" "the duplicate model loop"
+  front=$(tr -d '[:space:]' < "$dir/state/front-pid")
+  orig=$(tr -d '[:space:]' < "$dir/state/sib-orig-pid")
+  dup=$(tr -d '[:space:]' < "$dir/state/sib-dup-pid")
+  [ "$(ps -o ppid= -p "$orig" | tr -d ' ')" = "$front" ] || fail "the original model loop is not a child of the front-end"
+  [ "$(ps -o ppid= -p "$dup" | tr -d ' ')" = "$front" ] || fail "the duplicate model loop is not a child of the front-end"
+
+  printf '%s\n' "$front" > "$dir/state/.lock"
+  fire_twin "$dir" sib-orig 1
+  expect_code 0 "$(twin_value "$dir" sib-orig 1 lock.rc)" "the original loop could not confirm the front-end's lock: $(cat "$dir/state/sib-orig-1/lock.out")"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$front" ] || fail "the original loop moved line 1 off its own front-end"
+  anchored_sidecar "$dir/state/.lock-session" S1 "$orig" \
+    || fail "the original loop did not record itself as the anchor: $(cat "$dir/state/.lock-session")"
+  cp "$dir/state/.lock" "$dir/lock-before-dup"
+  cp "$dir/state/.lock-session" "$dir/sidecar-before-dup"
+
+  fire_twin "$dir" sib-dup 1
+  kill -0 "$orig" 2>/dev/null || fail "the original loop exited, so the duplicate was not checked against a live holder"
+  expect_code 1 "$(twin_value "$dir" sib-dup 1 lock.rc)" "the duplicate loop took the lock under the shared front-end: $(cat "$dir/state/sib-dup-1/lock.out")"
+  grep -qF "another live process holds the lock under this same session id (pid $orig, session S1) and this session's continuity with that holder could not be verified" "$dir/state/sib-dup-1/lock.out" \
+    || fail "the duplicate's refusal does not name the original loop $orig: $(cat "$dir/state/sib-dup-1/lock.out")"
+  expect_code 1 "$(twin_value "$dir" sib-dup 1 owned.rc)" "the duplicate loop reads the shared lock as its own"
+  expect_code 0 "$(twin_value "$dir" sib-dup 1 foreign.rc)" "the duplicate loop does not see the original loop as a live holder"
+  cmp -s "$dir/lock-before-dup" "$dir/state/.lock" || fail "the refused duplicate changed lock line 1"
+  cmp -s "$dir/sidecar-before-dup" "$dir/state/.lock-session" \
+    || fail "the refused duplicate changed the sidecar: $(cat "$dir/state/.lock-session")"
+
+  : > "$dir/state/stop-sib-orig"
+  local i=0
+  while [ "$i" -lt 200 ] && kill -0 "$orig" 2>/dev/null; do
+    sleep 0.05
+    i=$((i + 1))
+  done
+  kill -0 "$orig" 2>/dev/null && fail "the original loop did not exit"
+  fire_twin "$dir" sib-dup 2
+  expect_code 0 "$(twin_value "$dir" sib-dup 2 lock.rc)" "the surviving loop could not own its front-end's lock after the original loop exited: $(cat "$dir/state/sib-dup-2/lock.out")"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$front" ] || fail "the surviving loop moved line 1 off the front-end"
+  anchored_sidecar "$dir/state/.lock-session" S1 "$dup" \
+    || fail "the surviving loop did not record itself as the anchor: $(cat "$dir/state/.lock-session")"
+  : > "$dir/state/stop-sib-dup"
+  : > "$dir/state/stop-front"
+  pass "session-lock e2e: a duplicate model loop under a shared front-end is refused while the original loop lives, and the surviving loop owns the lock once it has exited"
+}
+
 test_e2e_live_twin_of_a_session_never_takes_the_lock
+test_e2e_sibling_model_loops_under_a_shared_front_end

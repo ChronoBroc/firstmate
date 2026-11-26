@@ -1623,7 +1623,6 @@ test_reanchor_keeps_task_leases_live() {
     FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
     "$NAMED_CLAUDE" -c '
       . "${FM_LOCK%/*}/fm-wake-lib.sh"
-      . "${FM_LOCK%/*}/fm-session-lock-lib.sh"
       printf "S1\nanchor=%s\nanchor-start=%s\n" "$$" "$(fm_pid_start_time "$$")" > "$FM_HOME/state/.lock-session"
       CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/reanchor.out" 2>&1
       printf "%s\n" "$?" > "$FM_HOME/state/reanchor.rc"
@@ -1686,7 +1685,6 @@ test_reanchor_keeps_autoarm_midturn_healthy() {
     FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
     "$NAMED_CLAUDE" -c '
       . "${FM_LOCK%/*}/fm-wake-lib.sh"
-      . "${FM_LOCK%/*}/fm-session-lock-lib.sh"
       printf "S1\nanchor=%s\nanchor-start=%s\n" "$$" "$(fm_pid_start_time "$$")" > "$FM_HOME/state/.lock-session"
       CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/reanchor.out" 2>&1
       printf "%s\n" "$?" > "$FM_HOME/state/reanchor.rc"

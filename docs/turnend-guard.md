@@ -99,8 +99,9 @@ The guard cooperates with that arm rather than trusting a beacon left by the cyc
 
 When an active home instead has a session lock that the current session does not own and the shared `fm_session_lock_pid_blocks_reclaim` verdict refuses to reclaim, the Claude guard emits a read-only ownership diagnostic and allows the turn to end safely.
 
-Ownership is the shared `fm_session_lock_owned_by_self` verdict in `bin/fm-session-lock-lib.sh`.
-The current session owns the lock when either of these holds:
+Ownership is the shared `fm_session_lock_owned_by_self` verdict in `bin/fm-session-lock-lib.sh`, one ordered decision (`fm_session_lock_decide`).
+A model-loop anchor recorded in `state/.lock-session` that is still running, by its pid and start time, outside the hook's ancestry is a live holder: the hook is a non-owner even when line 1 is a shared front-end in its ancestry.
+Otherwise the current session owns the lock when either of these holds:
 
 - The recorded pid is a member of the current session's contiguous harness ancestry.
 - The trusted Claude session id recorded beside the lock in `state/.lock-session` matches this hook's own environment, the model-loop anchor recorded beside that id is in this hook's own ancestry and is still the recorded process by its start time, and the recorded pid is still a live harness.

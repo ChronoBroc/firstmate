@@ -297,7 +297,7 @@ try:
     accepted = start(
         same_env,
         'export CLAUDE_PID=$$; printf "%s\\n" "$$" > "$FM_HOME/state/accepted-pid"; '
-        '. "$FM_ROOT_OVERRIDE/bin/fm-wake-lib.sh"; . "$FM_ROOT_OVERRIDE/bin/fm-session-lock-lib.sh"; '
+        '. "$FM_ROOT_OVERRIDE/bin/fm-wake-lib.sh"; '
         'printf "synthetic-same\\nanchor=%s\\nanchor-start=%s\\n" "$$" "$(fm_pid_start_time "$$")" > "$FM_HOME/state/.lock-session"; '
         '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; printf "%s\\n" "$?" > "$FM_HOME/state/accepted-rc.tmp"; '
         'mv "$FM_HOME/state/accepted-rc.tmp" "$FM_HOME/state/accepted-rc"; '
