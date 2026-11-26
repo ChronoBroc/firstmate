@@ -122,11 +122,18 @@ allow_exit() {
   exit 0
 }
 
+if [ "$CLAUDE_MODE" -eq 1 ]; then
+  # shellcheck source=bin/fm-session-lock-lib.sh
+  . "$SCRIPT_DIR/fm-session-lock-lib.sh"
+fi
+
 # A Claude secondmate's home carries .fm-busy-stop (bin/fm-spawn.sh), and this
 # guard is then the only Stop writer of the parent home's busy record for that
-# gen: every exit records the Stop's outcome, busy when exit 2 blocks it into a
-# continuation and idle otherwise. Claude runs Stop hooks in parallel, so a
-# second Stop writer could land after this one and flip the verdict.
+# gen: every exit of a session the shared ownership decision does not refuse
+# (fm_session_lock_foreign_owner_live) records the Stop's outcome, busy when
+# exit 2 blocks it into a continuation and idle otherwise. Claude runs Stop
+# hooks in parallel, so a second Stop writer could land after this one and flip
+# the verdict.
 # shellcheck disable=SC2329 # Invoked by the EXIT trap below.
 record_parent_stop_state() {
   local status=$? pointer="$FM_ROOT/.fm-busy-stop" key value writer='' state='' id='' gen='' verdict=idle event=stop
@@ -141,6 +148,7 @@ record_parent_stop_state() {
     esac
   done < "$pointer"
   [ -n "$state" ] && [ -n "$id" ] && [ -n "$gen" ] && [ -x "$writer" ] || return 0
+  ! fm_session_lock_foreign_owner_live "$STATE" || return 0
   if [ "$status" -eq 2 ]; then
     verdict=busy
     event=stop-blocked
@@ -205,10 +213,6 @@ fm_primary_scope_matches "$FM_ROOT" "$STATE" || allow_exit
 # --- the actual predicate ----------------------------------------------------
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
-if [ "$CLAUDE_MODE" -eq 1 ]; then
-  # shellcheck source=bin/fm-session-lock-lib.sh
-  . "$SCRIPT_DIR/fm-session-lock-lib.sh"
-fi
 
 # This session does not own the home lock and the shared ownership decision
 # refuses it, exactly as session start would: another live session or a live
@@ -216,8 +220,7 @@ fi
 # whether the holder is still running cannot be verified. Such a session is
 # read-only and cannot arm or repair supervision without stealing ownership,
 # so blocking its Stop would create an impossible loop, and it must not touch
-# the owner's continuation budget, failure records, watcher state, or the
-# parent's busy-state record. Report
+# the owner's continuation budget, failure records, or watcher state. Report
 # the reason and let this turn end before any of those are read or written;
 # the owning session remains responsible for restoring the watcher.
 if [ "$CLAUDE_MODE" -eq 1 ] && fm_session_lock_foreign_owner_live "$STATE"; then
@@ -225,10 +228,9 @@ if [ "$CLAUDE_MODE" -eq 1 ] && fm_session_lock_foreign_owner_live "$STATE"; then
     printf '{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION: this read-only session cannot and should not arm or repair the watcher (lock owner pid %s). Allowing this turn to end safely; the owning session must restore supervision."}\n' \
       "$FM_SESSION_LOCK_FOREIGN_OWNER_PID"
   else
-    printf '{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION OR ITS OWNER CANNOT BE VERIFIED: this read-only session cannot and should not arm or repair the watcher (lock owner pid %s; %s). Allowing this turn to end safely; the owning session must restore supervision."}\n' \
-      "$FM_SESSION_LOCK_FOREIGN_OWNER_PID" "$(fm_session_lock_decision_reason_text)"
+    printf '{"systemMessage":"FIRSTMATE SUPERVISION IS OWNED BY ANOTHER LIVE SESSION OR ITS OWNER CANNOT BE VERIFIED: this read-only session cannot and should not arm or repair the watcher (%s%s). Allowing this turn to end safely; the owning session must restore supervision."}\n' \
+      "${FM_SESSION_LOCK_FOREIGN_OWNER_PID:+lock owner pid $FM_SESSION_LOCK_FOREIGN_OWNER_PID; }" "$(fm_session_lock_decision_reason_text)"
   fi
-  trap - EXIT
   exit 0
 fi
 

@@ -173,9 +173,13 @@ fm_session_lock_anchor_pid() {
 #      recorded anchor; an id alone, an exited or reused anchor, or no recorded
 #      start time is no such proof.
 #   5. Line 1 must not be reclaimed (fm_session_lock_pid_blocks_reclaim):
-#      foreign naming line 1. Otherwise none, and bin/fm-lock.sh reclaims.
+#      the verdict names line 1. It is foreign when line 1 is a readable live
+#      harness and this ancestry was read to its end; otherwise unknown, with
+#      reason holder-unverified when line 1's identity could not be read, else
+#      ancestry-incomplete. Otherwise none, and bin/fm-lock.sh reclaims.
 #
-# A missing or malformed line 1 is none. A sidecar that exists but cannot be
+# A lock that exists but cannot be read is unknown naming no pid (reason
+# lock-unreadable). A missing or malformed line 1 is none. A sidecar that exists but cannot be
 # read is unknown naming line 1, before any other row (reason
 # sidecar-unreadable). An ancestry that cannot be resolved is unknown, naming
 # the holder that may be live - a recorded anchor that is not gone, else a line
@@ -194,7 +198,13 @@ fm_session_lock_decide() {  # <state>
   FM_SESSION_LOCK_DECISION=none
   FM_SESSION_LOCK_DECISION_REASON=
   FM_SESSION_LOCK_FOREIGN_OWNER_PID=
-  lock_pid=$(cat "$state/.lock" 2>/dev/null || true)
+  if ! lock_pid=$(cat "$state/.lock" 2>/dev/null); then
+    if [ -e "$state/.lock" ]; then
+      FM_SESSION_LOCK_DECISION=unknown
+      FM_SESSION_LOCK_DECISION_REASON='lock-unreadable'
+    fi
+    return 0
+  fi
   fm_session_pid_valid "$lock_pid" || return 0
   fm_session_lock_anchor_state "$state"
   if [ "$FM_SESSION_LOCK_ANCHOR_STATE" = unreadable ]; then
@@ -226,7 +236,7 @@ fm_session_lock_decide() {  # <state>
         FM_SESSION_LOCK_FOREIGN_OWNER_PID=$FM_SESSION_LOCK_ANCHOR_PID
         if ! fm_harness_ancestry_complete "$pids"; then
           FM_SESSION_LOCK_DECISION=unknown
-          FM_SESSION_LOCK_DECISION_REASON=ancestry-incomplete
+          FM_SESSION_LOCK_DECISION_REASON='ancestry-incomplete'
         elif [ "$FM_SESSION_LOCK_ANCHOR_STATE" = unknown ]; then
           FM_SESSION_LOCK_DECISION=unknown
           FM_SESSION_LOCK_DECISION_REASON='anchor-unverified'
@@ -256,8 +266,16 @@ fm_session_lock_decide() {  # <state>
     return 0
   fi
   if fm_session_lock_pid_blocks_reclaim "$lock_pid"; then
-    FM_SESSION_LOCK_DECISION=foreign
     FM_SESSION_LOCK_FOREIGN_OWNER_PID=$lock_pid
+    if [ "$FM_SESSION_LOCK_PID_VERDICT" != readable ]; then
+      FM_SESSION_LOCK_DECISION=unknown
+      FM_SESSION_LOCK_DECISION_REASON='holder-unverified'
+    elif ! fm_harness_ancestry_complete "$pids"; then
+      FM_SESSION_LOCK_DECISION=unknown
+      FM_SESSION_LOCK_DECISION_REASON='ancestry-incomplete'
+    else
+      FM_SESSION_LOCK_DECISION=foreign
+    fi
   fi
   return 0
 }
@@ -293,8 +311,10 @@ fm_session_lock_decision_reason_text() {
     legacy-front) printf '%s\n' "the lock was recorded before model-loop anchors existed under a front-end this session shares, so the original model loop cannot be told from a duplicate" ;;
     sidecar-unreadable) printf '%s\n' "the session sidecar beside the lock cannot be read" ;;
     ancestry-unresolved) printf '%s\n' "this session's harness ancestry cannot be read" ;;
-    ancestry-incomplete) printf '%s\n' "this session's harness ancestry could not be read to its end, so the recorded model-loop anchor may be this session's own" ;;
-    anchor-unverified) printf '%s\n' "the recorded model-loop anchor still exists but its identity cannot be confirmed by its recorded start time" ;;
+    lock-unreadable) printf '%s\n' "the session lock cannot be read" ;;
+    ancestry-incomplete) printf '%s\n' "this session's harness ancestry could not be read to its end, so the recorded holder may be this session's own" ;;
+    anchor-unverified) printf '%s\n' "the recorded model-loop anchor has not been shown to have exited, but its identity cannot be confirmed by its recorded start time" ;;
+    holder-unverified) printf '%s\n' "the lock holder has not been shown to have exited, but its identity cannot be read" ;;
     *) printf '%s\n' "whether the holder is still running cannot be verified" ;;
   esac
 }
@@ -318,6 +338,8 @@ fm_session_lock_decision_reason_text() {
 # while the sidecar's recorded model-loop anchor still exists but cannot be
 # confirmed by its start time or whose harness identity cannot be read; the pid
 # then names that anchor and FM_LOCK_INSPECT_DETAIL is anchor-unverified. A
+# valid line 1 whose identity cannot be read and that is not otherwise
+# classified is unknown with FM_LOCK_INSPECT_DETAIL holder-unverified. A
 # line 1 that is not held beside a sidecar that exists but cannot be read is
 # unknown too, with FM_LOCK_INSPECT_DETAIL sidecar-unreadable. Existence of a lock file, a session
 # record, or a pane is never treated as liveness.
@@ -376,6 +398,10 @@ fm_session_lock_inspect() {  # <state>
         # shellcheck disable=SC2034 # Output global, read by lock status and inbox ready.
         FM_LOCK_INSPECT_LIVE_HARNESS=false
       fi
+      ;;
+    unreadable)
+      # shellcheck disable=SC2034 # Output global, read by lock status and inbox ready.
+      FM_LOCK_INSPECT_DETAIL='holder-unverified'
       ;;
   esac
   [ "$FM_LOCK_INSPECT_STATE" != held ] || return 0

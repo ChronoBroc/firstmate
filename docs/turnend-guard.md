@@ -100,7 +100,7 @@ The guard cooperates with that arm rather than trusting a beacon left by the cyc
 When a home instead has a session lock that the current session does not own and that has a live or unverifiable holder - line 1 refused for reclaim by the shared `fm_session_lock_pid_blocks_reclaim` verdict, or a recorded model-loop anchor outside the session's ancestry that is alive or cannot be confirmed gone - the Claude guard emits a read-only ownership diagnostic and allows the turn to end safely.
 
 Ownership is the shared `fm_session_lock_owned_by_self` verdict in `bin/fm-session-lock-lib.sh`, one ordered decision (`fm_session_lock_decide`).
-A model-loop anchor recorded in `state/.lock-session` outside the hook's ancestry that is still running by its pid and start time, or whose pid still exists while its start time cannot be confirmed, is a live holder: the hook is a non-owner even when line 1 is a shared front-end in its ancestry. Only positive evidence that the anchor ended - no such pid, or a different readable start time - lets the decision continue.
+A model-loop anchor recorded in `state/.lock-session` outside the hook's ancestry that is still running by its pid and start time, or that has not been shown to have exited while its start time cannot be confirmed, is a holder that may be live: the hook is a non-owner even when line 1 is a shared front-end in its ancestry. Only positive evidence that the anchor ended - no such pid, or a different readable start time - lets the decision continue.
 Otherwise the current session owns the lock when either of these holds:
 
 - The recorded pid is a member of the current session's contiguous harness ancestry.
@@ -108,7 +108,7 @@ Otherwise the current session owns the lock when either of these holds:
 
 That second signal keeps a background Claude session owning its own lock after the transient helper chain between its hooks and its recorded owner is recycled.
 For a hook outside line 1's ancestry, a recorded anchor outside its own ancestry, a reused anchor pid, and a sidecar that records no anchor or no anchor start time prove no continuity with the live holder; a hook whose ancestry contains line 1 still owns through the first signal unless the live-holder rule above applies. Such a non-owning hook may belong to a second running copy of the same session, such as a running session resumed again under another terminal server, or to a genuine original whose evidence is insufficient; either way it is a non-owner and its turns end through this diagnostic.
-A sidecar that exists but cannot be read, and a start time recorded by a different source than the one now readable, are likewise never read as an ended holder.
+A lock or sidecar that exists but cannot be read, and a start time recorded by a different source than the one now readable, are likewise never read as an ended holder.
 Upgrade note: a sidecar written before model-loop anchors existed records the session id alone. When line 1 beside it is a front-end shared by more than one model loop, the original loop cannot be told from a duplicate, so every loop under that front-end other than line 1 itself is refused with the could-not-verify diagnostic, which says so, and its Stop takes this read-only exit without touching the continuation budget. This arises once, for a session started before this change under a shared front-end, and clears when the recorded front-end process is stopped: line 1 is then dead and the next session start reclaims the lock as before.
 The library's header owns the trust gate (`CLAUDE_PID` must be a Claude-shaped member of the current run).
 `bin/fm-lock.sh` owns the sidecar and the line-1 anchor it records for such a session.
@@ -119,7 +119,7 @@ The lock-owning session remains responsible for restoring supervision.
 The exception has these limits:
 
 - Malformed or absent lock records, and a dead line 1 whose recorded anchor is not a holder that may still be running, do not satisfy this Claude-specific exception and retain the ordinary guard behavior.
-- The exception is decided before the guard reads or writes anything else, so a refused session never touches the owner's continuation budget, failure records, or watcher state on any path, and when the holder cannot be verified - an unreadable sidecar, an unreadable ancestry, or a legacy shared front-end - its diagnostic says why.
+- The exception is decided before the guard reads or writes anything else, so a refused session never touches the owner's continuation budget, failure records, or watcher state on any path, and when the holder cannot be verified - an unreadable sidecar, an unreadable ancestry, or a legacy shared front-end - its diagnostic says why. The same holds for an unreadable lock, a line 1 whose identity cannot be read, and an ancestry walk that stopped on a failed read: each is refused, and the diagnostic names only what the probes established rather than a definite live owner.
 - A missing or mismatched sidecar or an untrusted id adds nothing to the verdict, so a live owner outside the ancestry still takes this exit exactly as before.
 
 ### Pull-warning verdict by supervision model
@@ -277,6 +277,7 @@ The registrations in detail:
   The auto-arm also handles `StopFailure`, without this guard; [watcher continuity](watcher-continuity.md#claude-stop-hook) owns error-ended turn coverage.
   In a Claude secondmate home, `bin/fm-spawn.sh` writes a `.fm-busy-stop` pointer and gives the mate no `Stop` busy hook, so `--claude` is the only Stop writer of the parent home's busy record for that generation.
   It records idle when it allows the Stop and busy when its exit 2 blocks it into a continuation, because Claude runs Stop hooks in parallel and that continuation fires no `UserPromptSubmit`.
+  A session the shared ownership decision refuses the lock records nothing there on any exit, so a duplicate cannot mark its live original idle.
   A home whose guard predates `.fm-busy-stop` cannot close the turn, so that launch keeps the ordinary `Stop` idle hook instead.
   [Runtime backend verification](verification/runtime-backends.md#secondmate-busy-contract) owns the live evidence.
 - Codex registers a synchronous `Stop` hook in `.codex/hooks.json`, anchors the executable to the hook process working directory, verifies a Firstmate-shaped hook-bearing root, and passes the original payload to the shared guard through `bin/fm-codex-stop-park.sh --guard` when that script is present.

@@ -85,9 +85,11 @@ if [ "${1:-}" = "status" ]; then
     held) echo "lock: held by live harness pid $FM_LOCK_INSPECT_PID" ;;
     unknown)
       if [ "$FM_LOCK_INSPECT_DETAIL" = anchor-unverified ]; then
-        echo "lock: unknown (recorded model-loop anchor pid $FM_LOCK_INSPECT_PID is still running but its identity cannot be verified)"
+        echo "lock: unknown (recorded model-loop anchor pid $FM_LOCK_INSPECT_PID has not been shown to have exited, but its identity cannot be verified)"
       elif [ "$FM_LOCK_INSPECT_DETAIL" = sidecar-unreadable ]; then
         echo "lock: unknown (pid $FM_LOCK_INSPECT_PID; the session sidecar beside the lock cannot be read, so whether its recorded holder is still running cannot be verified)"
+      elif [ "$FM_LOCK_INSPECT_DETAIL" = holder-unverified ]; then
+        echo "lock: unknown (pid $FM_LOCK_INSPECT_PID has not been shown to have exited, but its identity cannot be read)"
       else
         echo "lock: stale (pid $FM_LOCK_INSPECT_PID dead or not a harness)"
       fi
@@ -328,6 +330,10 @@ refuse_if_live_holder() {  # <recorded-pid>
 refuse_live_owner() {  # <recorded-pid>
   local recorded trusted
   case "${FM_SESSION_LOCK_DECISION:-}:${FM_SESSION_LOCK_DECISION_REASON:-}" in
+    unknown:lock-unreadable)
+      echo "error: session lock is unreadable; operate read-only until resolved" >&2
+      exit 1
+      ;;
     unknown:sidecar-unreadable)
       echo "error: whether the lock holder is still running could not be verified (lock pid $1): the session sidecar beside the lock cannot be read; operate read-only until resolved" >&2
       exit 1

@@ -2493,7 +2493,7 @@ stop_refusal_helper() {  # <dir>
 }
 
 test_hook_claude_refused_caller_never_touches_owner_records() {
-  local path dir home claude holder before out status
+  local path dir home claude holder before out status nojq tool tool_path variant
   claude="$TMP_ROOT/refusal-harness/claude"
   mkdir -p "${claude%/*}"
   ln -sf /bin/bash "$claude"
@@ -2520,6 +2520,57 @@ test_hook_claude_refused_caller_never_touches_owner_records() {
     cmp -s "$dir/parent-busy-before" "$dir/parent-state/sm.busy-state" \
       || fail "$path: a refused caller changed the parent's busy record: $(cat "$dir/parent-state/sm.busy-state")"
   done
+
+  nojq="$TMP_ROOT/refusal-nojq-bin"
+  mkdir -p "$nojq"
+  for tool in bash sh cat sed head tail awk grep tr date mkdir rm mv cp ln git dirname basename uname sleep env stat \
+    readlink mktemp touch ps kill wc cut sort tee find xargs id pwd printf test expr; do
+    tool_path=$(command -v "$tool" 2>/dev/null) || continue
+    case "$tool_path" in /*) ln -sf "$tool_path" "$nojq/$tool" ;; esac
+  done
+  for variant in nojq unreadable-lock; do
+    dir=$(make_refusal_path_home "$TMP_ROOT/refused-$variant" stale)
+    home=$(cd "$dir" && pwd)
+    "$claude" -c 'while :; do sleep 1; done' &
+    holder=$!
+    printf '%s\n' "$holder" > "$dir/state/.lock"
+    before=$(refusal_records "$dir")
+    cp "$dir/parent-state/sm.busy-state" "$dir/parent-busy-before"
+    status=0
+    if [ "$variant" = nojq ]; then
+      out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
+        | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID PATH="$nojq" CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+          "$nojq/bash" "$dir/bin/fm-turnend-guard.sh" --claude 2>&1) || status=$?
+    else
+      chmod 000 "$dir/state/.lock"
+      out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
+        | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+          bash "$dir/bin/fm-turnend-guard.sh" --claude 2>&1) || status=$?
+      chmod 644 "$dir/state/.lock"
+    fi
+    kill "$holder" 2>/dev/null || true
+    wait "$holder" 2>/dev/null || true
+    expect_code 0 "$status" "$variant: a refused caller's Stop did not end: $out"
+    if [ "$variant" = unreadable-lock ]; then
+      assert_contains "$out" "OWNER CANNOT BE VERIFIED: this read-only session cannot and should not arm or repair the watcher (the session lock cannot be read)" \
+        "unreadable-lock: the Stop did not take the read-only exit with the unreadable-lock reason"
+      assert_not_contains "$out" "lock owner pid" "unreadable-lock: the diagnostic named a holder pid it could not read"
+    fi
+    [ "$(refusal_records "$dir")" = "$before" ] \
+      || fail "$variant: a refused caller changed the owner's records: $(refusal_records "$dir")"
+    cmp -s "$dir/parent-busy-before" "$dir/parent-state/sm.busy-state" \
+      || fail "$variant: a refused caller changed the parent's busy record: $(cat "$dir/parent-state/sm.busy-state")"
+  done
+  dir=$(make_refusal_path_home "$TMP_ROOT/owner-nojq" stale)
+  home=$(cd "$dir" && pwd)
+  status=0
+  # shellcheck disable=SC2016 # the fake harness expands FM_HOME inside its child shell.
+  out=$(printf '{"stop_hook_active":false,"session_id":"sess-owner"}' \
+    | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID PATH="$nojq" CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+      "$claude" -c 'printf "%s\n" "$$" > "$FM_HOME/state/.lock"; bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude' 2>&1) || status=$?
+  expect_code 0 "$status" "nojq: the owner's Stop without jq did not end: $out"
+  [ "$(parent_busy_verdict "$dir")" = 'state=idle source=claude-hook event=stop' ] \
+    || fail "nojq: the owner's Stop without jq did not record idle for the parent: $(cat "$dir/parent-state/sm.busy-state")"
 
   for path in idle healthy daemon stale; do
     dir=$(make_refusal_path_home "$TMP_ROOT/owner-$path" "$path")

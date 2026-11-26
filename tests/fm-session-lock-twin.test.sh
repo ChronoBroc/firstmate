@@ -215,7 +215,7 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   [ "$status_out" = "lock: held by live harness pid $orig" ] \
     || fail "a dead line 1 beside a live recorded anchor was reported as '$status_out'"
   status_out=$(PATH="$dir/nostart-bin:$PATH" FM_PROC_ROOT_OVERRIDE="$dir/no-proc" FM_HOME="$dir" "$ROOT/bin/fm-lock.sh" status)
-  [ "$status_out" = "lock: unknown (recorded model-loop anchor pid $orig is still running but its identity cannot be verified)" ] \
+  [ "$status_out" = "lock: unknown (recorded model-loop anchor pid $orig has not been shown to have exited, but its identity cannot be verified)" ] \
     || fail "a dead line 1 beside a running anchor whose start time is unreadable was reported as '$status_out'"
   fire_twin "$dir" twin 5
   expect_code 1 "$(twin_value "$dir" twin 5 lock.rc)" "the twin took a lock whose recorded anchor is still running: $(cat "$dir/state/twin-5/lock.out")"
@@ -339,7 +339,7 @@ test_e2e_sibling_model_loops_under_a_shared_front_end() {
   # no evidence it ended, so the duplicate is still refused naming it.
   fire_twin "$dir" sib-dup 2 nostart
   expect_code 1 "$(twin_value "$dir" sib-dup 2 lock.rc)" "the duplicate loop took the lock while the original's start time was unreadable: $(cat "$dir/state/sib-dup-2/lock.out")"
-  grep -qF "whether the lock holder is still running could not be verified (pid $orig): the recorded model-loop anchor still exists but its identity cannot be confirmed by its recorded start time" "$dir/state/sib-dup-2/lock.out" \
+  grep -qF "whether the lock holder is still running could not be verified (pid $orig): the recorded model-loop anchor has not been shown to have exited, but its identity cannot be confirmed by its recorded start time" "$dir/state/sib-dup-2/lock.out" \
     || fail "the unverified refusal does not name the original loop $orig with its uncertainty: $(cat "$dir/state/sib-dup-2/lock.out")"
   if grep -qF "another live" "$dir/state/sib-dup-2/lock.out"; then
     fail "the unverified refusal claimed a definite live owner: $(cat "$dir/state/sib-dup-2/lock.out")"

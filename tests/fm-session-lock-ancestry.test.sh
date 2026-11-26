@@ -755,6 +755,15 @@ $current_row"
   if out=$(attempt_lock '' '' "$live_table" 1 700 2>&1); then status=0; else status=$?; fi
   [ "$status" -eq 1 ] || fail "fm-lock.sh acquired through an unreadable Windows process table: $out"
   [ "$(cat "$home/state/.lock")" = 'win:7204' ] || fail "an unreadable Windows table allowed the tagged owner lock to be replaced"
+  case "$out" in
+    *'whether the lock holder is still running could not be verified (pid win:7204): the lock holder has not been shown to have exited, but its identity cannot be read'*) ;;
+    *) fail "an unreadable Windows table refusal did not state its uncertainty: $out" ;;
+  esac
+  case "$out" in *'another live'*) fail "an unreadable Windows table refusal claimed a definite live owner: $out" ;; esac
+  out=$(env -u FM_TEST_CYG_PPID PATH="$fakebin:$PATH" FM_HOME="$home" FM_TEST_WIN_TABLE="$live_table" FM_TEST_WIN_PS_FAIL=1 \
+    "$ROOT/bin/fm-lock.sh" status 2>&1)
+  [ "$out" = 'lock: unknown (pid win:7204 has not been shown to have exited, but its identity cannot be read)' ] \
+    || fail "an unreadable Windows table was reported by lock status as '$out'"
 
   printf 'win:7204\n' > "$home/state/.lock"
   printf 'S1\n' > "$home/state/.lock-session"

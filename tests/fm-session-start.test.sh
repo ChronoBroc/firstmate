@@ -844,7 +844,8 @@ EOF
   printf '%s\n' "$holder_pid" > "$home/state/.lock"
 
   status=0
-  out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH") || status=$?
+  out=$(FM_FAKE_HARNESS_PID="$SESSION_START_TEST_HARNESS_PID" FM_FAKE_LIVE_HOLDER_PID="$holder_pid" \
+    run_session_start "$home" "$root" "$fakebin:$BASE_PATH") || status=$?
   kill "$holder_pid" 2>/dev/null || true
   wait "$holder_pid" 2>/dev/null || true
 
@@ -911,7 +912,7 @@ EOF
 
   expect_code 0 "$status" "fm-session-start.sh must exit 0 even on a same-session lock refusal"
   assert_contains "$out" "READ-ONLY SESSION" "read-only banner missing on a same-session lock refusal"
-  assert_contains "$out" "whether the lock holder is still running could not be verified (pid $holder_pid): the recorded model-loop anchor still exists but its identity cannot be confirmed" \
+  assert_contains "$out" "whether the lock holder is still running could not be verified (pid $holder_pid): the recorded model-loop anchor has not been shown to have exited, but its identity cannot be confirmed" \
     "the digest did not name the live holder pid and the unverified continuity"
   assert_not_contains "$out" "lock acquired" "the duplicate reported acquiring the lock"
   assert_contains "$out" "skipped (read-only session)" "wake-queue section did not report itself skipped"
