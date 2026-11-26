@@ -28,10 +28,10 @@
 # would write. Its second line `anchor=<pid>` records the acquiring session's
 # own anchor pid beside the id, so a same-id caller outside the lock's ancestry
 # owns the lock only when that recorded anchor is in its own ancestry and its
-# third line `anchor-identity=<identity>` still matches that process's start
-# identity (fm_session_lock_anchor_continues in bin/fm-session-lock-lib.sh);
+# third line `anchor-start=<start>` still matches that process's start time
+# (fm_session_lock_anchor_continues in bin/fm-session-lock-lib.sh);
 # any other same-id caller, including one beside a sidecar with no anchor or no
-# identity, is refused without a continuity verdict and never re-anchors the
+# start time, is refused without a continuity verdict and never re-anchors the
 # lock. A same-session
 # confirmation keeps a live line 1 that is in this session's harness ancestry,
 # because bin/fm-startup-network.sh compares that pid across its deferred
@@ -174,7 +174,7 @@ remember_lock_session() {
   [ "$LOCK_SESSION_PHASE" -eq 0 ] || return 0
   if [ -e "$LOCK_SESSION" ] || [ -L "$LOCK_SESSION" ]; then
     rm -f "$LOCK_SESSION_PREV" 2>/dev/null || true
-    cp -P "$LOCK_SESSION" "$LOCK_SESSION_PREV" 2>/dev/null || return 1
+    cp -pP "$LOCK_SESSION" "$LOCK_SESSION_PREV" 2>/dev/null || return 1
     LOCK_SESSION_KIND=1
   else
     LOCK_SESSION_KIND=2
@@ -185,22 +185,28 @@ remember_lock_session() {
 # Record the trusted session id beside the lock, or remove a sidecar that no
 # trusted id backs. A second line `anchor=<pid>` records this session's anchor
 # pid beside the id (fm_session_lock_recorded_anchor), and a third line
-# `anchor-identity=<identity>` its process start identity when that is readable
-# (fm_session_lock_recorded_anchor_identity). Called only while the claim lock
-# is held. A sidecar that already has exactly this content is left untouched,
-# so a same-session confirmation keeps it byte-identical; one rewritten under
-# the same recorded id keeps its modification time, which marks when that
-# session id was recorded.
+# `anchor-start=<start>` its process start time (fm_pid_start_time) when that is
+# readable (fm_session_lock_recorded_anchor_start); when it is not, a start
+# time already recorded beside this same id and anchor is kept. Called only
+# while the claim lock is held. A sidecar that already has exactly this content
+# is left untouched, so a same-session confirmation keeps it byte-identical; one
+# rewritten under the same recorded id keeps its modification time, which marks
+# when that session id was recorded, or the rewrite fails.
 publish_lock_session() {
-  local trusted current content identity recorded tmp
+  local trusted current content start recorded tmp
   if trusted=$(fm_session_lock_trusted_session_id); then
     content="$trusted"$'\n'"anchor=$me"
-    if identity=$(fm_session_pid_identity "$me" 2>/dev/null) && [ -n "$identity" ]; then
-      case "$identity" in
-        *$'\n'*|*$'\r'*) ;;
-        *) content="$content"$'\n'"anchor-identity=$identity" ;;
-      esac
+    if ! { start=$(fm_pid_start_time "$me" 2>/dev/null) && [ -n "$start" ]; }; then
+      start=
+      if [ "$(fm_session_lock_recorded_session_id "$STATE" 2>/dev/null)" = "$trusted" ] \
+        && [ "$(fm_session_lock_recorded_anchor "$STATE" 2>/dev/null)" = "$me" ]; then
+        start=$(fm_session_lock_recorded_anchor_start "$STATE" 2>/dev/null) || start=
+      fi
     fi
+    case "$start" in
+      ''|*$'\n'*|*$'\r'*) ;;
+      *) content="$content"$'\n'"anchor-start=$start" ;;
+    esac
     if [ -f "$LOCK_SESSION" ] && [ ! -L "$LOCK_SESSION" ] \
       && current=$(cat "$LOCK_SESSION" 2>/dev/null) && [ "$current" = "$content" ]; then
       return 0
@@ -212,7 +218,10 @@ publish_lock_session() {
       return 1
     fi
     if recorded=$(fm_session_lock_recorded_session_id "$STATE") && [ "$recorded" = "$trusted" ]; then
-      touch -r "$LOCK_SESSION" "$tmp" 2>/dev/null || true
+      if ! touch -r "$LOCK_SESSION" "$tmp" 2>/dev/null; then
+        rm -f "$tmp" 2>/dev/null
+        return 1
+      fi
     fi
     if ! mv -f "$tmp" "$LOCK_SESSION" 2>/dev/null; then
       rm -f "$tmp" 2>/dev/null

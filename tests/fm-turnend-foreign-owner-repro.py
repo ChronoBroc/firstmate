@@ -225,7 +225,7 @@ try:
     # A recorded anchor that has exited proves no continuity either, so the
     # live line 1 is never handed to a same-id process outside its ancestry.
     # Positive control: a process that is itself the recorded model-loop
-    # anchor, pid and start identity, as a surviving helper is after its chain
+    # anchor, pid and start time, as a surviving helper is after its chain
     # to line 1 is recycled, continues the session, so the lock accepts it and re-anchors line 1 onto
     # its CLAUDE_PID, keeping the recorded id. A different id against the
     # re-anchored lock keeps the refusal and names the recorded id.
@@ -264,8 +264,8 @@ try:
     require(
         (same / "state/.lock-session").read_text().splitlines()[:2] == ["synthetic-same", "anchor=" + same_lock_owner]
         and len((same / "state/.lock-session").read_text().splitlines()) == 3
-        and (same / "state/.lock-session").read_text().splitlines()[2].startswith("anchor-identity=")
-        and len((same / "state/.lock-session").read_text().splitlines()[2]) > len("anchor-identity="),
+        and (same / "state/.lock-session").read_text().splitlines()[2].startswith("anchor-start=")
+        and len((same / "state/.lock-session").read_text().splitlines()[2]) > len("anchor-start="),
         "the owner did not record its trusted session id and model-loop anchor beside the lock",
     )
     twin_stop = guard(same_env, "live-twin stop", prefix="export CLAUDE_PID=$$; ")
@@ -288,9 +288,16 @@ try:
     require(id_only_stop.returncode == 0, "an id-only twin's Stop must end safely")
     require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" in id_only_stop.stdout, "an id-only twin's Stop lost the foreign-owner diagnostic")
     print("FIXED a live twin beside an id-only sidecar is refused and its Stop ends safely", flush=True)
-    exited = run(same_env, 'printf "%s\\n" "$$"').stdout.strip()
-    require(exited.isdigit() and exited != same_lock_owner, "could not obtain an exited model-loop pid")
-    (same / "state/.lock-session").write_text(f"synthetic-same\nanchor={exited}\n")
+    short_lived = start(same_env, "sleep 60", "short-lived-anchor.txt")
+    exited = str(short_lived.pid)
+    exited_start = run(
+        same_env, '. "$FM_ROOT_OVERRIDE/bin/fm-wake-lib.sh" && fm_pid_start_time ' + exited
+    ).stdout.strip()
+    require(exited_start != "" and exited != same_lock_owner, "could not record a short-lived model-loop anchor")
+    (same / "state/.lock-session").write_text(f"synthetic-same\nanchor={exited}\nanchor-start={exited_start}\n")
+    stop(short_lived)
+    require(short_lived.poll() is not None, "the recorded anchor did not exit")
+    exited_record = (same / "state/.lock-session").read_text()
     exited_twin = run(
         same_env,
         'export CLAUDE_PID=$$; "$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; rc=$?; printf "lock_rc=%s\\n" "$rc"; true',
@@ -302,6 +309,7 @@ try:
         "the exited-anchor refusal did not name the owner pid and the shared session id",
     )
     require(session_lock_text(same_lock) == same_lock_owner, "a same-id process moved the lock line beside an exited anchor")
+    require((same / "state/.lock-session").read_text() == exited_record, "a refused same-id process changed the exited-anchor record")
     exited_stop = guard(same_env, "exited-anchor stop", prefix="export CLAUDE_PID=$$; ")
     require(exited_stop.returncode == 0, "an exited-anchor twin's Stop must end safely")
     require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" in exited_stop.stdout, "an exited-anchor twin's Stop lost the foreign-owner diagnostic")
@@ -310,7 +318,7 @@ try:
         same_env,
         'export CLAUDE_PID=$$; printf "%s\\n" "$$" > "$FM_HOME/state/accepted-pid"; '
         '. "$FM_ROOT_OVERRIDE/bin/fm-wake-lib.sh"; . "$FM_ROOT_OVERRIDE/bin/fm-session-lock-lib.sh"; '
-        'printf "synthetic-same\\nanchor=%s\\nanchor-identity=%s\\n" "$$" "$(fm_session_pid_identity "$$")" > "$FM_HOME/state/.lock-session"; '
+        'printf "synthetic-same\\nanchor=%s\\nanchor-start=%s\\n" "$$" "$(fm_pid_start_time "$$")" > "$FM_HOME/state/.lock-session"; '
         '"$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; printf "%s\\n" "$?" > "$FM_HOME/state/accepted-rc.tmp"; '
         'mv "$FM_HOME/state/accepted-rc.tmp" "$FM_HOME/state/accepted-rc"; '
         "while :; do sleep 1; done",

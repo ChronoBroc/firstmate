@@ -103,10 +103,10 @@ Ownership is the shared `fm_session_lock_owned_by_self` verdict in `bin/fm-sessi
 The current session owns the lock when either of these holds:
 
 - The recorded pid is a member of the current session's contiguous harness ancestry.
-- The trusted Claude session id recorded beside the lock in `state/.lock-session` matches this hook's own environment, the model-loop anchor recorded beside that id is in this hook's own ancestry and is still the recorded process by its start identity, and the recorded pid is still a live harness.
+- The trusted Claude session id recorded beside the lock in `state/.lock-session` matches this hook's own environment, the model-loop anchor recorded beside that id is in this hook's own ancestry and is still the recorded process by its start time, and the recorded pid is still a live harness.
 
 That second signal keeps a background Claude session owning its own lock after the transient helper chain between its hooks and its recorded owner is recycled.
-A recorded anchor outside the hook's ancestry, a reused anchor pid, and a sidecar that records no anchor or no anchor identity prove no continuity with the live holder. Such a hook may belong to a second running copy of the same session, such as a running session resumed again under another terminal server, or to a genuine original whose evidence is insufficient; either way it is a non-owner and its turns end through this diagnostic.
+A recorded anchor outside the hook's ancestry, a reused anchor pid, and a sidecar that records no anchor or no anchor start time prove no continuity with the live holder. Such a hook may belong to a second running copy of the same session, such as a running session resumed again under another terminal server, or to a genuine original whose evidence is insufficient; either way it is a non-owner and its turns end through this diagnostic.
 The library's header owns the trust gate (`CLAUDE_PID` must be a Claude-shaped member of the current run).
 `bin/fm-lock.sh` owns the sidecar and the line-1 anchor it records for such a session.
 
