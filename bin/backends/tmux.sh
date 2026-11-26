@@ -555,6 +555,12 @@ fm_backend_tmux_foreground_pids() {  # <target>
       done
 }
 
+# fm_backend_tmux_pane_pid: the pid of the process the pane was started with.
+# A RAW pane read like the ones above: confirm window membership first.
+fm_backend_tmux_pane_pid() {  # <target>
+  tmux display-message -p -t "$1" '#{pane_pid}' 2>/dev/null
+}
+
 fm_backend_tmux_foreground_argv0s() {  # <target>
   local target=$1 tty pid pgid tpgid comm args argv0
   tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 0

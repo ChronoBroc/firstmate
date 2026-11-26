@@ -2297,28 +2297,15 @@ fi
 if [ "$RELAUNCH" -ne 1 ]; then
   fm_lease_forbid_branch "new-task spawn (fm-spawn)" --away-relocated
 fi
-# spawn_live_agents_in <dir>: the live agent processes working in <dir>
-# (fm_agent_process_live_in_dir) as `<pid> (<name>)[, ...]`, returning the
-# probe's own status: 1 none found, 2 undecided with its reason printed.
-spawn_live_agents_in() {
-  local out rc=0
-  out=$(fm_agent_process_live_in_dir "$1") || rc=$?
-  if [ "$rc" -eq 0 ]; then
-    printf '%s\n' "$out" | awk -F'\t' 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }'
-  else
-    printf '%s' "$out"
-  fi
-  return "$rc"
-}
 # spawn_refuse_if_live_agent_in <dir> <what>: exit 1 naming the pid when a
 # live agent process works in <dir>; an inconclusive probe also exits 1.
 spawn_refuse_if_live_agent_in() {
   local dir=$1 what=$2 out rc=0
-  out=$(spawn_live_agents_in "$dir") || rc=$?
+  out=$(fm_agent_process_live_in_dir "$dir") || rc=$?
   case "$rc" in
     1) return 0 ;;
     0)
-      echo "error: refusing to start an agent for $ID: $what $dir already has a live agent process working in it, pid $out, whatever its recorded endpoint reads from here; stop that agent, or confirm it is not this task's, before launching another" >&2
+      echo "error: refusing to start an agent for $ID: $what $dir already has a live agent process working in it, pid $(fm_agent_process_format_live "$out"), whatever its recorded endpoint reads from here; stop that agent, or confirm it is not this task's, before launching another" >&2
       exit 1
       ;;
     *)
@@ -2638,12 +2625,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
       dead) RELAUNCH_STATE=dead ;;
       alive) RELAUNCH_STATE=alive ;;
       *)
-        relaunch_live_note=
-        relaunch_live_wt=$(fm_meta_get "$RELAUNCH_META" worktree)
-        if [ -n "$relaunch_live_wt" ] && relaunch_live_pids=$(spawn_live_agents_in "$relaunch_live_wt"); then
-          relaunch_live_note=" An agent process is still working in its worktree $relaunch_live_wt: pid $relaunch_live_pids."
-        fi
-        echo "error: task $ID's recorded endpoint $RELAUNCH_TARGET reads '$RELAUNCH_STATE', but ${RELAUNCH_ABSENCE#*$'\t'}. An endpoint that cannot be proven absent may still hold a live agent on this task's worktree; refusing rather than launching a second agent into it.$relaunch_live_note" >&2
+        echo "error: task $ID's recorded endpoint $RELAUNCH_TARGET reads '$RELAUNCH_STATE', but ${RELAUNCH_ABSENCE#*$'\t'}. An endpoint that cannot be proven absent may still hold a live agent on this task's worktree; refusing rather than launching a second agent into it.$(fm_agent_process_live_note "$(fm_meta_get "$RELAUNCH_META" worktree)")" >&2
         exit 1
         ;;
     esac
@@ -2652,7 +2634,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     dead) ;;
     missing) RELAUNCH_REBIND=1 ;;
     *)
-      echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
+      echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit).$(fm_agent_process_live_note "$(fm_meta_get "$RELAUNCH_META" worktree)")" >&2
       exit 1
       ;;
   esac

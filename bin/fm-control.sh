@@ -488,40 +488,50 @@ wait_agent_state() {  # <timeout> <wanted>...
   return 1
 }
 
-# control_format_live_agents <probe-output>: fm_agent_process_live_in_dir's
-# `<pid>\t<name>` lines as `<pid> (<name>)[, ...]`.
-control_format_live_agents() {
-  printf '%s\n' "$1" | awk -F'\t' 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }'
-}
-
-# control_live_agent_note: a sentence naming the agent processes still working
-# in the task's worktree, or nothing when none was found or the probe could
-# not decide.
-control_live_agent_note() {
-  local out
-  [ -n "$WT" ] || return 0
+# endpoint_agent_pids: the agent processes working in the task's worktree
+# that belong to its recorded endpoint (the pane's own process or one of its
+# descendants), one pid per line; nothing where the backend cannot name the
+# endpoint's process or the worktree probe finds none.
+endpoint_agent_pids() {
+  local root out pid p
+  case "$BACKEND" in
+    tmux) fm_backend_source tmux >/dev/null 2>&1 && root=$(fm_backend_tmux_pane_pid "$T") || return 0 ;;
+    *) return 0 ;;
+  esac
+  case "$root" in ''|*[!0-9]*) return 0 ;; esac
   out=$(fm_agent_process_live_in_dir "$WT") || return 0
-  printf ' An agent process is still working in its worktree %s: pid %s.' "$WT" "$(control_format_live_agents "$out")"
+  for pid in $(printf '%s\n' "$out" | cut -f1); do
+    p=$pid
+    while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null; do
+      if [ "$p" = "$root" ]; then
+        printf '%s\n' "$pid"
+        break
+      fi
+      p=$(LC_ALL=C ps -o ppid= -p "$p" 2>/dev/null | tr -d '[:space:]')
+    done
+  done
 }
 
-# wait_agent_pids_gone <timeout> <pid>...: wait until none of <pid> is still
-# found working in the task's worktree; nonzero on timeout.
-wait_agent_pids_gone() {  # <timeout> <pid>...
-  local timeout=$1 elapsed=0 out rc pid live
+# wait_pids_gone <timeout> <pid>...: wait until every <pid> has exited (a
+# zombie counts as exited), bounded by <timeout> seconds of elapsed time
+# rounded up; nonzero on timeout.
+wait_pids_gone() {  # <timeout> <pid>...
+  local timeout=$1 started limit pid live
   shift
   [ "$#" -gt 0 ] || return 0
+  started=$(date +%s)
+  limit=$(awk -v t="$timeout" 'BEGIN { c = int(t); if (c < t) c++; print c }')
   while :; do
-    rc=0
-    out=$(fm_agent_process_live_in_dir "$WT") || rc=$?
-    [ "$rc" -eq 0 ] || return 0
     live=0
     for pid in "$@"; do
-      printf '%s\n' "$out" | cut -f1 | grep -Fqx "$pid" && live=1
+      case "$(LC_ALL=C ps -o stat= -p "$pid" 2>/dev/null)" in
+        ''|*Z*) ;;
+        *) live=1 ;;
+      esac
     done
     [ "$live" = 1 ] || return 0
-    awk -v e="$elapsed" -v t="$timeout" 'BEGIN{exit !(e < t)}' || return 1
+    [ $(($(date +%s) - started)) -lt "$limit" ] || return 1
     sleep "$POLL"
-    elapsed=$(awk -v e="$elapsed" -v p="$POLL" 'BEGIN{printf "%.3f", e + p}')
   done
 }
 
@@ -808,7 +818,7 @@ do_exit() {
     alive) ;;
     *)
       fm_control_absence_recheck_applies "$BACKEND" "$state" \
-        || die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint"
+        || die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint.$(fm_agent_process_live_note "$WT")"
       # `missing` on its own is not a finding about the endpoint: it conflates
       # "destroyed" with "unreachable from this seat". Route it through the
       # control plane's one absence proof - the same one the relaunch gate uses
@@ -838,7 +848,7 @@ do_exit() {
           # alive path: interrupt if busy, then the harness's exit command.
           ;;
         *)
-          die "task $ID's endpoint $T reads '$state', but ${absence#*$'\t'}; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one.$(control_live_agent_note)"
+          die "task $ID's endpoint $T reads '$state', but ${absence#*$'\t'}; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one.$(fm_agent_process_live_note "$WT")"
           ;;
       esac
       ;;
@@ -1098,7 +1108,7 @@ relaunch_rollback() {
           relaunch_restore_brief
           if [ "$live_rc" -eq 0 ]; then
             journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-in-worktree" || true
-            echo "error: $ID's recorded endpoint holds no agent now, but no replacement was launched because an agent is still working in its local copy $WT (pid $(control_format_live_agents "$live_out")); $(relaunch_restore_text) and the durable record was retained" >&2
+            echo "error: $ID's recorded endpoint holds no agent now, but no replacement was launched because an agent is still working in its local copy $WT (pid $(fm_agent_process_format_live "$live_out")); $(relaunch_restore_text) and the durable record was retained" >&2
           else
             journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-in-worktree-unproven" || true
             echo "error: $ID's recorded endpoint holds no agent now, but the replacement did not launch and whether an agent still works in its local copy $WT could not be established ($live_out); $(relaunch_restore_text) and the durable record was retained" >&2
@@ -1400,12 +1410,12 @@ do_relaunch() {
   journal_write noted "${CHECKPOINT_LINES[@]}" "$note_line"
 
   journal_write stopping "${CHECKPOINT_LINES[@]}" "$note_line"
-  stopping_pids=$(fm_agent_process_live_in_dir "$WT" 2>/dev/null | cut -f1) || stopping_pids=
+  stopping_pids=$(endpoint_agent_pids) || stopping_pids=
   exit_result=$(do_exit)
   journal_write exited "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
   if [ "$exit_result" = stopped ]; then
     # shellcheck disable=SC2086
-    wait_agent_pids_gone "$EXIT_WAIT" $stopping_pids || true
+    wait_pids_gone "$EXIT_WAIT" $stopping_pids || true
   fi
 
   # The launch owner (fm-spawn --relaunch) clears the previous incarnation's

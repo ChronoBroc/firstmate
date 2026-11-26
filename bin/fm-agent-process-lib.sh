@@ -148,7 +148,8 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
 # ancestor of the caller still counts.
 #
 # Working directories come from /proc/<pid>/cwd where the kernel exposes it
-# (Linux) and from lsof otherwise (macOS).
+# (Linux) and otherwise from lsof (macOS), matched by the directory's device
+# and inode because lsof escapes bytes in the names it prints.
 #
 # Prints and returns:
 #   0  one `<pid>\t<process name>` line per live agent process found.
@@ -159,7 +160,7 @@ fm_agent_process_classify() {  # <name> <argv0> <args> [pid] -> agent|shell|othe
 #      Callers that would start an agent in <dir> must treat this as a
 #      refusal, never as 1.
 fm_agent_process_live_in_dir() {  # <dir>
-  local dir=${1:-} dir_real uid pid cwd self selves found='' lsof_out lsof_rc p candidates=''
+  local dir=${1:-} dir_real dir_id uid pid cwd self selves found='' lsof_out lsof_rc p candidates=''
   dir_real=$(cd "$dir" 2>/dev/null && pwd -P) || {
     printf 'the directory %s does not resolve\n' "${dir:-<empty>}"
     return 2
@@ -199,15 +200,21 @@ fm_agent_process_live_in_dir() {  # <dir>
       printf 'neither /proc nor lsof is available to read process working directories\n'
       return 2
     }
+    dir_id=$(stat -c '%d %i' "$dir_real" 2>/dev/null) || dir_id=$(stat -f '%d %i' "$dir_real" 2>/dev/null) || dir_id=
+    case "$dir_id" in
+      [0-9]*' '[0-9]*) ;;
+      *) printf 'the identity of the directory %s could not be read\n' "$dir_real"; return 2 ;;
+    esac
     lsof_rc=0
-    lsof_out=$(LC_ALL=C lsof -w -a -u "$uid" -d cwd -Fpn 2>/dev/null) || lsof_rc=$?
+    lsof_out=$(LC_ALL=C lsof -w -a -u "$uid" -d cwd -FpDi 2>/dev/null) || lsof_rc=$?
     if [ "$lsof_rc" -ne 0 ] || [ -z "$lsof_out" ]; then
       printf 'lsof could not list the working directories of this user'"'"'s processes (exit %s)\n' "$lsof_rc"
       return 2
     fi
-    candidates=$(printf '%s\n' "$lsof_out" | awk -v want="$dir_real" '
-      /^p/ { pid = substr($0, 2); next }
-      /^n/ { if (substr($0, 2) == want) printf " %s", pid }')
+    candidates=$(printf '%s\n' "$lsof_out" | awk -v dev="$(printf '0x%x' "${dir_id%% *}")" -v ino="${dir_id##* }" '
+      /^p/ { pid = substr($0, 2); d = ""; next }
+      /^D/ { d = substr($0, 2); next }
+      /^i/ { if (d == dev && substr($0, 2) == ino) printf " %s", pid }')
   fi
   for pid in $candidates; do
     case "$selves" in *" $pid "*) continue ;; esac
@@ -228,7 +235,7 @@ fm_agent_process_live_in_dir() {  # <dir>
 # name and command line into FM_AGENT_PROCESS_KIND (agent|shell|other) and
 # FM_AGENT_PROCESS_NAME; returns 1 when either could not be read.
 _fm_agent_process_identify() {  # <pid>
-  local pid=$1 name args
+  local pid=$1 name args argv0
   FM_AGENT_PROCESS_KIND=
   FM_AGENT_PROCESS_NAME=
   name=$(LC_ALL=C ps -o comm= -p "$pid" 2>/dev/null) || return 1
@@ -236,6 +243,28 @@ _fm_agent_process_identify() {  # <pid>
   name=${name#"${name%%[![:space:]]*}"}
   args=${args#"${args%%[![:space:]]*}"}
   [ -n "$name" ] && [ -n "$args" ] || return 1
+  argv0=${args%%[[:space:]]*}
+  if [ -r "/proc/$pid/cmdline" ]; then
+    argv0=$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | head -n 1)
+    [ -n "$argv0" ] || return 1
+  fi
   FM_AGENT_PROCESS_NAME=$name
-  FM_AGENT_PROCESS_KIND=$(fm_agent_process_classify "$name" "${args%%[[:space:]]*}" "$args" "$pid")
+  FM_AGENT_PROCESS_KIND=$(fm_agent_process_classify "$name" "$argv0" "$args" "$pid")
+}
+
+# fm_agent_process_format_live <probe-output>: fm_agent_process_live_in_dir's
+# `<pid>\t<name>` lines as `<pid> (<name>)[, ...]`.
+fm_agent_process_format_live() {  # <probe-output>
+  printf '%s\n' "$1" | awk -F'\t' 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }'
+}
+
+# fm_agent_process_live_note <dir>: a sentence naming the agent processes
+# still working in <dir>, for appending to a refusal; prints nothing when none
+# was found or the probe could not decide, and always succeeds.
+fm_agent_process_live_note() {  # <dir>
+  local out
+  [ -n "${1:-}" ] || return 0
+  out=$(fm_agent_process_live_in_dir "$1") || return 0
+  printf ' An agent process is still working in its worktree %s: pid %s.' "$1" "$(fm_agent_process_format_live "$out")"
+  return 0
 }
