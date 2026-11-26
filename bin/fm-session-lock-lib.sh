@@ -878,6 +878,8 @@ fm_session_lock_anchor_continues() {  # <state> <ancestry-pids>
   fm_harness_pid_listed "$anchor" "$2" || return 1
   recorded=$(fm_session_lock_recorded_anchor_start "$1") || return 1
   if ! command -v fm_pid_start_time >/dev/null 2>&1; then
+    # shellcheck disable=SC2034 # Read by the sourced fm-wake-lib.sh.
+    local STATE=${FM_STATE_OVERRIDE:-$1}
     # shellcheck source=/dev/null
     . "$FM_SESSION_LOCK_LIB_DIR/fm-wake-lib.sh"
   fi

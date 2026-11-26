@@ -26,14 +26,7 @@ FAKEBIN=$(fm_fakebin "$TMP_ROOT/harness-bin")
 ln -s /bin/bash "$FAKEBIN/claude"
 NAMED_CLAUDE="$FAKEBIN/claude"
 
-BG_FIXTURE_PIDS=()
-reap_background_fixture() {
-  local pid
-  for pid in ${BG_FIXTURE_PIDS[@]+"${BG_FIXTURE_PIDS[@]}"}; do
-    kill -TERM "$pid" 2>/dev/null || true
-  done
-}
-trap 'reap_background_fixture; fm_test_cleanup' EXIT
+trap fm_test_cleanup EXIT
 
 wait_for_file() {  # <path> <what>
   local i=0
@@ -66,7 +59,8 @@ done
 export CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$
 printf '%s\n' "$$" > "$FM_HOME/state/$role-pid"
 n=1
-while [ ! -e "$FM_HOME/state/stop-$role" ]; do
+while [ ! -e "$FM_HOME/state/stop-$role" ] && kill -0 "$FM_TEST_SUITE_PID" 2>/dev/null \
+  && [ "$SECONDS" -lt "$FM_TEST_STUB_MAX_BLOCK_SECONDS" ]; do
   req="$FM_HOME/state/$role-fire-$n"
   if [ -f "$req" ]; then
     out="$FM_HOME/state/$role-$n"
@@ -100,7 +94,6 @@ start_twin_role() {  # <dir> <role>
   env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID FM_HOME="$1" FM_BIN="$ROOT/bin" \
     bash -c '"$0" "$1" "$2" &' "$NAMED_CLAUDE" "$1/twin.sh" "$2"
   wait_for_file "$1/state/$2-pid" "the $2 session"
-  BG_FIXTURE_PIDS+=("$(tr -d '[:space:]' < "$1/state/$2-pid")")
 }
 
 fire_twin() {  # <dir> <role> <n> [nostart]
@@ -164,7 +157,7 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   # a same-id process outside its ancestry.
   sleep 60 &
   exited=$!
-  exited_start=$(bash -c '. "$1/bin/fm-wake-lib.sh" && fm_pid_start_time "$2"' _ "$ROOT" "$exited") \
+  exited_start=$(FM_STATE_OVERRIDE="$dir/state" bash -c '. "$1/bin/fm-wake-lib.sh" && fm_pid_start_time "$2"' _ "$ROOT" "$exited") \
     && [ -n "$exited_start" ] || fail "could not read the short-lived anchor's start time"
   printf 'S1\nanchor=%s\nanchor-start=%s\n' "$exited" "$exited_start" > "$dir/state/.lock-session"
   kill "$exited" 2>/dev/null
@@ -179,7 +172,7 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   # The recorded anchor pid reused by the same-id caller itself: the pid is in
   # its ancestry, but the start time recorded beside it is another process's,
   # so it proves no continuity.
-  twin_start=$(bash -c '. "$1/bin/fm-wake-lib.sh" && fm_pid_start_time "$2"' _ "$ROOT" "$twin") \
+  twin_start=$(FM_STATE_OVERRIDE="$dir/state" bash -c '. "$1/bin/fm-wake-lib.sh" && fm_pid_start_time "$2"' _ "$ROOT" "$twin") \
     && [ -n "$twin_start" ] || fail "could not read the twin's start time"
   reused_start='Thu Jan  1 00:00:00 1970'
   [ "$reused_start" != "$twin_start" ] || fail "the seeded start time collides with the twin's own start time"
