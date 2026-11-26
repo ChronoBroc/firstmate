@@ -247,9 +247,10 @@ fm_session_lock_owned_by_self() {  # <state>
   [ "$FM_SESSION_LOCK_DECISION" = own ]
 }
 
-# True when fm_session_lock_decide finds a live holder of state dir $1's lock
-# that is not this process's session, or refuses this process as one loop of
-# a legacy shared front-end (reason legacy-front), naming the holder in
+# True when fm_session_lock_decide refuses this process the lock in state dir
+# $1, as bin/fm-lock.sh does: a live holder that is not this process's session
+# (foreign), or a holder that may be live but cannot be verified (unknown, with
+# FM_SESSION_LOCK_DECISION_REASON). Names the holder in
 # FM_SESSION_LOCK_FOREIGN_OWNER_PID for a diagnostic caller. A lock that is not
 # a regular file is no foreign-owner evidence.
 fm_session_lock_foreign_owner_live() {  # <state>
@@ -257,8 +258,21 @@ fm_session_lock_foreign_owner_live() {  # <state>
   FM_SESSION_LOCK_FOREIGN_OWNER_PID=
   [ -f "$1/.lock" ] && [ ! -L "$1/.lock" ] || return 1
   fm_session_lock_decide "$1"
-  [ "$FM_SESSION_LOCK_DECISION" = foreign ] \
-    || [ "$FM_SESSION_LOCK_DECISION:$FM_SESSION_LOCK_DECISION_REASON" = unknown:legacy-front ]
+  case "$FM_SESSION_LOCK_DECISION" in
+    foreign|unknown) return 0 ;;
+  esac
+  return 1
+}
+
+# Print why the last fm_session_lock_decide verdict of unknown could not verify
+# the holder, from FM_SESSION_LOCK_DECISION_REASON.
+fm_session_lock_decision_reason_text() {
+  case "$FM_SESSION_LOCK_DECISION_REASON" in
+    legacy-front) printf '%s\n' "the lock was recorded before model-loop anchors existed under a front-end this session shares, so the original model loop cannot be told from a duplicate" ;;
+    sidecar-unreadable) printf '%s\n' "the session sidecar beside the lock cannot be read" ;;
+    ancestry-unresolved) printf '%s\n' "this session's harness ancestry cannot be read" ;;
+    *) printf '%s\n' "whether the holder is still running cannot be verified" ;;
+  esac
 }
 
 # Read-only classification of state/.lock for machine-readable callers.

@@ -244,7 +244,7 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
     grep -qF "whether the lock holder is still running could not be verified (lock pid $orig): the session sidecar beside the lock cannot be read" "$dir/state/orig-2/lock.out" \
       || fail "the unreadable-sidecar refusal claims more than was verified: $(cat "$dir/state/orig-2/lock.out")"
     grep -qF "pid $orig" "$dir/state/orig-2/lock.out" || fail "the unreadable-sidecar refusal does not name line 1: $(cat "$dir/state/orig-2/lock.out")"
-    [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$orig" ] || fail "an unreadable sidecar let line 1 be rewritten"
+    [ "$(twin_value "$dir" orig 2 lock-after)" = "$orig" ] || fail "an unreadable sidecar let line 1 be rewritten to $(cat "$dir/state/orig-2/lock-after")"
     cmp -s "$dir/sidecar-before-twin" "$dir/state/.lock-session" || fail "an unreadable sidecar was replaced"
   else
     fire_twin "$dir" orig 2

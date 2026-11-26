@@ -2426,6 +2426,116 @@ test_hook_claude_mode_secondmate_reblocks_like_primary() {
   pass "fm-turnend-guard --claude: secondmate home re-blocks unclaimed and allows auto-arm-claimed stops"
 }
 
+# --- REFUSED CALLER: the owner's records are never touched -------------------
+#
+# A session that session start would refuse - here another live harness holds
+# the lock - takes the read-only exit on every guard path, idle, healthy
+# watcher, away-mode daemon, and stale watcher alike, and leaves the owner's
+# continuation budget and failure records byte-for-byte. The owner, the process
+# that holds line 1, keeps the guard's ordinary writes on the same paths.
+refusal_records() {  # <dir>
+  local f
+  for f in .turnend-claude-blocks .claude-autoarm-failure-notified .claude-autoarm-failure-alarmed; do
+    if [ -e "$1/state/$f" ]; then printf '%s=%s\n' "$f" "$(cat "$1/state/$f")"; else printf '%s=absent\n' "$f"; fi
+  done
+}
+
+seed_owner_records() {  # <dir>
+  printf '2\n' > "$1/state/.turnend-claude-blocks"
+  printf 'notified\n' > "$1/state/.claude-autoarm-failure-notified"
+  printf 'alarmed\n' > "$1/state/.claude-autoarm-failure-alarmed"
+}
+
+make_refusal_path_home() {  # <dir-path> <idle|healthy|daemon|stale> -> prints dir
+  local dir=$1 path=$2 pid
+  dir=$(make_primary_dir "$dir")
+  case "$path" in
+    idle) ;;
+    healthy)
+      : > "$dir/state/task1.meta"
+      sleep 120 > /dev/null 2>&1 &
+      pid=$!
+      printf '%s\n' "$pid" > "$dir/helper-pid"
+      record_watcher_lock "$dir" "$pid" "$(watcher_identity "$dir" "$pid")"
+      touch "$dir/state/.last-watcher-beat"
+      ;;
+    daemon)
+      : > "$dir/state/task1.meta"
+      : > "$dir/state/.afk"
+      sleep 120 > /dev/null 2>&1 &
+      pid=$!
+      printf '%s\n' "$pid" > "$dir/helper-pid"
+      record_daemon_lock "$dir" "$pid"
+      touch "$dir/state/.last-watcher-beat"
+      ;;
+    stale)
+      : > "$dir/state/task1.meta"
+      touch -t 202001010000 "$dir/state/.last-watcher-beat"
+      ;;
+  esac
+  seed_owner_records "$dir"
+  printf '%s\n' "$dir"
+}
+
+stop_refusal_helper() {  # <dir>
+  local pid
+  [ -f "$1/helper-pid" ] || return 0
+  pid=$(cat "$1/helper-pid")
+  kill "$pid" 2>/dev/null || true
+}
+
+test_hook_claude_refused_caller_never_touches_owner_records() {
+  local path dir home claude holder before out status
+  claude="$TMP_ROOT/refusal-harness/claude"
+  mkdir -p "${claude%/*}"
+  ln -sf /bin/bash "$claude"
+  for path in idle healthy daemon stale; do
+    dir=$(make_refusal_path_home "$TMP_ROOT/refused-$path" "$path")
+    home=$(cd "$dir" && pwd)
+    "$claude" -c 'while :; do sleep 1; done' &
+    holder=$!
+    printf '%s\n' "$holder" > "$dir/state/.lock"
+    before=$(refusal_records "$dir")
+    status=0
+    out=$(printf '{"stop_hook_active":false,"session_id":"sess-refused"}' \
+      | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+        bash "$dir/bin/fm-turnend-guard.sh" --claude 2>&1) || status=$?
+    kill "$holder" 2>/dev/null || true
+    wait "$holder" 2>/dev/null || true
+    stop_refusal_helper "$dir"
+    expect_code 0 "$status" "$path: a refused caller's Stop did not end read-only: $out"
+    assert_contains "$out" "OWNED BY ANOTHER LIVE SESSION" "$path: a refused caller's Stop lost the read-only diagnostic"
+    assert_contains "$out" "lock owner pid $holder" "$path: the read-only diagnostic does not name the holder"
+    [ "$(refusal_records "$dir")" = "$before" ] \
+      || fail "$path: a refused caller changed the owner's records: $(refusal_records "$dir")"
+  done
+
+  for path in idle healthy daemon stale; do
+    dir=$(make_refusal_path_home "$TMP_ROOT/owner-$path" "$path")
+    home=$(cd "$dir" && pwd)
+    status=0
+    # shellcheck disable=SC2016 # the fake harness expands FM_HOME inside its child shell.
+    out=$(printf '{"stop_hook_active":false,"session_id":"sess-owner"}' \
+      | env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID CLAUDECODE=1 FM_HOME="$home" FM_CLAUDE_AUTOARM_SYNC_WAIT_MS=100 \
+        "$claude" -c 'printf "%s\n" "$$" > "$FM_HOME/state/.lock"; bash "$FM_HOME/bin/fm-turnend-guard.sh" --claude' 2>&1) || status=$?
+    stop_refusal_helper "$dir"
+    assert_not_contains "$out" "OWNED BY ANOTHER LIVE SESSION" "$path: the lock owner took the read-only exit"
+    case "$path" in
+      idle)
+        expect_code 0 "$status" "idle: the owner's idle Stop did not end silently: $out"
+        [ "$(refusal_records "$dir")" = "$(printf '.turnend-claude-blocks=2\n.claude-autoarm-failure-notified=notified\n.claude-autoarm-failure-alarmed=alarmed')" ] \
+          || fail "idle: the owner's idle Stop changed records it keeps while a failure notice is open: $(refusal_records "$dir")"
+        ;;
+      healthy|daemon)
+        expect_code 0 "$status" "$path: the owner's supervised Stop did not end: $out"
+        [ "$(refusal_records "$dir")" = "$(printf '.turnend-claude-blocks=absent\n.claude-autoarm-failure-notified=absent\n.claude-autoarm-failure-alarmed=absent')" ] \
+          || fail "$path: the owner's supervised Stop did not reset its failure episode: $(refusal_records "$dir")"
+        ;;
+    esac
+  done
+  pass "fm-turnend-guard: a refused caller ends read-only on every path and never touches the owner's records; the owner keeps its ordinary writes"
+}
+
 # --- AWAY MODE: the daemon owns supervision ----------------------------------
 #
 # While state/.afk exists, bin/fm-supervise-daemon.sh owns supervision and runs
@@ -2749,6 +2859,7 @@ test_hook_claude_mode_away_mode_never_uses_stop_autoarm_fail_open
 test_hook_claude_mode_allow_resets_budget
 test_hook_claude_mode_waits_for_late_claim
 test_hook_claude_mode_secondmate_reblocks_like_primary
+test_hook_claude_refused_caller_never_touches_owner_records
 test_hook_away_daemon_allows_between_watcher_cycles
 test_hook_away_daemon_allows_over_dead_watcher_lock
 test_hook_away_mode_blocks_without_any_supervisor

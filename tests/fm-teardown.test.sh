@@ -6122,6 +6122,18 @@ test_missing_adapter_sibling_refuses_before_cleanup() {
   pass "a missing adapter sibling refuses before cleanup"
 }
 
+test_missing_session_lock_decision_sibling_refuses_before_cleanup() {
+  local case_dir rc
+  case_dir=$(make_case missing-decision-sibling)
+  write_meta "$case_dir" local-only ship
+  prepare_teardown_source_copy "$case_dir"
+  rm -f "$case_dir/test-root/bin/fm-session-lock-decision-lib.sh"
+  rc=0
+  run_copied_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  assert_source_refusal_preserved_state "$case_dir" "missing-decision-sibling" "required tmux source"
+  pass "a missing session-lock decision sibling refuses before cleanup"
+}
+
 test_forced_child_missing_adapter_sibling_refuses_before_cleanup() {
   local case_dir home rc
   case_dir=$(make_case missing-child-adapter-sibling)
@@ -6957,6 +6969,7 @@ test_status_archive_pruning_failure_warns_and_completes
 test_missing_startup_source_refuses_before_cleanup
 test_unreadable_startup_source_refuses_before_cleanup
 test_missing_adapter_sibling_refuses_before_cleanup
+test_missing_session_lock_decision_sibling_refuses_before_cleanup
 test_forced_child_missing_adapter_sibling_refuses_before_cleanup
 test_forced_secondmate_own_missing_adapter_sibling_refuses_before_child_cleanup
 test_retained_sources_still_reach_the_ordinary_refusal

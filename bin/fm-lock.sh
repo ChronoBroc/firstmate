@@ -195,7 +195,7 @@ remember_lock_session() {
 
 # Record the trusted session id beside the lock, or remove a sidecar that no
 # trusted id backs; an ancestry or CLAUDE_PID read that cannot be completed,
-# including a walk that stopped early beside a sidecar recording this same id,
+# including a walk that stopped early beside any existing sidecar,
 # fails the publication and leaves the sidecar as it was. A second line
 # `anchor=<pid>` records the CLAUDE_PID the trusted id was verified against in
 # this same ancestry walk, tagged when the
@@ -216,7 +216,7 @@ publish_lock_session() {
     [ "$rc" -ne 2 ] || return 1
     if [ "$rc" -ne 0 ]; then
       trusted=
-      if [ "$(fm_session_lock_recorded_session_id "$STATE" 2>/dev/null)" = "$CLAUDE_CODE_SESSION_ID" ]; then
+      if [ -e "$LOCK_SESSION" ] || [ -L "$LOCK_SESSION" ]; then
         fm_harness_ancestry_complete "$pids" || return 1
       fi
     fi

@@ -97,7 +97,7 @@ The guard cooperates with that arm rather than trusting a beacon left by the cyc
 
 ### Foreign session-lock owner
 
-When an active home instead has a session lock that the current session does not own and that has a live holder - line 1 refused for reclaim by the shared `fm_session_lock_pid_blocks_reclaim` verdict, or a recorded model-loop anchor outside the session's ancestry that is alive or cannot be confirmed gone - the Claude guard emits a read-only ownership diagnostic and allows the turn to end safely.
+When a home instead has a session lock that the current session does not own and that has a live or unverifiable holder - line 1 refused for reclaim by the shared `fm_session_lock_pid_blocks_reclaim` verdict, or a recorded model-loop anchor outside the session's ancestry that is alive or cannot be confirmed gone - the Claude guard emits a read-only ownership diagnostic and allows the turn to end safely.
 
 Ownership is the shared `fm_session_lock_owned_by_self` verdict in `bin/fm-session-lock-lib.sh`, one ordered decision (`fm_session_lock_decide`).
 A model-loop anchor recorded in `state/.lock-session` outside the hook's ancestry that is still running by its pid and start time, or whose pid still exists while its start time cannot be confirmed, is a live holder: the hook is a non-owner even when line 1 is a shared front-end in its ancestry. Only positive evidence that the anchor ended - no such pid, or a different readable start time - lets the decision continue.
@@ -118,7 +118,8 @@ The lock-owning session remains responsible for restoring supervision.
 
 The exception has these limits:
 
-- Malformed, absent, or ancestry-uncertain lock records, and a dead line 1 whose recorded anchor is not a live foreign holder, do not satisfy this Claude-specific exception and retain the ordinary guard behavior.
+- Malformed or absent lock records, and a dead line 1 whose recorded anchor is not a holder that may still be running, do not satisfy this Claude-specific exception and retain the ordinary guard behavior.
+- The exception is decided before the guard reads or writes anything else, so a refused session never touches the owner's continuation budget, failure records, or watcher state on any path, and when the holder cannot be verified - an unreadable sidecar, an unreadable ancestry, or a legacy shared front-end - its diagnostic says why.
 - A missing or mismatched sidecar or an untrusted id adds nothing to the verdict, so a live owner outside the ancestry still takes this exit exactly as before.
 
 ### Pull-warning verdict by supervision model
