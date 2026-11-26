@@ -111,6 +111,8 @@ DEGRADED_WATCH_ENABLED=0
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
+# shellcheck source=bin/fm-lease-lib.sh
+. "$SCRIPT_DIR/fm-lease-lib.sh"
 ADOPT_KIND=$FM_PR_ADOPTED_KIND
 
 pr_check_reported_url() {  # <status-file>
@@ -248,6 +250,7 @@ fi
 
 # Task-derived paths are constructed only after the canonical ID validation.
 META="$STATE/$ID.meta"
+fm_lease_require_session_lock "PR registration (fm-pr-check)"
 
 # Adoption publishes a new worker-less record for a pull request no fleet
 # worker opened, then falls through to the ordinary registration below. Every

@@ -249,6 +249,7 @@ case "${1:-}" in
     ;;
   *) echo "usage: fm-wake-drain.sh [--ack-through SEQUENCE --recovery-generation GENERATION | --pending-for-main]" >&2; exit 2 ;;
 esac
+[ "$PENDING_QUERY" = true ] || fm_lease_require_session_lock "wake drain (fm-wake-drain)"
 
 [ "$ACTOR" != branch ] || require_branch_eligible_rows || exit 1
 

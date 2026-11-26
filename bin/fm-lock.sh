@@ -25,10 +25,11 @@
 # confirmed-own acquisition, including the early already-mine exit that waits
 # for the claim lock, removed when the acquiring session proves no trusted id,
 # and left byte-identical when it already has the content this acquisition
-# would write. Its optional second line `anchor=<pid>` is present exactly when
-# line 1 is this session's own anchor pid, so a live recorded anchor outside a
-# same-id caller's ancestry is a live twin of the session
-# (fm_session_lock_live_twin in bin/fm-session-lock-lib.sh): that caller is
+# would write. Its second line `anchor=<pid>` records the acquiring session's
+# own anchor pid beside the id, so a same-id caller outside the lock's ancestry
+# owns the lock only when that recorded anchor is its own process or has exited
+# (fm_session_lock_anchor_continues in bin/fm-session-lock-lib.sh); any other
+# same-id caller, including one beside a sidecar with no anchor line, is
 # refused as a duplicate and never re-anchors the lock. A same-session
 # confirmation keeps a live line 1 that is in this session's harness ancestry,
 # because bin/fm-startup-network.sh compares that pid across its deferred
@@ -180,16 +181,14 @@ remember_lock_session() {
 }
 
 # Record the trusted session id beside the lock, or remove a sidecar that no
-# trusted id backs. $1 is the pid line 1 holds once this acquisition completes;
-# when it is this session's anchor, a second line `anchor=<pid>` records it
-# (fm_session_lock_recorded_anchor). Called only while the claim lock is held.
-# A sidecar that already has exactly this content is left untouched, so a
-# same-session confirmation keeps it byte-identical.
-publish_lock_session() {  # <final-line-1-pid>
+# trusted id backs. A second line `anchor=<pid>` records this session's anchor
+# pid beside the id (fm_session_lock_recorded_anchor). Called only while the
+# claim lock is held. A sidecar that already has exactly this content is left
+# untouched, so a same-session confirmation keeps it byte-identical.
+publish_lock_session() {
   local trusted current content tmp
   if trusted=$(fm_session_lock_trusted_session_id); then
-    content=$trusted
-    [ "$1" != "$me" ] || content="$content"$'\n'"anchor=$me"
+    content="$trusted"$'\n'"anchor=$me"
     if [ -f "$LOCK_SESSION" ] && [ ! -L "$LOCK_SESSION" ] \
       && current=$(cat "$LOCK_SESSION" 2>/dev/null) && [ "$current" = "$content" ]; then
       return 0
@@ -209,8 +208,8 @@ publish_lock_session() {  # <final-line-1-pid>
   return 0
 }
 
-publish_lock_session_or_die() {  # <final-line-1-pid>
-  publish_lock_session "$1" && return 0
+publish_lock_session_or_die() {
+  publish_lock_session && return 0
   echo "error: cannot record the session identity beside the lock; operate read-only until resolved" >&2
   exit 1
 }
@@ -243,7 +242,7 @@ confirm_own_lock() {  # <recorded-pid>
       REANCHOR=$recorded
       return 0
     fi
-    publish_lock_session_or_die "$recorded"
+    publish_lock_session_or_die
     commit_lock_session
     release_claim_lock
     echo "lock acquired: harness pid $recorded"
@@ -258,8 +257,7 @@ confirm_own_lock() {  # <recorded-pid>
 refuse_live_owner() {  # <recorded-pid>
   local recorded trusted
   if recorded=$(fm_session_lock_recorded_session_id "$STATE") \
-    && trusted=$(fm_session_lock_trusted_session_id) && [ "$trusted" = "$recorded" ] \
-    && fm_session_lock_live_twin "$STATE" "$1"; then
+    && trusted=$(fm_session_lock_trusted_session_id) && [ "$trusted" = "$recorded" ]; then
     echo "error: another live process of this same session holds the lock (pid $1, session $recorded): this session is a duplicate of one still running; operate read-only until resolved" >&2
   elif [ -n "$recorded" ]; then
     echo "error: another live firstmate session holds the lock (pid $1, session $recorded); operate read-only until resolved" >&2
@@ -320,7 +318,7 @@ fi
 # there a HUP, INT, or TERM during the lease move or the bounded
 # .claude-autoarm.lock wait, before commit_lock_session, still runs
 # restore_uncommitted_lock_session with phase 2 and removes the sidecar.
-publish_lock_session_or_die "$me"
+publish_lock_session_or_die
 if [ -f "$LOCK" ]; then
   LOCK_LINE_PRE=$(mktemp "$STATE/.lock.pre.XXXXXX") || {
     echo "error: cannot write session lock; operate read-only until resolved" >&2

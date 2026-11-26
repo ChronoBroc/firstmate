@@ -214,12 +214,15 @@ try:
     # that session's model-loop anchor, is a live twin: a second running copy of
     # the session. Its acquisition is refused with the duplicate diagnostic and
     # its Stop ends safely as a non-owner.
-    # Positive control: once line 1 is a pid of the session's chain rather than
-    # its recorded anchor (the sidecar carries the id alone), the same id is
-    # the same session, so its Stop is held to the owner's own guard instead of
-    # ending as a foreign session, and the lock accepts it and re-anchors line 1
-    # onto that process's CLAUDE_PID, keeping the recorded id. A different id
-    # against the re-anchored lock keeps the refusal and names the recorded id.
+    # A sidecar that records the id alone, as every sidecar written before the
+    # anchor existed does, proves no continuity either: the twin stays refused.
+    # Positive control: once the recorded model-loop anchor has exited while
+    # line 1 is still a live pid of the session's chain, as a recycled
+    # background helper leaves it, the same id continues that session, so its
+    # Stop is held to the owner's own guard instead of ending as a foreign
+    # session, and the lock accepts it and re-anchors line 1 onto that
+    # process's CLAUDE_PID, keeping the recorded id. A different id against the
+    # re-anchored lock keeps the refusal and names the recorded id.
     same, same_env = make("same-session")
     same_env["CLAUDE_CODE_SESSION_ID"] = "synthetic-same"
     same_owner = start(
@@ -261,6 +264,24 @@ try:
     require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" in twin_stop.stdout, "a live twin's Stop lost the foreign-owner diagnostic")
     print("FIXED a live twin of the owner's session is refused and its Stop ends safely", flush=True)
     (same / "state/.lock-session").write_text("synthetic-same\n")
+    id_only = run(
+        same_env,
+        'export CLAUDE_PID=$$; "$FM_ROOT_OVERRIDE/bin/fm-lock.sh"; rc=$?; printf "lock_rc=%s\\n" "$rc"; true',
+    )
+    print("id-only sidecar twin acquisition", "rc=" + str(id_only.returncode), "stdout=" + repr(id_only.stdout), "stderr=" + repr(id_only.stderr), flush=True)
+    require("lock_rc=1" in id_only.stdout, "a live twin took the owner's lock beside an id-only sidecar")
+    require(
+        f"another live process of this same session holds the lock (pid {same_lock_owner}, session synthetic-same)" in id_only.stderr,
+        "the id-only twin refusal did not name the owner pid and the shared session id",
+    )
+    require(session_lock_text(same_lock) == same_lock_owner, "a twin moved the lock line beside an id-only sidecar")
+    id_only_stop = guard(same_env, "id-only twin stop", prefix="export CLAUDE_PID=$$; ")
+    require(id_only_stop.returncode == 0, "an id-only twin's Stop must end safely")
+    require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" in id_only_stop.stdout, "an id-only twin's Stop lost the foreign-owner diagnostic")
+    print("FIXED a live twin beside an id-only sidecar is refused and its Stop ends safely", flush=True)
+    exited = run(same_env, 'printf "%s\\n" "$$"').stdout.strip()
+    require(exited.isdigit() and exited != same_lock_owner, "could not obtain an exited model-loop pid")
+    (same / "state/.lock-session").write_text(f"synthetic-same\nanchor={exited}\n")
     same_stop = guard(same_env, "same-session stop", prefix="export CLAUDE_PID=$$; ")
     require(same_stop.returncode == 2, "a same-session Stop must be held to the owner's own guard, not ended as a foreign session")
     require("SUPERVISION IS OWNED BY ANOTHER LIVE SESSION" not in same_stop.stdout, "a same-session Stop took the foreign-owner exit")

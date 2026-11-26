@@ -55,9 +55,11 @@
 # tracked as separate follow-up design work. The branch's shell prelude makes
 # the actor variables readonly (see the Pi branch extension), so an
 # ACCIDENTAL override fails loudly inside the branch's own shell as well.
-#   - Session-lock check (fm_lease_require_session_lock): fm_lease_guard and
-#     fm_lease_forbid_branch first refuse a main-actor fleet action whose
-#     harness session no longer holds this home's session lock.
+#   - Session-lock check (fm_lease_require_session_lock): fm_lease_guard,
+#     fm_lease_forbid_branch, and the lease-free main-session entry points
+#     (PR registration, scout promotion, the wake drain, every steer, a
+#     relaunch, and lease claim and release) refuse a main-actor fleet action
+#     from this home's recorded session once it no longer holds the lock.
 #   - Guard semantics (fm_lease_guard): no lease, a same-actor lease, or a
 #     provably stale lease passes; a live lease held by the OTHER actor
 #     refuses with exit FM_LEASE_REFUSE_EXIT. Whenever the guard engages - a
@@ -100,7 +102,8 @@
 #
 # Sourced by bin/fm-send.sh, bin/fm-control.sh, bin/fm-teardown.sh,
 # bin/fm-pr-merge.sh, bin/fm-merge-local.sh, bin/fm-spawn.sh, bin/fm-lock.sh,
-# and bin/fm-lease.sh. Callers must have $STATE resolved before calling. No side
+# bin/fm-lease.sh, bin/fm-pr-check.sh, bin/fm-promote.sh, and
+# bin/fm-wake-drain.sh. Callers must have $STATE resolved before calling. No side
 # effects on source. set -u / set -e safe.
 
 # Distinct from usage errors (2), the gate refusal (3), and fm-send's
@@ -138,25 +141,28 @@ fm_lease_tagged_holder_live() {
   fm_harness_pid_alive "$1"
 }
 
-# fm_lease_require_session_lock <action-label>: exit 1 when the main actor's
-# fleet action runs in a harness session while this home's session lock names
-# another live session, including a live twin of this same session
-# (fm_session_lock_foreign_owner_live in bin/fm-session-lock-lib.sh). The branch
-# actor, a caller with no harness ancestry, and a home whose lock is absent,
-# dead, or this session's own pass untouched. fm_lease_guard and
-# fm_lease_forbid_branch call it first, so every script guarded by either one
-# refuses before its first mutation.
+# fm_lease_require_session_lock <action-label>: exit 1 before a main-actor
+# fleet action when this process is the home's recorded main session - its
+# trusted Claude session id is the one recorded beside state/.lock - but no
+# longer owns the lock: the lock is missing, names a dead or unverifiable pid,
+# or names another running copy of this session
+# (fm_session_lock_lost_by_self in bin/fm-session-lock-lib.sh). Reclaiming a
+# dead holder stays with bin/fm-lock.sh, which bin/fm-session-start.sh runs.
+# The branch actor, a caller with no harness ancestry, and a caller whose
+# session is not the recorded one - a worker, a secondmate, the supervision
+# host, the watcher - pass untouched. fm_lease_guard and fm_lease_forbid_branch
+# call it first; the main-session entry points that take no lease call it
+# directly before their first mutation.
 fm_lease_require_session_lock() {
   local action=$1
   [ "${FM_SUPERVISION_ACTOR:-main}" = main ] || return 0
-  [ -f "$STATE/.lock" ] && [ ! -L "$STATE/.lock" ] || return 0
-  if ! command -v fm_session_lock_foreign_owner_live >/dev/null 2>&1; then
+  if ! command -v fm_session_lock_lost_by_self >/dev/null 2>&1; then
     # Kept an analysis boundary for the same reason as fm-wake-lib.sh above.
     # shellcheck source=/dev/null
     . "$FM_LEASE_LIB_DIR/fm-session-lock-lib.sh"
   fi
-  fm_session_lock_foreign_owner_live "$STATE" || return 0
-  echo "error: $action refused - this session does not hold this home's session lock: it names live harness pid $FM_SESSION_LOCK_FOREIGN_OWNER_PID, another session or another running copy of this one; operate read-only and check bin/fm-lock.sh status" >&2
+  fm_session_lock_lost_by_self "$STATE" || return 0
+  echo "error: $action refused - this session does not hold this home's session lock: $FM_SESSION_LOCK_LOST_DETAIL; operate read-only, or re-run bin/fm-session-start.sh to reacquire the lock, which succeeds only while no other running copy of this session holds it" >&2
   exit 1
 }
 
