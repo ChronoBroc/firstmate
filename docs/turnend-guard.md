@@ -97,17 +97,17 @@ The guard cooperates with that arm rather than trusting a beacon left by the cyc
 
 ### Foreign session-lock owner
 
-When an active home instead has a session lock that the current session does not own and the shared `fm_session_lock_pid_blocks_reclaim` verdict refuses to reclaim, the Claude guard emits a read-only ownership diagnostic and allows the turn to end safely.
+When an active home instead has a session lock that the current session does not own and that has a live holder - line 1 refused for reclaim by the shared `fm_session_lock_pid_blocks_reclaim` verdict, or a recorded model-loop anchor outside the session's ancestry that is alive or cannot be confirmed gone - the Claude guard emits a read-only ownership diagnostic and allows the turn to end safely.
 
 Ownership is the shared `fm_session_lock_owned_by_self` verdict in `bin/fm-session-lock-lib.sh`, one ordered decision (`fm_session_lock_decide`).
-A model-loop anchor recorded in `state/.lock-session` that is still running, by its pid and start time, outside the hook's ancestry is a live holder: the hook is a non-owner even when line 1 is a shared front-end in its ancestry.
+A model-loop anchor recorded in `state/.lock-session` outside the hook's ancestry that is still running by its pid and start time, or whose pid still exists while its start time cannot be confirmed, is a live holder: the hook is a non-owner even when line 1 is a shared front-end in its ancestry. Only positive evidence that the anchor ended - no such pid, or a different readable start time - lets the decision continue.
 Otherwise the current session owns the lock when either of these holds:
 
 - The recorded pid is a member of the current session's contiguous harness ancestry.
 - The trusted Claude session id recorded beside the lock in `state/.lock-session` matches this hook's own environment, the model-loop anchor recorded beside that id is in this hook's own ancestry and is still the recorded process by its start time, and the recorded pid is still a live harness.
 
 That second signal keeps a background Claude session owning its own lock after the transient helper chain between its hooks and its recorded owner is recycled.
-A recorded anchor outside the hook's ancestry, a reused anchor pid, and a sidecar that records no anchor or no anchor start time prove no continuity with the live holder. Such a hook may belong to a second running copy of the same session, such as a running session resumed again under another terminal server, or to a genuine original whose evidence is insufficient; either way it is a non-owner and its turns end through this diagnostic.
+For a hook outside line 1's ancestry, a recorded anchor outside its own ancestry, a reused anchor pid, and a sidecar that records no anchor or no anchor start time prove no continuity with the live holder; a hook whose ancestry contains line 1 still owns through the first signal unless the live-holder rule above applies. Such a non-owning hook may belong to a second running copy of the same session, such as a running session resumed again under another terminal server, or to a genuine original whose evidence is insufficient; either way it is a non-owner and its turns end through this diagnostic.
 The library's header owns the trust gate (`CLAUDE_PID` must be a Claude-shaped member of the current run).
 `bin/fm-lock.sh` owns the sidecar and the line-1 anchor it records for such a session.
 
@@ -116,7 +116,7 @@ The lock-owning session remains responsible for restoring supervision.
 
 The exception has these limits:
 
-- Malformed, absent, dead, or ancestry-uncertain lock records do not satisfy this Claude-specific exception and retain the ordinary guard behavior.
+- Malformed, absent, or ancestry-uncertain lock records, and a dead line 1 whose recorded anchor is not a live foreign holder, do not satisfy this Claude-specific exception and retain the ordinary guard behavior.
 - A missing or mismatched sidecar or an untrusted id adds nothing to the verdict, so a live owner outside the ancestry still takes this exit exactly as before.
 
 ### Pull-warning verdict by supervision model

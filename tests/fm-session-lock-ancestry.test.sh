@@ -314,6 +314,7 @@ case "$pid:$field:${FM_TEST_DAEMON_PRESENT:-0}" in
   730:comm=:*) printf '%s\n' claude ;;
   730:args=:*) printf '%s\n' 'claude daemon run --origin transient' ;;
   730:ppid=:*) printf '%s\n' 700 ;;
+  730:lstart=:*) [ "${FM_TEST_DAEMON_START-Wed Dec 31 00:00:00 2025}" = '' ] || printf '%s\n' "${FM_TEST_DAEMON_START-Wed Dec 31 00:00:00 2025}" ;;
   720:comm=:*) printf '%s\n' 'claude bg-pty-host' ;;
   720:args=:*) printf '%s\n' 'claude bg-pty-host /tmp/pty.sock 120 40 -- claude --bg-spare' ;;
   720:ppid=:1) printf '%s\n' 730 ;;
@@ -390,12 +391,21 @@ test_same_session_id_owns_a_recycled_background_chain() {
   got=$(FM_TEST_SPARE_START='Fri Jan  2 00:00:00 2026' FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 foreign_owner "$fakebin" "$state") \
     || fail "a reused anchor pid suppressed the foreign-owner verdict"
   [ "$got" = 700 ] || fail "the reused-anchor foreign owner pid was '$got', expected 700"
-  printf 'S1\nanchor=730\nanchor-start=%s\n' "$spare_start" > "$state/.lock-session"
+  printf 'S1\nanchor=730\nanchor-start=%s\n' 'Wed Dec 31 00:00:00 2025' > "$state/.lock-session"
   if FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
     fail "a live recorded anchor outside the run let the same id own the lock"
   fi
-  FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 foreign_owner "$fakebin" "$state" >/dev/null \
+  got=$(FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 foreign_owner "$fakebin" "$state") \
     || fail "a live recorded anchor outside the run suppressed the foreign-owner verdict"
+  [ "$got" = 730 ] || fail "the live recorded anchor's holder pid was '$got', expected the anchor 730"
+  # The same anchor whose start time cannot be read still exists, so it is no
+  # evidence that the holder ended: still foreign, still naming the anchor.
+  if FM_TEST_DAEMON_START='' FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
+    fail "an existing anchor with an unreadable start time let the same id own the lock"
+  fi
+  got=$(FM_TEST_DAEMON_START='' FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 foreign_owner "$fakebin" "$state") \
+    || fail "an existing anchor with an unreadable start time suppressed the foreign-owner verdict"
+  [ "$got" = 730 ] || fail "the unconfirmed anchor's holder pid was '$got', expected the anchor 730"
   printf 'S1\nanchor=710\nanchor-start=%s\n' "$spare_start" > "$state/.lock-session"
   # 2. A different id: the existing refusal, naming the live owner.
   if FM_TEST_SESSION_ID=S2 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then

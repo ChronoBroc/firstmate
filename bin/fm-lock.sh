@@ -289,12 +289,13 @@ confirm_own_lock() {  # <recorded-pid>
 }
 
 # Exit through refuse_live_owner when this session does not own the lock and
-# a live holder exists: the decision's foreign holder, or line 1 $1 when it
-# must not be reclaimed.
+# a holder may be live: the decision's foreign or unknown holder, or line 1 $1
+# when it must not be reclaimed.
 refuse_if_live_holder() {  # <recorded-pid>
-  if fm_session_lock_foreign_owner_live "$STATE"; then
-    refuse_live_owner "$FM_SESSION_LOCK_FOREIGN_OWNER_PID"
-  fi
+  fm_session_lock_decide "$STATE"
+  case "$FM_SESSION_LOCK_DECISION" in
+    foreign|unknown) refuse_live_owner "$FM_SESSION_LOCK_FOREIGN_OWNER_PID" ;;
+  esac
   if fm_session_lock_pid_blocks_reclaim "$1"; then
     refuse_live_owner "$1"
   fi

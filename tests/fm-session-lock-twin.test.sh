@@ -138,7 +138,7 @@ expect_twin_refused() {  # <dir> <n> <orig> <label>
 }
 
 test_e2e_live_twin_of_a_session_never_takes_the_lock() {
-  local dir orig twin late exited exited_start twin_start reused_start
+  local dir orig twin late exited exited_start twin_start reused_start dead_line1 status_out
   dir="$TMP_ROOT/e2e-live-twin"
   make_twin_home "$dir"
   start_twin_role "$dir" orig
@@ -193,6 +193,25 @@ test_e2e_live_twin_of_a_session_never_takes_the_lock() {
   printf 'S1\nanchor=%s\nanchor-start=%s\n' "$twin" "$reused_start" > "$dir/state/.lock-session"
   fire_twin "$dir" twin 4
   expect_twin_refused "$dir" 4 "$orig" "anchor pid reused by the caller"
+
+  # Line 1 names a process that has exited while the recorded anchor, the
+  # original, is still running: the lock is held by that anchor for status,
+  # and the twin is refused naming it with both records left as they were.
+  cp "$dir/sidecar-before-twin" "$dir/state/.lock-session"
+  dead_line1=$(bash -c 'printf "%s\n" "$$"')
+  printf '%s\n' "$dead_line1" > "$dir/state/.lock"
+  cp "$dir/state/.lock" "$dir/lock-dead-line1"
+  status_out=$(FM_HOME="$dir" "$ROOT/bin/fm-lock.sh" status)
+  [ "$status_out" = "lock: held by live harness pid $orig" ] \
+    || fail "a dead line 1 beside a live recorded anchor was reported as '$status_out'"
+  fire_twin "$dir" twin 5
+  expect_code 1 "$(twin_value "$dir" twin 5 lock.rc)" "the twin took a lock whose recorded anchor is still running: $(cat "$dir/state/twin-5/lock.out")"
+  grep -qF "another live process holds the lock under this same session id (pid $orig, session S1) and this session's continuity with that holder could not be verified" "$dir/state/twin-5/lock.out" \
+    || fail "the twin's refusal over a dead line 1 does not name the live anchor $orig: $(cat "$dir/state/twin-5/lock.out")"
+  cmp -s "$dir/lock-dead-line1" "$dir/state/.lock" || fail "the refused twin rewrote the dead line 1"
+  cmp -s "$dir/sidecar-before-twin" "$dir/state/.lock-session" \
+    || fail "the refused twin changed the live anchor's sidecar: $(cat "$dir/state/.lock-session")"
+  printf '%s\n' "$orig" > "$dir/state/.lock"
 
   # The original, whose own pid is line 1, still owns its lock beside an
   # id-only sidecar, and its lock run records its anchor.
@@ -279,6 +298,16 @@ test_e2e_sibling_model_loops_under_a_shared_front_end() {
   cmp -s "$dir/sidecar-before-dup" "$dir/state/.lock-session" \
     || fail "the refused duplicate changed the sidecar: $(cat "$dir/state/.lock-session")"
 
+  # The original loop's start time cannot be read while it still runs: that is
+  # no evidence it ended, so the duplicate is still refused naming it.
+  fire_twin "$dir" sib-dup 2 nostart
+  expect_code 1 "$(twin_value "$dir" sib-dup 2 lock.rc)" "the duplicate loop took the lock while the original's start time was unreadable: $(cat "$dir/state/sib-dup-2/lock.out")"
+  grep -qF "another live process holds the lock under this same session id (pid $orig, session S1) and this session's continuity with that holder could not be verified" "$dir/state/sib-dup-2/lock.out" \
+    || fail "the unverified refusal does not name the original loop $orig: $(cat "$dir/state/sib-dup-2/lock.out")"
+  cmp -s "$dir/lock-before-dup" "$dir/state/.lock" || fail "the unverified duplicate changed lock line 1"
+  cmp -s "$dir/sidecar-before-dup" "$dir/state/.lock-session" \
+    || fail "the unverified duplicate changed the sidecar: $(cat "$dir/state/.lock-session")"
+
   : > "$dir/state/stop-sib-orig"
   local i=0
   while [ "$i" -lt 200 ] && kill -0 "$orig" 2>/dev/null; do
@@ -286,8 +315,8 @@ test_e2e_sibling_model_loops_under_a_shared_front_end() {
     i=$((i + 1))
   done
   kill -0 "$orig" 2>/dev/null && fail "the original loop did not exit"
-  fire_twin "$dir" sib-dup 2
-  expect_code 0 "$(twin_value "$dir" sib-dup 2 lock.rc)" "the surviving loop could not own its front-end's lock after the original loop exited: $(cat "$dir/state/sib-dup-2/lock.out")"
+  fire_twin "$dir" sib-dup 3
+  expect_code 0 "$(twin_value "$dir" sib-dup 3 lock.rc)" "the surviving loop could not own its front-end's lock after the original loop exited: $(cat "$dir/state/sib-dup-3/lock.out")"
   [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$front" ] || fail "the surviving loop moved line 1 off the front-end"
   anchored_sidecar "$dir/state/.lock-session" S1 "$dup" \
     || fail "the surviving loop did not record itself as the anchor: $(cat "$dir/state/.lock-session")"
