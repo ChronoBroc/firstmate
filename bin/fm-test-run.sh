@@ -310,9 +310,9 @@ family_for_basename() {
       printf '%s\n' pure-contract-unit
       ;;
     fm-daemon.test.sh|fm-guard-stale-banner.test.sh|fm-pi-watch-extension.test.sh|\
-    fm-session-lock-ancestry.test.sh|fm-session-lock-twin.test.sh|fm-cursor-primary.test.sh|fm-agy-primary.test.sh|\
+    fm-session-lock-ancestry.test.sh|fm-session-lock-continuity.test.sh|fm-session-lock-twin.test.sh|fm-cursor-primary.test.sh|fm-agy-primary.test.sh|\
     fm-parent-channel-scan-exclusion.test.sh|\
-    fm-supervision-events.test.sh|fm-turnend-guard.test.sh|fm-wake-daemon-lifecycle-e2e.test.sh|\
+    fm-supervision-events.test.sh|fm-turnend-guard.test.sh|fm-turnend-guard-refusal.test.sh|fm-wake-daemon-lifecycle-e2e.test.sh|\
     fm-wake-drain-unread-status.test.sh|\
     fm-tool-update-check.test.sh|\
     fm-mail.test.sh|fm-mail-check.test.sh|\
@@ -923,7 +923,8 @@ tests/fm-send-remote-delivery.test.sh 31964
 tests/fm-send-resolve-key.test.sh 47317
 tests/fm-send-secondmate-marker-herdr-e2e.test.sh 80
 tests/fm-send-secondmate-marker.test.sh 7574
-tests/fm-session-lock-ancestry.test.sh 18918
+tests/fm-session-lock-ancestry.test.sh 8000
+tests/fm-session-lock-continuity.test.sh 11000
 tests/fm-session-lock-ps-denied.test.sh 3012
 tests/fm-session-lock-twin.test.sh 21414
 tests/fm-session-start.test.sh 363574
@@ -971,7 +972,8 @@ tests/fm-tool-update-check.test.sh 14383
 tests/fm-trace-context-lib.test.sh 221
 tests/fm-trace-context-spawn.test.sh 57488
 tests/fm-turnend-foreign-owner-arm-fix.test.sh 5575
-tests/fm-turnend-guard.test.sh 34727
+tests/fm-turnend-guard-refusal.test.sh 8000
+tests/fm-turnend-guard.test.sh 27000
 tests/fm-update.test.sh 11894
 tests/fm-vendor-auth-probe.test.sh 43278
 tests/fm-voice-relay.test.sh 28917

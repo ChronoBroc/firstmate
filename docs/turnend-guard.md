@@ -629,6 +629,8 @@ That warning uses `bin/fm-supervision-instructions.sh --repair-line`, so it alwa
 - Malformed input.
 - Exactly-one-path safety.
 
+`tests/fm-turnend-guard-refusal.test.sh` covers a Claude Stop the shared session-lock decision refuses: on every guard path it ends read-only and leaves the owner's continuation budget, failure records, and the parent's busy record untouched, while the lock owner keeps the guard's ordinary writes.
+
 `tests/fm-turnend-foreign-owner-arm-fix.test.sh` runs the extracted isolated executable reproduction against real auto-arm and turn-end guard scripts.
 It proves that a live foreign owner still prevents arming while repeated non-owner Stops receive a diagnostic and exit safely.
 
