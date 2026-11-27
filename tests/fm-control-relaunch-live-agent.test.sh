@@ -21,6 +21,11 @@ set -u
 # shellcheck source=tests/relaunch-helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/relaunch-helpers.sh"
 
+# Task ids carry this run's own token, so a fixture's /tmp/fm-<id> scratch,
+# and the launch staging beside it, can never be a real task's.
+RL_RUN=rlt$$
+TASK_TMP_GLOBS+=("/tmp/fm-*-$RL_RUN" "/tmp/fm-*-$RL_RUN+*")
+
 test_worktree_agent_probe_finds_only_agents_working_there() {
   local dir agent out rc agent_pid other_pid sub_pid shell_pid
   dir="$TMP_ROOT/probe-$RANDOM"
@@ -224,8 +229,8 @@ test_worktree_agent_probe_survives_a_denied_ps_and_a_partial_listing() {
 
 test_relaunch_refuses_a_raw_launch_worker_still_in_the_worktree() {
   local dir out rc raw_pid
-  dir=$(new_case rawworker rl98)
-  add_ship_task "$dir" rl98 custom-agent
+  dir=$(new_case rawworker rl98-${RL_RUN})
+  add_ship_task "$dir" rl98-${RL_RUN} custom-agent
   # `custom-agent --flag` as a shebang script: its kernel argv is the
   # interpreter followed by the script path, never the script's own name.
   mkdir -p "$dir/rawbin"
@@ -234,7 +239,7 @@ test_relaunch_refuses_a_raw_launch_worker_still_in_the_worktree() {
   printf 'zsh' > "$dir/fake/command"
   start_dir_process "$dir/wt" "$dir/rawbin/custom-agent" --flag; raw_pid=$STARTED_PID
   wait_dir_process_alive "$raw_pid" || fail "the raw-launch script must keep running"
-  out=$(run_spawn "$dir" rl98 --relaunch --harness claude); rc=$?
+  out=$(run_spawn "$dir" rl98-${RL_RUN} --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "a relaunch beside the task's surviving raw-launch worker must refuse"$'\n'"$out"
   assert_contains "$out" "pid $raw_pid (" "the refusal must name the raw-launch script's process"
   ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no replacement agent may be launched"
@@ -244,9 +249,9 @@ test_relaunch_refuses_a_raw_launch_worker_still_in_the_worktree() {
 
 test_relaunch_on_an_incomplete_process_view_refuses_before_the_stop() {
   local dir agent out rc agent_pid=
-  dir=$(new_case winview rl99)
-  add_ship_task "$dir" rl99 claude
-  cp -p "$dir/home/data/rl99/brief.md" "$dir/brief.orig"
+  dir=$(new_case winview rl99-${RL_RUN})
+  add_ship_task "$dir" rl99-${RL_RUN} claude
+  cp -p "$dir/home/data/rl99-${RL_RUN}/brief.md" "$dir/brief.orig"
   if agent=$(agent_standin_named "$dir" claude); then
     start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
     wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
@@ -254,11 +259,11 @@ test_relaunch_on_an_incomplete_process_view_refuses_before_the_stop() {
   # Git for Windows: the replacement's launch could only refuse after a stop.
   printf '#!/bin/sh\necho MINGW64_NT-10.0\n' > "$dir/fakebin/uname"
   chmod +x "$dir/fakebin/uname"
-  out=$(run_control "$dir" rl99 relaunch --note "on windows"); rc=$?
+  out=$(run_control "$dir" rl99-${RL_RUN} relaunch --note "on windows"); rc=$?
   [ "$rc" -ne 0 ] || fail "a relaunch whose replacement could only be refused must refuse first"$'\n'"$out"
   assert_contains "$out" "native Windows processes" "the refusal should name the incomplete process view"
   ! grep -Fqx /exit "$dir/fake/literal" || fail "the running agent must not be stopped"
-  cmp -s "$dir/brief.orig" "$dir/home/data/rl99/brief.md" || fail "the instructions must be left untouched"
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl99-${RL_RUN}/brief.md" || fail "the instructions must be left untouched"
   if [ -n "$agent_pid" ]; then
     assert_contains "$out" "pid $agent_pid (claude)" "the refusal should name the agent it can see"
     stop_dir_process "$agent_pid"
@@ -268,14 +273,14 @@ test_relaunch_on_an_incomplete_process_view_refuses_before_the_stop() {
 
 test_relaunch_refuses_a_brief_backup_it_cannot_take() {
   local dir out rc
-  dir=$(new_case unusablebackup rl97)
-  add_ship_task "$dir" rl97 claude
-  cp -p "$dir/home/data/rl97/brief.md" "$dir/brief.orig"
-  mkdir -p "$dir/home/state/rl97.control-relaunch.brief-prior"
-  out=$(run_control "$dir" rl97 relaunch --note "the backup path is a directory"); rc=$?
+  dir=$(new_case unusablebackup rl97-${RL_RUN})
+  add_ship_task "$dir" rl97-${RL_RUN} claude
+  cp -p "$dir/home/data/rl97-${RL_RUN}/brief.md" "$dir/brief.orig"
+  mkdir -p "$dir/home/state/rl97-${RL_RUN}.control-relaunch.brief-prior"
+  out=$(run_control "$dir" rl97-${RL_RUN} relaunch --note "the backup path is a directory"); rc=$?
   [ "$rc" -ne 0 ] || fail "a relaunch whose instructions cannot be preserved must refuse"$'\n'"$out"
-  assert_contains "$out" "could not preserve task rl97's instructions" "the refusal should say the instructions could not be preserved"
-  cmp -s "$dir/brief.orig" "$dir/home/data/rl97/brief.md" \
+  assert_contains "$out" "could not preserve task rl97-${RL_RUN}'s instructions" "the refusal should say the instructions could not be preserved"
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl97-${RL_RUN}/brief.md" \
     || fail "instructions that could not be preserved must never receive the progress note"
   ! grep -Fqx /exit "$dir/fake/literal" || fail "the agent must not be stopped"
   pass "fm-control relaunch: a brief backup that cannot be taken refuses before the note is appended"
@@ -283,33 +288,33 @@ test_relaunch_refuses_a_brief_backup_it_cannot_take() {
 
 test_relaunch_refuses_an_agent_still_working_in_the_worktree() {
   local dir agent out rc agent_pid
-  dir=$(new_case beside rl90)
-  add_ship_task "$dir" rl90 claude
+  dir=$(new_case beside rl90-${RL_RUN})
+  add_ship_task "$dir" rl90-${RL_RUN} claude
   agent=$(agent_standin_named "$dir" claude) || {
     pass "fm-control relaunch beside a live agent: skipped - no stand-in survives a rename on this host"
     return 0
   }
-  cp -p "$dir/home/data/rl90/brief.md" "$dir/brief.orig"
+  cp -p "$dir/home/data/rl90-${RL_RUN}/brief.md" "$dir/brief.orig"
   start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
   wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
-  out=$(run_spawn "$dir" rl90 --relaunch --harness claude); rc=$?
+  out=$(run_spawn "$dir" rl90-${RL_RUN} --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "fm-spawn --relaunch must refuse an endpoint that reads alive"$'\n'"$out"
   assert_contains "$out" "a relaunch requires a positively agent-free endpoint" "fm-spawn should refuse on the endpoint state"
   assert_contains "$out" "pid $agent_pid (claude)" "fm-spawn's endpoint-state refusal must name the agent in the worktree"
   printf 'vim' > "$dir/fake/command"
-  out=$(run_control "$dir" rl90 exit); rc=$?
+  out=$(run_control "$dir" rl90-${RL_RUN} exit); rc=$?
   expect_code 1 "$rc" "exit must refuse an unattributed endpoint"$'\n'"$out"
   assert_contains "$out" "unattributed endpoint" "exit should refuse the unattributed endpoint"
   assert_contains "$out" "pid $agent_pid (claude)" "exit's unattributed-endpoint refusal must name the agent in the worktree"
   printf 'claude' > "$dir/fake/command"
   : > "$dir/fake/literal"
-  out=$(run_control "$dir" rl90 relaunch --note "lost its terminal"); rc=$?
+  out=$(run_control "$dir" rl90-${RL_RUN} relaunch --note "lost its terminal"); rc=$?
   [ "$rc" -ne 0 ] || fail "a relaunch beside a live agent in the worktree must refuse"$'\n'"$out"
   assert_contains "$out" "pid $agent_pid (claude)" "the refusal must name the live agent's pid"
   assert_contains "$out" "still working in its local copy" "the outcome must not claim no agent is running"
   assert_not_contains "$out" "no agent is running" "an agent is running in the worktree"
   ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no replacement agent may be launched"
-  cmp -s "$dir/brief.orig" "$dir/home/data/rl90/brief.md" \
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl90-${RL_RUN}/brief.md" \
     || fail "the live agent's instructions must be restored byte-exact"
   kill -0 "$agent_pid" 2>/dev/null || fail "the found agent must be left running, never killed"
   stop_dir_process "$agent_pid"
@@ -318,8 +323,8 @@ test_relaunch_refuses_an_agent_still_working_in_the_worktree() {
 
 test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
   local dir agent out rc agent_pid waiter_pid
-  dir=$(new_case settling rl91)
-  add_ship_task "$dir" rl91 claude
+  dir=$(new_case settling rl91-${RL_RUN})
+  add_ship_task "$dir" rl91-${RL_RUN} claude
   agent=$(agent_standin_named "$dir" claude) || {
     pass "fm-control relaunch after a stopping agent: skipped - no stand-in survives a rename on this host"
     return 0
@@ -339,7 +344,7 @@ test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
   # shellcheck disable=SC2031 # The background PID is captured immediately in this shell.
   waiter_pid=$!
   LIVE_PIDS+=("$waiter_pid")
-  out=$(RUN_CONTROL_EXIT_WAIT=10 run_control "$dir" rl91 relaunch --note "stopped mid-refactor"); rc=$?
+  out=$(RUN_CONTROL_EXIT_WAIT=10 run_control "$dir" rl91-${RL_RUN} relaunch --note "stopped mid-refactor"); rc=$?
   reap_dir_process "$waiter_pid"
   reap_dir_process "$agent_pid"
   expect_code 0 "$rc" "an agent the relaunch stopped must be waited for until it leaves the worktree"$'\n'"$out"
@@ -351,8 +356,8 @@ test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
 
 test_relaunch_waits_only_for_the_agent_it_stopped() {
   local dir agent out rc stopped_pid other_pid waiter_pid started
-  dir=$(new_case attributed rl94)
-  add_ship_task "$dir" rl94 claude
+  dir=$(new_case attributed rl94-${RL_RUN})
+  add_ship_task "$dir" rl94-${RL_RUN} claude
   agent=$(agent_standin_named "$dir" claude) || {
     pass "fm-control relaunch beside an unrelated agent: skipped - no stand-in survives a rename on this host"
     return 0
@@ -371,7 +376,7 @@ test_relaunch_waits_only_for_the_agent_it_stopped() {
   waiter_pid=$!
   LIVE_PIDS+=("$waiter_pid")
   started=$SECONDS
-  out=$(RUN_CONTROL_EXIT_WAIT=30 run_control "$dir" rl94 relaunch --note "beside an unrelated agent"); rc=$?
+  out=$(RUN_CONTROL_EXIT_WAIT=30 run_control "$dir" rl94-${RL_RUN} relaunch --note "beside an unrelated agent"); rc=$?
   reap_dir_process "$waiter_pid"
   reap_dir_process "$stopped_pid"
   [ $((SECONDS - started)) -lt 20 ] \
@@ -386,13 +391,13 @@ test_relaunch_waits_only_for_the_agent_it_stopped() {
 
 test_relaunch_stopping_rollback_reports_a_survivor_in_the_worktree() {
   local dir agent out rc agent_pid real_mv
-  dir=$(new_case survivor rl95)
-  add_ship_task "$dir" rl95 claude
+  dir=$(new_case survivor rl95-${RL_RUN})
+  add_ship_task "$dir" rl95-${RL_RUN} claude
   agent=$(agent_standin_named "$dir" claude) || {
     pass "fm-control relaunch stopping rollback beside a survivor: skipped - no stand-in survives a rename on this host"
     return 0
   }
-  cp -p "$dir/home/data/rl95/brief.md" "$dir/brief.orig"
+  cp -p "$dir/home/data/rl95-${RL_RUN}/brief.md" "$dir/brief.orig"
   start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
   wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
   # The endpoint's own agent stops, but the transaction cannot record that it
@@ -400,13 +405,13 @@ test_relaunch_stopping_rollback_reports_a_survivor_in_the_worktree() {
   real_mv=$(command -v mv)
   make_mv_failure_stub "$dir"
   out=$(FM_REAL_MV="$real_mv" FM_FAKE_JOURNAL_PHASE_MV_FAIL=exited \
-    run_control "$dir" rl95 relaunch --note "survivor in the worktree"); rc=$?
+    run_control "$dir" rl95-${RL_RUN} relaunch --note "survivor in the worktree"); rc=$?
   [ "$rc" -ne 0 ] || fail "a relaunch whose exited phase cannot be recorded must fail"$'\n'"$out"
-  [ "$(journal_field "$dir" rl95 phase)" = failed:stopping ] \
-    || fail "the rollback should run from the stopping phase, got $(journal_field "$dir" rl95 phase)"
+  [ "$(journal_field "$dir" rl95-${RL_RUN} phase)" = failed:stopping ] \
+    || fail "the rollback should run from the stopping phase, got $(journal_field "$dir" rl95-${RL_RUN} phase)"
   assert_contains "$out" "pid $agent_pid (claude)" "the stopping rollback must name the agent still in the worktree"
   assert_not_contains "$out" "no agent is running" "an agent is running in the worktree"
-  cmp -s "$dir/brief.orig" "$dir/home/data/rl95/brief.md" \
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl95-${RL_RUN}/brief.md" \
     || fail "the surviving agent's instructions must be restored byte-exact"
   stop_dir_process "$agent_pid"
   pass "fm-control relaunch: a rollback from stopping reports and restores for an agent surviving in the worktree"
@@ -414,24 +419,24 @@ test_relaunch_stopping_rollback_reports_a_survivor_in_the_worktree() {
 
 test_relaunch_rollback_never_restores_an_earlier_relaunch_backup() {
   local dir out rc
-  dir=$(new_case stalebrief rl96)
-  add_ship_task "$dir" rl96 claude
-  cp -p "$dir/home/data/rl96/brief.md" "$dir/brief.orig"
+  dir=$(new_case stalebrief rl96-${RL_RUN})
+  add_ship_task "$dir" rl96-${RL_RUN} claude
+  cp -p "$dir/home/data/rl96-${RL_RUN}/brief.md" "$dir/brief.orig"
   # An earlier relaunch left its backup behind; this one fails before it
   # takes its own, because its progress note cannot be written.
-  printf '# an earlier relaunch'"'"'s instructions\n' > "$dir/home/state/rl96.control-relaunch.brief-prior"
-  mkdir -p "$dir/home/state/rl96.control-relaunch.note"
-  out=$(run_control "$dir" rl96 relaunch --note "cannot be written"); rc=$?
+  printf '# an earlier relaunch'"'"'s instructions\n' > "$dir/home/state/rl96-${RL_RUN}.control-relaunch.brief-prior"
+  mkdir -p "$dir/home/state/rl96-${RL_RUN}.control-relaunch.note"
+  out=$(run_control "$dir" rl96-${RL_RUN} relaunch --note "cannot be written"); rc=$?
   [ "$rc" -ne 0 ] || fail "a relaunch whose note cannot be written must fail"$'\n'"$out"
-  cmp -s "$dir/brief.orig" "$dir/home/data/rl96/brief.md" \
-    || fail "the current instructions must never be replaced by an earlier relaunch's backup"$'\n'"$(cat "$dir/home/data/rl96/brief.md")"
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl96-${RL_RUN}/brief.md" \
+    || fail "the current instructions must never be replaced by an earlier relaunch's backup"$'\n'"$(cat "$dir/home/data/rl96-${RL_RUN}/brief.md")"
   pass "fm-control relaunch: a rollback never restores a backup it did not take"
 }
 
 test_relaunch_refusal_of_an_unprovable_absence_names_the_worktree_agent() {
   local dir agent out rc agent_pid recorded_pid
-  dir=$(new_case unprovable rl93)
-  add_ship_task "$dir" rl93 claude
+  dir=$(new_case unprovable rl93-${RL_RUN})
+  add_ship_task "$dir" rl93-${RL_RUN} claude
   agent=$(agent_standin_named "$dir" claude) || {
     pass "relaunch refusal of an unprovable absence: skipped - no stand-in survives a rename on this host"
     return 0
@@ -440,19 +445,19 @@ test_relaunch_refusal_of_an_unprovable_absence_names_the_worktree_agent() {
   # while the server this process addresses on the same socket lacks its window.
   start_tmux_named_process "$dir"; recorded_pid=$TMUX_NAMED_PID
   start_tmux_named_process "$dir/replacement"
-  record_tmux_server "$dir" rl93 "$recorded_pid:1700000000"
+  record_tmux_server "$dir" rl93-${RL_RUN} "$recorded_pid:1700000000"
   serve_tmux_from "$dir" "$TMUX_NAMED_PID:1700000001"
-  strand_endpoint "$dir" rl93
+  strand_endpoint "$dir" rl93-${RL_RUN}
   start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
   wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
-  out=$(run_spawn "$dir" rl93 --relaunch --harness claude); rc=$?
+  out=$(run_spawn "$dir" rl93-${RL_RUN} --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "fm-spawn --relaunch must refuse an endpoint it cannot prove absent"$'\n'"$out"
   assert_contains "$out" "cannot be proven absent" "fm-spawn should refuse on the endpoint check"
   assert_contains "$out" "pid $agent_pid (claude)" "fm-spawn's endpoint refusal must name the agent still in the worktree"
-  out=$(run_control "$dir" rl93 exit); rc=$?
+  out=$(run_control "$dir" rl93-${RL_RUN} exit); rc=$?
   expect_code 1 "$rc" "exit must refuse an endpoint it cannot prove absent"$'\n'"$out"
   assert_contains "$out" "pid $agent_pid (claude)" "exit's endpoint refusal must name the agent still in the worktree"
-  out=$(run_control "$dir" rl93 relaunch --note "after the server fault"); rc=$?
+  out=$(run_control "$dir" rl93-${RL_RUN} relaunch --note "after the server fault"); rc=$?
   expect_code 1 "$rc" "relaunch must refuse an endpoint it cannot prove absent"$'\n'"$out"
   assert_contains "$out" "pid $agent_pid (claude)" "relaunch's endpoint refusal must name the agent still in the worktree"
   [ ! -s "$dir/fake/literal" ] || fail "no replacement agent may be launched"
@@ -466,12 +471,12 @@ test_spawn_relaunch_refuses_when_the_worktree_probe_is_inconclusive() {
     pass "fm-spawn --relaunch inconclusive probe: skipped - this host reads working directories from /proc, not lsof"
     return 0
   fi
-  dir=$(new_case inconclusive rl92)
-  add_ship_task "$dir" rl92 claude
+  dir=$(new_case inconclusive rl92-${RL_RUN})
+  add_ship_task "$dir" rl92-${RL_RUN} claude
   printf 'zsh' > "$dir/fake/command"
   printf '#!/bin/sh\nprintf "p1\\nn/\\n"\nexit 1\n' > "$dir/fakebin/lsof"
   chmod +x "$dir/fakebin/lsof"
-  out=$(run_spawn "$dir" rl92 --relaunch --harness claude); rc=$?
+  out=$(run_spawn "$dir" rl92-${RL_RUN} --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "an inconclusive worktree probe must refuse the relaunch"$'\n'"$out"
   assert_contains "$out" "could not establish whether an agent process is still working" "the refusal should say the probe was inconclusive"
   assert_contains "$out" "lsof could not list every working directory" "a failed lsof that listed some rows must still refuse, naming the cause"
@@ -481,24 +486,24 @@ test_spawn_relaunch_refuses_when_the_worktree_probe_is_inconclusive() {
 
 test_secondmate_respawn_refuses_an_agent_still_working_in_its_home() {
   local dir home agent out rc agent_pid
-  dir=$(new_case smbeside sm90)
+  dir=$(new_case smbeside sm90-${RL_RUN})
   home="$dir/home"
   agent=$(agent_standin_named "$dir" codex) || {
     pass "fm-spawn --secondmate beside a live agent: skipped - no stand-in survives a rename on this host"
     return 0
   }
-  mkdir -p "$home/data/sm90"
-  printf '# secondmate brief\n' > "$home/data/sm90/brief.md"
+  mkdir -p "$home/data/sm90-${RL_RUN}"
+  printf '# secondmate brief\n' > "$home/data/sm90-${RL_RUN}/brief.md"
   fm_git_worktree "$dir/proj" "$dir/smhome" sm-branch
   mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin"
-  printf 'sm90\n' > "$dir/smhome/.fm-secondmate-home"
+  printf '%s\n' "sm90-${RL_RUN}" > "$dir/smhome/.fm-secondmate-home"
   printf '# agents\n' > "$dir/smhome/AGENTS.md"
-  printf '%s\n' "fm-sm90" > "$dir/fake/windows"
+  printf '%s\n' "fm-sm90-${RL_RUN}" > "$dir/fake/windows"
   printf '%s' "$dir/smhome" > "$dir/fake/cwd"
   printf 'zsh' > "$dir/fake/command"
   start_dir_process "$dir/smhome" "$agent" 600; agent_pid=$STARTED_PID
   wait_probe_rc "$dir/smhome" 0 || fail "the stand-in agent never appeared in the secondmate home"
-  out=$(run_spawn "$dir" sm90 "$dir/smhome" --secondmate claude); rc=$?
+  out=$(run_spawn "$dir" sm90-${RL_RUN} "$dir/smhome" --secondmate claude); rc=$?
   expect_code 1 "$rc" "a secondmate respawn beside its live agent must refuse"$'\n'"$out"
   assert_contains "$out" "the secondmate home" "the refusal should name the secondmate home"
   assert_contains "$out" "pid $agent_pid (codex)" "the refusal must name the live agent's pid"
@@ -507,7 +512,8 @@ test_secondmate_respawn_refuses_an_agent_still_working_in_its_home() {
   wait_probe_rc "$dir/smhome" 1 || fail "the stand-in agent should be gone"
   : > "$dir/fake/literal"
   : > "$dir/fake/windows"
-  out=$(run_spawn "$dir" sm90 "$dir/smhome" --secondmate claude); rc=$?
+  register_task_tmp "sm90-${RL_RUN}"
+  out=$(run_spawn "$dir" sm90-${RL_RUN} "$dir/smhome" --secondmate claude); rc=$?
   expect_code 0 "$rc" "once its agent has exited, the secondmate respawn must succeed"$'\n'"$out"
   assert_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "the respawn should deliver the replacement launch"
   pass "fm-spawn --secondmate: refuses and names the pid of an agent still working in the home"

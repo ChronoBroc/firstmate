@@ -26,6 +26,9 @@ TMP_ROOT=$(fm_test_tmproot "$(basename "$0" .test.sh)")
 mkdir -p "$TMP_ROOT"
 TMP_ROOT=$(cd "$TMP_ROOT" && pwd)
 TASK_TMPS=()
+# Glob patterns of per-task scratch a suite owns outright (its task ids are
+# unique to the run), removed on exit.
+TASK_TMP_GLOBS=()
 # Real processes the worktree-agent probe tests start, stopped on exit.
 LIVE_PIDS=()
 
@@ -36,6 +39,9 @@ relaunch_cleanup() {
   done
   for d in "${TASK_TMPS[@]:-}"; do
     [ -n "$d" ] && fm_test_remove_tree "$d"
+  done
+  for d in ${TASK_TMP_GLOBS[@]+${TASK_TMP_GLOBS[@]}}; do
+    [ -e "$d" ] && fm_test_remove_tree "$d"
   done
   stop_tmux_named_processes
   for d in "${TMP_TMUX_ROOTS[@]:-}"; do
@@ -274,7 +280,14 @@ EOF
   printf '%s\n' "fm-$id" > "$dir/fake/windows"
   printf '%s' "$ses" > "$dir/fake/session-name"
   printf '%s' "$wt" > "$dir/fake/cwd"
-  TASK_TMPS+=("/tmp/fm-$id")
+  register_task_tmp "$id"
+}
+
+# register_task_tmp <id>: have this run's cleanup remove /tmp/fm-<id>, which a
+# spawn creates, only when it does not exist yet - so a directory this run did
+# not create is never removed.
+register_task_tmp() {  # <id>
+  [ -e "/tmp/fm-$1" ] || [ -L "/tmp/fm-$1" ] || TASK_TMPS+=("/tmp/fm-$1")
 }
 
 run_control() {  # <case-dir> <args...>
