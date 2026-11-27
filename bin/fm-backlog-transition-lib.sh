@@ -111,12 +111,30 @@ fm_backlog_control_bytes_valid() {  # <allow-newline: 0|1> <od-bytes>
   '
 }
 
+# fm_backlog_path_final_symlink <path>: true when <path>'s final component -
+# after any trailing `/` and `/.` spellings - is a symbolic link, whether or
+# not the path exists yet; read before any resolution erases the link.
+fm_backlog_path_final_symlink() {  # <path>
+  local check=$1
+  while :; do
+    case "$check" in
+      /) break ;;
+      */) check=${check%/} ;;
+      */.) check=${check%/.} ;;
+      .) break ;;
+      *) break ;;
+    esac
+    [ -n "$check" ] || { check=/; break; }
+  done
+  [ -L "$check" ]
+}
+
 fm_backlog_directory_present() {
   local path=$1 label=$2 check=$1
   while [ "$check" != / ] && [ "${check%/}" != "$check" ]; do
     check=${check%/}
   done
-  if [ ! -d "$check" ] || [ -L "$check" ]; then
+  if [ ! -d "$check" ] || fm_backlog_path_final_symlink "$path"; then
     FM_BACKLOG_TRANSITION_ERROR="$label is not a real directory at $path"
     return 1
   fi
@@ -659,9 +677,64 @@ fm_backlog_canonical_existing() {
   ' "$1" 2>/dev/null
 }
 
+# fm_backlog_home_contained <path> <label>: <path> (or, while it does not
+# exist, its nearest existing ancestor) may not enter FM_HOME or any directory
+# inside it and then resolve outside it - a link in its spelling redirecting
+# into another home - and the part not created yet may hold no `..` or link.
+# Both resolve physically from the same working directory; a path that never
+# enters FM_HOME is an explicit external choice and passes. On success
+# FM_BACKLOG_CONTAINED_PATH names the directory the check evaluated: <path>
+# itself, or its physical spelling when a `..` component would let a logical
+# `cd` reach a different directory.
+fm_backlog_home_contained() {  # <path> <label>
+  local path=$1 label=$2 rc=0 resolved
+  FM_BACKLOG_CONTAINED_PATH=
+  [ -n "${FM_HOME:-}" ] || { FM_BACKLOG_CONTAINED_PATH=$path; return 0; }
+  resolved=$(LC_ALL=C perl -MCwd=realpath,getcwd -e '
+    my ($path, $home) = @ARGV;
+    exit 5 if $path =~ /[\x00-\x1f\x7f]/;
+    my $home_real = realpath($home);
+    exit 3 unless defined $home_real && -d $home_real;
+    $path = getcwd() . "/" . $path unless $path =~ m{^/};
+    my ($prefix, $through, $last, $missing, @rest) = ("", 0, realpath("/"), 0);
+    for my $part (split m{/}, $path) {
+      next if $part eq "";
+      $prefix .= "/$part";
+      if (!$missing && -e $prefix) {
+        my $real = realpath($prefix);
+        exit 1 unless defined $real;
+        $through = 1 if $real eq $home_real || index($real, "$home_real/") == 0;
+        $last = $real;
+        next;
+      }
+      $missing = 1;
+      exit 4 if $part eq ".." || -l $prefix;
+      push @rest, $part unless $part eq ".";
+    }
+    exit 1 if $through && $last ne $home_real && index($last, "$home_real/") != 0;
+    my $physical = @rest ? ($last eq "/" ? "" : $last) . "/" . join("/", @rest) : $last;
+    exit 5 if $physical =~ /[\x00-\x1f\x7f]/;
+    print $physical;
+  ' "$path" "$FM_HOME" 2>/dev/null) || rc=$?
+  case "$rc" in
+    0)
+      case "/$path/" in
+        */../*) FM_BACKLOG_CONTAINED_PATH=$resolved ;;
+        *) FM_BACKLOG_CONTAINED_PATH=$path ;;
+      esac
+      return 0
+      ;;
+    1) FM_BACKLOG_TRANSITION_ERROR="$label resolves outside this home at $path" ;;
+    4) FM_BACKLOG_TRANSITION_ERROR="$label steps through a part that does not exist yet at $path" ;;
+    5) FM_BACKLOG_TRANSITION_ERROR="$label resolves through a control character at $path" ;;
+    *) FM_BACKLOG_TRANSITION_ERROR="$label home directory cannot be resolved at $FM_HOME" ;;
+  esac
+  return 1
+}
+
 fm_backlog_record_parent_authorized() {  # <path> <label> <root> [parent-only]
   local path=$1 label=$2 root=$3 parent_only=${4:-} parent base parent_resolved expected_path
-  local path_resolved root_resolved root_prefix home_resolved final_matches=1
+  local path_resolved root_resolved root_prefix final_matches=1
   parent=${path%/*}
   [ "$parent" != "$path" ] || parent=.
   base=${path##*/}
@@ -673,23 +746,7 @@ fm_backlog_record_parent_authorized() {  # <path> <label> <root> [parent-only]
     FM_BACKLOG_TRANSITION_ERROR="$label authorized directory is not a directory at $root"
     return 1
   }
-  if [ -n "${FM_HOME:-}" ]; then
-    case "$root" in
-      "$FM_HOME"|"$FM_HOME"/*)
-        home_resolved=$(fm_backlog_canonical_existing "$FM_HOME") || {
-          FM_BACKLOG_TRANSITION_ERROR="$label home directory cannot be resolved at $FM_HOME"
-          return 1
-        }
-        case "$root_resolved" in
-          "$home_resolved"|"$home_resolved"/*) ;;
-          *)
-            FM_BACKLOG_TRANSITION_ERROR="$label authorized directory resolves outside this home at $root"
-            return 1
-            ;;
-        esac
-        ;;
-    esac
-  fi
+  fm_backlog_home_contained "$root" "$label authorized directory" || return 1
   parent_resolved=$(fm_backlog_canonical_existing "$parent") || {
     FM_BACKLOG_TRANSITION_ERROR="$label parent directory cannot be resolved at $path"
     return 1

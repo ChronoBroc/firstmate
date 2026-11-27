@@ -79,8 +79,6 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 . "$SCRIPT_DIR/fm-cursor-lib.sh"
 # shellcheck source=bin/fm-gemini-lib.sh
 . "$SCRIPT_DIR/fm-gemini-lib.sh"
-# shellcheck source=bin/fm-hermes-process-lib.sh
-. "${SCRIPT_DIR:-/}/fm-hermes-process-lib.sh"
 # shellcheck source=bin/fm-omp-process-lib.sh
 . "${SCRIPT_DIR:-/}/fm-omp-process-lib.sh"
 

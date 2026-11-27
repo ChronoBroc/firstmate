@@ -103,6 +103,10 @@
 #   Only a crewmate or scout rebinds: a secondmate whose endpoint is gone is
 #   respawned by its own owner (`--secondmate`, driven by the session-start
 #   liveness sweep).
+#   Whatever the endpoint reads, a relaunch, and a --secondmate spawn into an
+#   existing home, refuses while a live agent process still works in that
+#   worktree or home (spawn_refuse_if_live_agent_in below; docs/agent-control.md
+#   owns the rule).
 #   Every fresh ship/scout launch and replacement explicitly enters the recorded
 #   worktree immediately before trust setup and brief delivery, and a pre-launch
 #   cwd check refuses any endpoint that still reports another copy; a Herdr shell
@@ -829,12 +833,57 @@ resolve_directory_input() {
 
 FM_HOME=$(resolve_directory_input FM_HOME "$FM_HOME") || exit 1
 if [ -n "${FM_STATE_OVERRIDE:-}" ]; then
-  FM_STATE_OVERRIDE=$(resolve_directory_input FM_STATE_OVERRIDE "$FM_STATE_OVERRIDE") || exit 1
+  resolve_directory_input FM_STATE_OVERRIDE "$FM_STATE_OVERRIDE" >/dev/null || exit 1
+  case "$FM_STATE_OVERRIDE" in /*) state_override_relative= ;; *) state_override_relative=1 ;; esac
+  ! fm_backlog_path_final_symlink "$FM_STATE_OVERRIDE" || {
+    echo "error: spawn refused: state directory is not a real directory at $FM_STATE_OVERRIDE" >&2
+    exit 1
+  }
+  fm_backlog_home_contained "$FM_STATE_OVERRIDE" "state directory" || {
+    echo "error: spawn refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
+    exit 1
+  }
+  [ -z "$state_override_relative" ] || [ -d "$FM_BACKLOG_CONTAINED_PATH" ] || {
+    echo "error: FM_STATE_OVERRIDE directory cannot be resolved: $FM_STATE_OVERRIDE" >&2
+    exit 1
+  }
+  unset state_override_relative
+  FM_STATE_OVERRIDE=$(resolve_directory_input FM_STATE_OVERRIDE "$FM_BACKLOG_CONTAINED_PATH") || exit 1
 fi
+STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+# spawn_refusal_note <status>: a relaunch, or a --secondmate respawn of an
+# existing local task, that exits nonzero without an fm-control transaction
+# owning its report names any agent still working in the recorded worktree
+# (fm_agent_process_record_note) on a line of its own after its reason,
+# keeping its status (fm_agent_process_fold_survivor lets a first-line summary
+# carry it). Armed here, before any later precondition can fail, and kept by
+# spawn_abort_cleanup.
+SPAWN_NOTE_ID=
+case "${1:-}" in -*|'') ;; *) SPAWN_NOTE_ID=$1 ;; esac
+SPAWN_NOTE_MODE=
+for spawn_note_arg in "$@"; do
+  case "$spawn_note_arg" in --relaunch|--secondmate) SPAWN_NOTE_MODE=$spawn_note_arg ;; esac
+done
+unset spawn_note_arg
+SPAWN_LIVE_NOTE_SHOWN=0
+spawn_refusal_note() {  # <status>
+  [ "$1" -ne 0 ] && [ -n "$SPAWN_NOTE_MODE" ] && [ -n "$SPAWN_NOTE_ID" ] || return 0
+  [ "$SPAWN_LIVE_NOTE_SHOWN" != 1 ] && [ -z "${FM_CONTROL_RELAUNCH_TX:-}" ] || return 0
+  (
+    if ! declare -F fm_agent_process_record_note >/dev/null 2>&1; then
+      { . "$SCRIPT_DIR/fm-backend.sh" && . "$SCRIPT_DIR/fm-agent-process-lib.sh"; } >/dev/null 2>&1 || exit 0
+    fi
+    declare -F fm_task_id_creation_valid >/dev/null 2>&1 || . "$SCRIPT_DIR/fm-pr-lib.sh" >/dev/null 2>&1 || exit 0
+    fm_task_id_creation_valid "$SPAWN_NOTE_ID" || exit 0
+    note=$(fm_agent_process_record_note "$STATE" "$SPAWN_NOTE_ID" 2>/dev/null) || note=
+    [ -z "$note" ] || printf '%s\n' "${note# }" >&2
+  )
+  return 0
+}
+trap 'spawn_refusal_note "$?"' EXIT
 if [ -n "${FM_DATA_OVERRIDE:-}" ]; then
   FM_DATA_OVERRIDE=$(resolve_directory_input FM_DATA_OVERRIDE "$FM_DATA_OVERRIDE") || exit 1
 fi
-STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
@@ -995,6 +1044,8 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-polytoken-lib.sh"
 # shellcheck source=bin/fm-cursor-lib.sh
 . "$SCRIPT_DIR/fm-cursor-lib.sh"
+# shellcheck source=bin/fm-agent-process-lib.sh
+. "$SCRIPT_DIR/fm-agent-process-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
 # shellcheck source=bin/fm-dod-lib.sh
@@ -1803,6 +1854,7 @@ spawn_orca_reclaim_launch_file() {
 
 spawn_abort_cleanup() {
   local status=$?
+  spawn_refusal_note "$status"
   if [ "$RELAUNCH_REPLACEMENT_PENDING" = 1 ] &&
     [ "$SPAWN_META_PUBLISH_STARTED" = 1 ] &&
     [ -n "$SPAWN_META_TMP" ] &&
@@ -2256,6 +2308,7 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   exit "$rc"
 fi
 ID=${POS[0]}
+SPAWN_NOTE_ID=$ID
 fm_task_id_creation_valid "$ID" || {
   echo "error: invalid task id" >&2
   exit 2
@@ -2291,6 +2344,27 @@ fi
 if [ "$RELAUNCH" -ne 1 ]; then
   fm_lease_forbid_branch "new-task spawn (fm-spawn)" --away-relocated
 fi
+# spawn_refuse_if_live_agent_in <dir> <what> [launch-exe]: exit 1 naming the
+# pid when a live agent process - or one running the task's recorded raw
+# launch executable - works in <dir>; an inconclusive probe also exits 1.
+spawn_refuse_if_live_agent_in() {
+  local dir=$1 what=$2 exe=${3:-} out rc=0
+  out=$(fm_agent_process_live_in_dir "$dir" "$exe") || rc=$?
+  [ "$rc" -eq 1 ] || SPAWN_LIVE_NOTE_SHOWN=1
+  case "$rc" in
+    1) return 0 ;;
+    0)
+      echo "error: refusing to start an agent for $ID: $what $dir already has a live agent process working in it, whatever its recorded endpoint reads from here; stop that agent, or confirm it is not this task's, before launching another" >&2
+      fm_agent_process_survivor_line "$dir" "$out" >&2
+      printf '\n' >&2
+      exit 1
+      ;;
+    *)
+      echo "error: refusing to start an agent for $ID: could not establish whether an agent process is still working in $what $dir (${out:-probe failed}); an unproven answer is treated as a live agent" >&2
+      exit 1
+      ;;
+  esac
+}
 spawn_refuse_if_away_spend_cap() {
   [ "$KIND" != secondmate ] || return 0
   if [ "$RELAUNCH" -eq 1 ]; then
@@ -2645,6 +2719,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: task $ID's recorded worktree '${RELAUNCH_WT:-none}' is missing; refusing to relaunch without the local copy its work lives in" >&2
     exit 1
   }
+  [ "$KIND" = secondmate ] \
+    || spawn_refuse_if_live_agent_in "$RELAUNCH_WT" "the recorded worktree" "$RELAUNCH_PRIOR_HARNESS"
   if [ "$KIND" = secondmate ]; then
     FIRSTMATE_HOME=$(fm_meta_get "$RELAUNCH_META" home)
     [ -n "$FIRSTMATE_HOME" ] || FIRSTMATE_HOME=$RELAUNCH_WT
@@ -4168,7 +4244,7 @@ validate_firstmate_home_for_spawn() {
     echo "error: firstmate home $home is not a seeded secondmate home" >&2
     return 1
   fi
-  marker_id=$(cat "$abs_home/$SUB_HOME_MARKER" 2>/dev/null || true)
+  marker_id=$(fm_agent_process_home_marker "$abs_home") || marker_id=
   if [ "$marker_id" != "$id" ]; then
     echo "error: firstmate home $home is marked for secondmate ${marker_id:-unknown}, expected $id" >&2
     return 1
@@ -4216,12 +4292,16 @@ validate_firstmate_operational_dirs() {
 }
 
 if [ "$KIND" = secondmate ]; then
-  if [ -z "$FIRSTMATE_HOME" ] && { [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; }; then
+  SECONDMATE_RECORD=
+  if [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; then
     fm_backlog_record_present "$STATE/$ID.meta" "task record" "$STATE" || {
       echo "error: secondmate task record is unsafe: $FM_BACKLOG_TRANSITION_ERROR" >&2
       exit 1
     }
-    FIRSTMATE_HOME=$(grep '^home=' "$STATE/$ID.meta" | cut -d= -f2- || true)
+    SECONDMATE_RECORD=$STATE/$ID.meta
+  fi
+  if [ -z "$FIRSTMATE_HOME" ] && [ -n "$SECONDMATE_RECORD" ]; then
+    FIRSTMATE_HOME=$(grep '^home=' "$SECONDMATE_RECORD" | cut -d= -f2- || true)
   fi
   if [ -z "$FIRSTMATE_HOME" ]; then
     FIRSTMATE_HOME=$(secondmate_registry_value "$ID" home || true)
@@ -4234,6 +4314,8 @@ if [ "$KIND" = secondmate ]; then
     exit 1
   }
   PROJ_ABS=$(validate_firstmate_home_for_spawn "$ID" "$FIRSTMATE_HOME")
+  spawn_refuse_if_live_agent_in "$PROJ_ABS" "the secondmate home" \
+    "$( { [ -n "$SECONDMATE_RECORD" ] && fm_meta_get "$SECONDMATE_RECORD" harness; } || true)"
   if [ -e "$DATA/secondmates.md" ] || [ -L "$DATA/secondmates.md" ]; then
     if ! secondmate_registry_validate_bindings "$DATA/secondmates.md" resolve_path "$ID" "$FIRSTMATE_HOME"; then
       echo "error: $SECONDMATE_REGISTRY_ERROR" >&2

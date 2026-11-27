@@ -24,13 +24,22 @@
 # ancestry fallback. The GEMINI_CLI=1 environment marker in bin/fm-harness.sh
 # remains the load-bearing path for the installed bundle shape on modern Node.
 
+# shellcheck source=bin/fm-hermes-process-lib.sh
+_FM_GEMINI_LIB_DIR=${BASH_SOURCE[0]%/*}
+[ "$_FM_GEMINI_LIB_DIR" != "${BASH_SOURCE[0]}" ] || _FM_GEMINI_LIB_DIR=.
+. "$_FM_GEMINI_LIB_DIR/fm-hermes-process-lib.sh"
+unset _FM_GEMINI_LIB_DIR
+
 # True when path $1 carries Gemini's own structural evidence: the file is named
 # gemini, or it sits inside the published @google/gemini-cli package tree. A
 # directory component merely named `gemini` is never enough on its own, and a
-# bare interpreter is always rejected.
+# bare interpreter is always rejected. A path under a checkout boundary is
+# judged by its part below it only (fm_process_path_below_boundary in
+# bin/fm-hermes-process-lib.sh).
 fm_gemini_path_is_gemini() {  # <path>
   local path=$1
   [ -n "$path" ] || return 1
+  path=$(fm_process_path_below_boundary "$path")
   case "$path" in
     -*) return 1 ;;
   esac
@@ -47,24 +56,33 @@ fm_gemini_path_is_gemini() {  # <path>
 # argv as NUL-delimited fields, which preserves a script path containing spaces
 # that `ps -o args=` necessarily flattens into an ambiguous string.
 fm_gemini_pid_is_gemini() {  # <pid>
-  local pid=$1 token argv0='' index=0
+  local pid=$1 token
+  local argv=()
   [ -r "/proc/$pid/cmdline" ] || return 1
-  while IFS= read -r -d '' token; do
-    if [ "$index" -eq 0 ]; then
-      argv0=$token
-      fm_gemini_path_is_gemini "$argv0" && return 0
-      case "${argv0##*/}" in
-        node|node-*|node[0-9]*|MainThread) ;;
-        *) return 1 ;;
-      esac
-    else
-      case "$token" in
-        -*) ;;
-        *) fm_gemini_path_is_gemini "$token" && return 0; return 1 ;;
-      esac
-    fi
-    index=$((index + 1))
-  done < "/proc/$pid/cmdline"
+  while IFS= read -r -d '' token; do argv+=("$token"); done < "/proc/$pid/cmdline"
+  fm_gemini_argv_is_gemini ${argv[@]+"${argv[@]}"}
+}
+
+# True when the argument vector "$@" (argv[0] first, boundaries intact) is a
+# Gemini process: argv[0] is Gemini's own path, or a node interpreter whose
+# first non-flag argument is - node's own options are skipped, so
+# `node --max-old-space-size=10000 <script>`, the exact shape the installed
+# launcher execs, still resolves.
+fm_gemini_argv_is_gemini() {  # <argv...>
+  local token argv0=${1:-}
+  [ "$#" -gt 0 ] || return 1
+  fm_gemini_path_is_gemini "$argv0" && return 0
+  case "${argv0##*/}" in
+    node|node-*|node[0-9]*|MainThread) ;;
+    *) return 1 ;;
+  esac
+  shift
+  for token in "$@"; do
+    case "$token" in
+      -*) ;;
+      *) fm_gemini_path_is_gemini "$token" && return 0; return 1 ;;
+    esac
+  done
   return 1
 }
 
@@ -79,29 +97,7 @@ fm_gemini_pid_is_gemini() {  # <pid>
 # prompt string - only argv[0] and the script argument are ever consulted, so
 # an unrelated command that merely TALKS about gemini never matches.
 fm_gemini_args_are_gemini() {  # <args>
-  local args=$1 argv0 rest token
-  [ -n "$args" ] || return 1
-  args=${args#"${args%%[![:space:]]*}"}
-  argv0=${args%%[[:space:]]*}
-  fm_gemini_path_is_gemini "$argv0" && return 0
-  case "${argv0##*/}" in
-    node|node-*|node[0-9]*|MainThread) ;;
-    *) return 1 ;;
-  esac
-  rest=${args#"$argv0"}
-  # The first non-flag token after the interpreter is the script it runs.
-  # Node's own options are skipped so `node --max-old-space-size=10000 <script>`
-  # - the exact shape the installed launcher execs - still resolves.
-  while [ -n "$rest" ]; do
-    rest=${rest#"${rest%%[![:space:]]*}"}
-    [ -n "$rest" ] || break
-    token=${rest%%[[:space:]]*}
-    rest=${rest#"$token"}
-    case "$token" in
-      -*) continue ;;
-    esac
-    fm_gemini_path_is_gemini "$token" && return 0
-    return 1
-  done
-  return 1
+  local words=()
+  read -r -a words <<< "${1:-}"
+  fm_gemini_argv_is_gemini ${words[@]+"${words[@]}"}
 }

@@ -59,6 +59,7 @@ Before `fm-brief.sh`, `fm-spawn.sh`, or `fm-afk-launch.sh` saves a path or passe
 - Reject an unresolvable relative directory and name the offending variable.
 
 `fm-spawn.sh` additionally rejects control bytes in those raw directory inputs before shell or filesystem normalization can change which path the backlog gate checks.
+`fm-spawn.sh` and `fm-control.sh` consume an `FM_STATE_OVERRIDE` containing a `..` component as the directory it physically resolves to, the one their home-ownership check evaluated: with `alias` linking to `nested/leaf`, `alias/../state` (relative or absolute) is used as `nested/state`, never the `state` beside `alias`. `fm-spawn.sh` also refuses a relative override whose physically resolved directory does not exist. `fm-brief.sh` and `fm-afk-launch.sh` keep the logical resolution above.
 Lifecycle access to a backlog, task record, or pending-close record must resolve within its configured data or state root, and a final-component symlink is refused even when its target remains within that root.
 
 Bootstrap applies the same relative `FM_HOME` resolution only when embedding that home in the generated Relay poll shim.

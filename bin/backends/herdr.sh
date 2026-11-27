@@ -3180,6 +3180,18 @@ fm_backend_herdr_projection_token_workspace_gone() {  # <session> <journal> <tas
 # fm_backend_herdr_parse_target: split "<session>:<pane_id>" (pane_id itself
 # contains a colon, e.g. "w1:p2") on the FIRST colon only. Sets
 # FM_BACKEND_HERDR_SESSION and FM_BACKEND_HERDR_PANE for the caller.
+# fm_backend_herdr_pane_shell_pid: the pid of <target>'s pane shell, from the
+# same process-info read the agent-state probe trusts; fails when it cannot be
+# read for exactly that pane.
+fm_backend_herdr_pane_shell_pid() {  # <target>
+  local info
+  fm_backend_herdr_parse_target "$1" || return 1
+  info=$(fm_backend_herdr_cli "$FM_BACKEND_HERDR_SESSION" pane process-info --pane "$FM_BACKEND_HERDR_PANE" 2>/dev/null) || return 1
+  printf '%s' "$info" | jq -er --arg pane "$FM_BACKEND_HERDR_PANE" '
+    .result | select(.type == "pane_process_info" and .process_info.pane_id == $pane)
+    | .process_info.shell_pid | select(type == "number" and . > 1) | floor' 2>/dev/null
+}
+
 fm_backend_herdr_parse_target() {  # <target>
   local target=$1
   FM_BACKEND_HERDR_SESSION=${target%%:*}

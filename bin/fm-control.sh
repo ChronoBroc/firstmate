@@ -209,6 +209,20 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
   echo "error: state dir '$STATE' is missing; fm-control cannot resolve tasks for FM_HOME '$FM_HOME'" >&2
   exit 1
 }
+# shellcheck source=bin/fm-tasks-axi-lib.sh
+. "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+# shellcheck source=bin/fm-backlog-transition-lib.sh
+. "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
+! fm_backlog_path_final_symlink "$STATE" || {
+  echo "error: state dir '$STATE' is a symlink, not a real directory; fm-control reads task records only from this home's own state" >&2
+  exit 1
+}
+fm_backlog_home_contained "$STATE" "state dir" || {
+  echo "error: $FM_BACKLOG_TRANSITION_ERROR; fm-control reads task records only from this home's own state" >&2
+  exit 1
+}
+STATE_OVERRIDE_INPUT=${FM_STATE_OVERRIDE:-}
+[ -z "$STATE_OVERRIDE_INPUT" ] || { STATE=$FM_BACKLOG_CONTAINED_PATH; FM_STATE_OVERRIDE=$STATE; }
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
@@ -259,10 +273,18 @@ release_task_set_lock() {
 }
 
 control_cleanup() {
-  local status=$?
+  local status=$? note
   if [ "$RELAUNCH_ACTIVE" = 1 ] \
      && declare -F relaunch_rollback >/dev/null 2>&1; then
     relaunch_rollback || true
+  fi
+  # Every relaunch that fails - refused, deferred, or failed on any of its own
+  # preconditions or steps - names any agent still working in the recorded
+  # worktree on a line of its own after its reason, keeping its status
+  # (fm_agent_process_fold_survivor lets a first-line summary carry it).
+  if [ "$status" -ne 0 ] && [ "$VERB" = relaunch ] && [ -n "${ID:-}" ]; then
+    note=$(fm_agent_process_record_note "$STATE" "$ID" 2>/dev/null) || note=
+    [ -z "$note" ] || printf '%s\n' "${note# }" >&2
   fi
   # Remove the dialog file while the lock is still held: once it is released,
   # the next lifecycle command for this task writes the same path.
@@ -299,6 +321,18 @@ if ! fm_control_verb_allowed "$VERB"; then
   } >&2
   exit 2
 fi
+
+# --- exact task-id resolution ----------------------------------------------
+
+case "$RAW_ID" in
+  *:*) die "'$RAW_ID' is an explicit backend endpoint; fm-control accepts an exact task id only, so a lifecycle command can never land on an endpoint this home does not own" ;;
+esac
+if ! fm_task_id_creation_valid "$RAW_ID"; then
+  die "'$RAW_ID' is not a valid task id"
+fi
+ID=$RAW_ID
+CONTROL_LOCK="$STATE/.control-$ID.lock"
+trap control_cleanup EXIT
 
 NEW_HARNESS=
 NEW_MODEL=
@@ -372,23 +406,12 @@ case "$NEW_EFFORT" in
   *) die "--effort must be one of default, low, medium, high, xhigh, max, ultra" ;;
 esac
 
-# --- exact task-id resolution ----------------------------------------------
-
-case "$RAW_ID" in
-  *:*) die "'$RAW_ID' is an explicit backend endpoint; fm-control accepts an exact task id only, so a lifecycle command can never land on an endpoint this home does not own" ;;
-esac
-if ! fm_task_id_creation_valid "$RAW_ID"; then
-  die "'$RAW_ID' is not a valid task id"
-fi
-ID=$RAW_ID
 # Supervision lease guard: lifecycle control is overlap territory between the
 # two Pi supervision actors; refuse while the OTHER actor holds this task's
 # live lease (contract: bin/fm-lease-lib.sh; no-op in homes without leases).
 # shellcheck source=bin/fm-lease-lib.sh
 . "$SCRIPT_DIR/fm-lease-lib.sh"
 fm_lease_guard "$ID" "lifecycle control (fm-control)"
-CONTROL_LOCK="$STATE/.control-$ID.lock"
-trap control_cleanup EXIT
 if [ "$VERB" = relaunch ] && [ -f "$STATE/.afk-contract" ]; then
   TASK_SET_LOCK=$(fm_task_set_lock_path "$STATE") || die "could not resolve the task-set lock for $STATE"
   if ! fm_lock_try_acquire "$TASK_SET_LOCK"; then
@@ -486,6 +509,68 @@ wait_agent_state() {  # <timeout> <wanted>...
   done
   printf '%s' "$state"
   return 1
+}
+
+# endpoint_agent_pids: the agent processes working in the task's worktree
+# that belong to its recorded endpoint, one pid per line: a descendant of the
+# tmux pane process or the Herdr pane shell (or that process itself), a member
+# of the Rex block's live pid set (fm_backend_rex_live_pids), or the Polytoken
+# session daemon bound to this task's own sessions root, which outlives its
+# pane. Nothing where none of those can be read or the worktree probe finds
+# no agent.
+endpoint_agent_pids() {
+  local root='' exact=' ' out pid p polytoken_bin polytoken_state
+  if fm_backend_source "$BACKEND" >/dev/null 2>&1; then
+    case "$BACKEND" in
+      tmux) root=$(fm_backend_tmux_pane_pid "$T") || root= ;;
+      herdr) root=$(fm_backend_herdr_pane_shell_pid "$T") || root= ;;
+      rex) exact="$exact$(fm_backend_rex_live_pids "$T" 2>/dev/null | jq -r '.[]?' 2>/dev/null | tr '\n' ' ')" ;;
+    esac
+  fi
+  case "$root" in *[!0-9]*) root= ;; esac
+  if [ "$HARNESS" = polytoken ] && polytoken_bin=$(fm_polytoken_binary 2>/dev/null) \
+     && polytoken_state=$(cd "$STATE" 2>/dev/null && pwd -P); then
+    exact="$exact$(fm_polytoken_session_for_project "$polytoken_bin" \
+      "$(fm_polytoken_config_dir "$polytoken_state" "$ID")" \
+      "$(fm_polytoken_sessions_root "$polytoken_state" "$ID")" "$WT" | cut -f4 | tr '\n' ' ')"
+  fi
+  [ -n "$root" ] || [ "$exact" != ' ' ] || return 0
+  out=$(fm_agent_process_live_in_dir "$LIVE_DIR" "$RECORDED_HARNESS") || return 0
+  for pid in $(printf '%s\n' "$out" | cut -f1); do
+    case "$exact" in *" $pid "*) printf '%s\n' "$pid"; continue ;; esac
+    [ -n "$root" ] || continue
+    p=$pid
+    while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null; do
+      if [ "$p" = "$root" ]; then
+        printf '%s\n' "$pid"
+        break
+      fi
+      p=$(LC_ALL=C ps -o ppid= -p "$p" 2>/dev/null | tr -d '[:space:]')
+    done
+  done
+}
+
+# wait_pids_gone <timeout> <pid>...: wait until every <pid> has exited (a
+# zombie counts as exited), bounded by <timeout> seconds of elapsed time
+# rounded up; nonzero on timeout.
+wait_pids_gone() {  # <timeout> <pid>...
+  local timeout=$1 started limit pid live
+  shift
+  [ "$#" -gt 0 ] || return 0
+  started=$(date +%s)
+  limit=$(awk -v t="$timeout" 'BEGIN { c = int(t); if (c < t) c++; print c }')
+  while :; do
+    live=0
+    for pid in "$@"; do
+      case "$(LC_ALL=C ps -o stat= -p "$pid" 2>/dev/null)" in
+        ''|*Z*) ;;
+        *) live=1 ;;
+      esac
+    done
+    [ "$live" = 1 ] || return 0
+    [ $(($(date +%s) - started)) -lt "$limit" ] || return 1
+    sleep "$POLL"
+  done
 }
 
 require_state_verified_backend() {  # <verb>
@@ -703,12 +788,6 @@ clear_retired_meta_busy_gen() {  # <gen>
   local gen=$1 meta="$STATE/$ID.meta" lock tmp current line
   [ -n "$gen" ] || return 0
   [ -f "$meta" ] && [ ! -L "$meta" ] || return 0
-  if ! declare -F fm_backlog_atomic_transition >/dev/null 2>&1; then
-    # shellcheck source=bin/fm-tasks-axi-lib.sh
-    . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
-    # shellcheck source=bin/fm-backlog-transition-lib.sh
-    . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
-  fi
   lock=$(fm_meta_lock_path "$meta") || return 1
   fm_lock_acquire_wait "$lock"
   current=$(fm_meta_get "$meta" busy_gen)
@@ -758,7 +837,7 @@ retire_busy_incarnation() {
 # do_exit: stop the running agent, preserving endpoint and worktree. Prints
 # `already-stopped`, `endpoint-gone`, or `stopped`.
 do_exit() {
-  local state cmd hazard verdict composer_state cancel absence interrupt_result=not-needed dialog
+  local state cmd hazard verdict composer_state cancel absence interrupt_result=not-needed dialog stopping_pids=
   require_state_verified_backend exit
   fm_control_backend_exit_supported "$BACKEND" \
     || die "task $ID runs on the $BACKEND backend, whose T3 Orchestrator V2 tools have no session stop, so 'exit' cannot stop its agent; 'interrupt' ends the running turn and teardown archives the thread"
@@ -806,6 +885,9 @@ do_exit() {
       esac
       ;;
   esac
+  # The endpoint is proven alive here: name what this stop owns before it is
+  # sent, so a relaunch can wait for exactly those processes to exit.
+  [ "$RELAUNCH_ACTIVE" != 1 ] || stopping_pids=$(endpoint_agent_pids) || stopping_pids=
   # A busy agent is interrupted first before the exit command is submitted,
   # unless the caller asked for an idle-only stop, which refuses instead.
   if [ "$ONLY_IF_IDLE" = 1 ]; then
@@ -829,6 +911,8 @@ do_exit() {
       case "$state" in
         dead)
           retire_busy_incarnation
+          # shellcheck disable=SC2086
+          wait_pids_gone "$EXIT_WAIT" $stopping_pids || true
           printf 'stopped'
           return 0
           ;;
@@ -914,6 +998,8 @@ do_exit() {
   # The incarnation is over: retire its busy wiring so no stale record or
   # orphaned generation survives the agent that produced it.
   retire_busy_incarnation
+  # shellcheck disable=SC2086
+  wait_pids_gone "$EXIT_WAIT" $stopping_pids || true
   printf 'stopped'
 }
 
@@ -934,6 +1020,7 @@ RELAUNCH_META_PUBLISHED=0
 RELAUNCH_AGENT_CONFIRMED=0
 RELAUNCH_TX=
 RELAUNCH_BRIEF=
+RELAUNCH_BRIEF_SAVED=0
 PRIOR_HARNESS=$HARNESS
 PRIOR_RECORDED_HARNESS=$RECORDED_HARNESS
 CONFIG_HARNESS=
@@ -975,6 +1062,51 @@ journal_write() {  # <phase> [extra-line]...
   return 1
 }
 
+# relaunch_restore_brief: put the preserved instructions back byte-exact and
+# record the outcome in RELAUNCH_RESTORE: restored, failed, or untouched when
+# this relaunch never preserved and rewrote them (a secondmate's charter, or a
+# failure before this transaction's own backup was taken).
+relaunch_restore_brief() {
+  RELAUNCH_RESTORE=untouched
+  [ "$RELAUNCH_BRIEF_SAVED" = 1 ] && [ -n "$RELAUNCH_BRIEF" ] || return 0
+  if [ -f "$BRIEF_PRIOR" ] && cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null; then
+    RELAUNCH_RESTORE=restored
+  else
+    RELAUNCH_RESTORE=failed
+  fi
+}
+
+relaunch_restore_text() {
+  case "$RELAUNCH_RESTORE" in
+    restored) printf 'its original instructions were restored' ;;
+    failed) printf 'its original instructions could NOT be restored to %s; restore them from the saved copy %s' "$RELAUNCH_BRIEF" "$BRIEF_PRIOR" ;;
+    *) printf 'its instructions were never rewritten' ;;
+  esac
+}
+
+# relaunch_rollback_endpoint_agent_free <tag> <message>: roll back once the
+# recorded endpoint holds no agent. Only a worktree that holds no agent
+# process either keeps the progress note under <tag> and <message>; an agent
+# still working there, or a probe that cannot decide, gets its instructions
+# restored and is reported.
+relaunch_rollback_endpoint_agent_free() {  # <tag> <message>
+  local live_rc=0 live_out
+  live_out=$(fm_agent_process_live_in_dir "$LIVE_DIR" "$RECORDED_HARNESS") || live_rc=$?
+  if [ "$live_rc" -eq 1 ]; then
+    journal_write "failed:$RELAUNCH_PHASE" "rollback=$1" || true
+    echo "$2" >&2
+    return 0
+  fi
+  relaunch_restore_brief
+  if [ "$live_rc" -eq 0 ]; then
+    journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-in-worktree" || true
+    echo "error: $ID's recorded endpoint holds no agent now, but no replacement was launched because an agent is still working in $LIVE_DIR (pid $(fm_agent_process_format_live "$live_out")); $(relaunch_restore_text) and the durable record was retained" >&2
+  else
+    journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-in-worktree-unproven" || true
+    echo "error: $ID's recorded endpoint holds no agent now, but the replacement did not launch and whether an agent still works in ${LIVE_DIR:-its local copy} could not be established ($live_out); $(relaunch_restore_text) and the durable record was retained" >&2
+  fi
+}
+
 relaunch_rollback() {
   local state
   [ "$RELAUNCH_ACTIVE" = 1 ] || return 0
@@ -984,25 +1116,25 @@ relaunch_rollback() {
     checkpoint|noted)
       # The old agent was never touched. Restore the instructions byte-exact so
       # a refused relaunch leaves nothing behind.
-      if [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ]; then
-        cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null || true
+      relaunch_restore_brief
+      journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE" || true
+      if [ "$RELAUNCH_RESTORE" = failed ]; then
+        echo "error: relaunch of $ID was refused before its agent was touched; $(relaunch_restore_text)" >&2
+      else
+        echo "error: relaunch of $ID was refused before its agent was touched; nothing changed" >&2
       fi
-      journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-restored" || true
-      echo "error: relaunch of $ID was refused before its agent was touched; nothing changed" >&2
       ;;
     stopping)
       state=$(agent_state 2>/dev/null || printf unknown)
       case "$state" in
         alive)
-          if [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ]; then
-            cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null || true
-          fi
-          journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-restored-agent-alive" || true
-          echo "error: relaunch of $ID failed while stopping the old agent, which is still running; its original instructions were restored" >&2
+          relaunch_restore_brief
+          journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-alive" || true
+          echo "error: relaunch of $ID failed while stopping the old agent, which is still running; $(relaunch_restore_text)" >&2
           ;;
         dead)
-          journal_write "failed:$RELAUNCH_PHASE" "rollback=prior-record-kept-agent-dead" || true
-          echo "error: $ID's agent stopped but relaunch did not reach replacement launch; no agent is running, and its work plus progress note are preserved at $WT" >&2
+          relaunch_rollback_endpoint_agent_free prior-record-kept-agent-dead \
+            "error: $ID's agent stopped but relaunch did not reach replacement launch; no agent is running, and its work plus progress note are preserved at $WT"
           ;;
         *)
           # The old agent was NOT proven stopped, so no replacement is coming
@@ -1010,11 +1142,9 @@ relaunch_rollback() {
           # original one. The note exists to brief a replacement; leaving it in
           # a possibly-live agent's brief would be an unrequested edit to a
           # running task. Restore byte-exact, exactly as the alive case does.
-          if [ -n "$RELAUNCH_BRIEF" ] && [ -f "$BRIEF_PRIOR" ]; then
-            cp -p "$BRIEF_PRIOR" "$RELAUNCH_BRIEF" 2>/dev/null || true
-          fi
-          journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-restored-agent-state-$state" || true
-          echo "error: relaunch of $ID failed while stopping the old agent and its state is '$state', so it was not proven stopped; its original instructions were restored and the durable record was retained for recovery" >&2
+          relaunch_restore_brief
+          journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-state-$state" || true
+          echo "error: relaunch of $ID failed while stopping the old agent and its state is '$state', so it was not proven stopped; $(relaunch_restore_text) and the durable record was retained for recovery" >&2
           ;;
       esac
       ;;
@@ -1033,8 +1163,8 @@ relaunch_rollback() {
         journal_write "failed:$RELAUNCH_PHASE" "rollback=none-new-record-kept" || true
         echo "error: $ID was relaunched on $TARGET_HARNESS but no running agent could be confirmed; its work is preserved at $WT" >&2
       else
-        journal_write "failed:$RELAUNCH_PHASE" "rollback=prior-record-kept" || true
-        echo "error: $ID's agent was stopped but the replacement did not launch; no agent is running, and its work plus the recorded progress note are preserved at $WT" >&2
+        relaunch_rollback_endpoint_agent_free prior-record-kept \
+          "error: $ID's agent was stopped but the replacement did not launch; no agent is running, and its work plus the recorded progress note are preserved at $WT"
       fi
       ;;
   esac
@@ -1220,7 +1350,7 @@ safe_checkpoint() {
     # durable records at startup. The checkpoint proves those records are
     # readable BEFORE the agent stops, so a relaunch can never strand child
     # work behind an unreadable home.
-    marker=$(cat "$WT/.fm-secondmate-home" 2>/dev/null || true)
+    marker=$(fm_agent_process_home_marker "$WT") || marker=
     [ "$marker" = "$ID" ] \
       || die "task $ID's home $WT is not marked as its own seeded secondmate home (marker: ${marker:-none}); refusing to relaunch"
     # Do not walk state/ with find(1): watcher scratch files can vanish
@@ -1255,8 +1385,9 @@ record_note() {
   printf '%s\n' "$NOTE" > "$NOTE_FILE"
   case "$KIND" in
     ship|scout)
-      cp -p "$RELAUNCH_BRIEF" "$BRIEF_PRIOR" \
+      { [ ! -d "$BRIEF_PRIOR" ] && cp -p "$RELAUNCH_BRIEF" "$BRIEF_PRIOR" && [ -f "$BRIEF_PRIOR" ]; } \
         || die "could not preserve task $ID's instructions before recording the progress note"
+      RELAUNCH_BRIEF_SAVED=1
       {
         echo
         echo "## Progress note ($stamp)"
@@ -1278,7 +1409,11 @@ record_note() {
 }
 
 do_relaunch() {
-  local exit_result state note_line
+  # The directory this task's agent works in - its worktree, or a secondmate's
+  # marked home - for every live-agent check of the relaunch; empty when the
+  # record cannot name it, which leaves those checks undecided.
+  LIVE_DIR=$(fm_agent_process_task_dir "$META" "$ID" 2>/dev/null) || LIVE_DIR=
+  local exit_result state note_line view_gap
   local -a spawn_args
 
   require_state_verified_backend relaunch
@@ -1296,6 +1431,11 @@ do_relaunch() {
       FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || exit 75
       ;;
   esac
+  safe_checkpoint
+  if view_gap=$(fm_agent_process_argv_reader_unusable) \
+     || { view_gap=$(fm_agent_process_live_in_dir "$LIVE_DIR" "$RECORDED_HARNESS" strict); [ "$?" -eq 2 ]; }; then
+    die "relaunch of $ID refused before its agent was touched: ${view_gap}, and the replacement's launch would refuse on that after the stop"
+  fi
 
   case "$KIND" in
     ship|scout)
@@ -1322,7 +1462,6 @@ do_relaunch() {
   else
     note_line="note=none"
   fi
-  safe_checkpoint
   cp -p "$META" "$META_PRIOR" || die "could not preserve task $ID's durable record before relaunching"
   RELAUNCH_ACTIVE=1
   journal_write checkpoint "${CHECKPOINT_LINES[@]}" "$note_line"
@@ -1342,7 +1481,7 @@ do_relaunch() {
   [ "$TARGET_MODEL" = default ] || spawn_args+=(--model "$TARGET_MODEL")
   [ "$TARGET_EFFORT" = default ] || spawn_args+=(--effort "$TARGET_EFFORT")
   [ -z "$TARGET_ACCOUNT" ] || spawn_args+=(--account "$TARGET_ACCOUNT")
-  if FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
+  if FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" FM_STATE_OVERRIDE="$STATE_OVERRIDE_INPUT" \
       "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" >/dev/null; then
     release_task_set_lock
     RELAUNCH_META_PUBLISHED=1

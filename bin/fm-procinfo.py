@@ -25,6 +25,10 @@ its declared length yields no identity rather than a partial one. No
 pid, no verification, no output - exit 1.
 
 Usage: fm-procinfo.py <pid>
+       fm-procinfo.py --argv <pid>
+
+--argv prints the pid's argv itself, each element NUL-terminated, so a
+caller keeps the argument boundaries that the joined args line loses.
 """
 import ctypes
 import ctypes.util
@@ -158,6 +162,12 @@ def _ps_visible(raw):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--argv" and sys.argv[2].isdigit():
+        argv = _procargs(int(sys.argv[2]))
+        if not argv or not argv[0]:
+            return 1
+        sys.stdout.buffer.write(b"".join(raw + b"\0" for raw in argv))
+        return 0
     if len(sys.argv) != 2 or not sys.argv[1].isdigit():
         print("usage: fm-procinfo.py <pid>", file=sys.stderr)
         return 2

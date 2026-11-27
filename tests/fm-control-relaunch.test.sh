@@ -17,399 +17,15 @@
 #   6. fm-spawn --relaunch refuses on its own: a live agent, a contradicting
 #      flag, an extra positional, or a backend that cannot prove the previous
 #      agent exited.
+# The worktree-agent probe cases live in tests/fm-control-relaunch-live-agent.test.sh.
 set -u
 
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-# shellcheck source=/dev/null
-. "$ROOT/bin/fm-control-lib.sh"
-# shellcheck source=/dev/null
-. "$ROOT/bin/fm-pr-lib.sh"
-# shellcheck source=/dev/null
-. "$ROOT/bin/fm-trace-context-lib.sh"
-# shellcheck source=/dev/null
-. "$ROOT/bin/fm-tasks-axi-lib.sh"
+# shellcheck source=tests/relaunch-helpers.sh
+. "$(dirname "${BASH_SOURCE[0]}")/relaunch-helpers.sh"
 
-CONTROL="$ROOT/bin/fm-control.sh"
-SPAWN="$ROOT/bin/fm-spawn.sh"
 PROMOTE="$ROOT/bin/fm-promote.sh"
 BRIEF="$ROOT/bin/fm-brief.sh"
 X_LINK="$ROOT/bin/fm-x-link.sh"
-# fm_test_tmproot's own cleanup trap fires when its command substitution exits,
-# so recreate the root before resolving it and clean it up from this file's trap.
-TMP_ROOT=$(fm_test_tmproot fm-control-relaunch)
-mkdir -p "$TMP_ROOT"
-TMP_ROOT=$(cd "$TMP_ROOT" && pwd)
-TASK_TMPS=()
-
-relaunch_cleanup() {
-  local d
-  for d in "${TASK_TMPS[@]:-}"; do
-    [ -n "$d" ] && fm_test_remove_tree "$d"
-  done
-  stop_tmux_named_processes
-  for d in "${TMP_TMUX_ROOTS[@]:-}"; do
-    [ -n "$d" ] || continue
-    tmux -S "$d/tmux-$(id -u)/default" kill-server 2>/dev/null
-    rm -rf "$d"
-  done
-  fm_test_cleanup
-}
-trap relaunch_cleanup EXIT
-
-# The same lifecycle-modelling tmux stub as tests/fm-control.test.sh: the
-# harness's exit command stops the agent, and a launch-brief literal starts the
-# harness named in `becomes`.
-make_tmux_stub() {  # <dir>
-  local fb="$1/fakebin"
-  mkdir -p "$fb"
-  cat > "$fb/tmux" <<'SH'
-#!/usr/bin/env bash
-set -u
-D=$FM_FAKE_DIR
-# `-S <socket>` addresses the server listening there. That server answers its
-# identity from socket-server (absent: nothing is listening) and, when
-# socket-windows exists, its own window list; otherwise it is the same server
-# this process addresses.
-SOCK=
-if [ "${1:-}" = -S ]; then SOCK=${2:-}; shift 2; fi
-case "${1:-}" in
-  has-session)
-    prev=
-    for a in "$@"; do
-      if [ "$prev" = -t ] && grep -Fqx -- "${a#=}" "$D/missing-sessions" 2>/dev/null; then
-        exit 1
-      fi
-      prev=$a
-    done
-    exit 0 ;;
-  send-keys)
-    shift
-    literal=0
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        -t) shift 2 ;;
-        -l) literal=1; shift ;;
-        *) break ;;
-      esac
-    done
-    payload=${1:-}
-    if [ "$literal" = 1 ]; then
-      case "$payload" in
-        ". '"*"'") staged=${payload#". '"}; staged=${staged%"'"}; [ ! -f "$staged" ] || payload=$(cat "$staged") ;;
-      esac
-      printf '%s\n' "$payload" >> "$D/literal"
-      case "$payload" in
-        /exit|/quit)
-          printf 'zsh' > "$D/command"
-          [ -z "${FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP:-}" ] || exit 1
-          ;;
-        *'encode launch-brief'* | *'Firstmate operational input waiting: read'*)
-          cat "$D/becomes" > "$D/command"
-          [ -z "${FM_FAKE_LAUNCH_TRANSPORT_FAIL_AFTER_START:-}" ] || exit 1
-          ;;
-      esac
-    else
-      printf '%s\n' "$payload" >> "$D/keys"
-      case "$payload" in
-        'export GOTMPDIR='*)
-          if [ -n "${FM_FAKE_TRACE_PREPARE:-}" ]; then
-            : > "$FM_FAKE_TRACE_PREPARE"
-            while [ ! -e "$FM_FAKE_TRACE_RELEASE" ]; do /bin/sleep 0.01; done
-          fi
-          ;;
-        'export TRACEPARENT='*)
-          [ -z "${FM_FAKE_TRACE_EXPORTED:-}" ] || : > "$FM_FAKE_TRACE_EXPORTED"
-          ;;
-      esac
-    fi
-    exit 0 ;;
-  display-message)
-    for a in "$@"; do
-      case "$a" in
-        *socket_path*)
-          [ -f "$D/tmux-server" ] || exit 1
-          printf '%s|%s\n' "$(cat "$D/tmux-socket")" "$(cat "$D/tmux-server")"; exit 0 ;;
-        *start_time*)
-          if [ -n "$SOCK" ]; then
-            [ -f "$D/socket-server" ] || { echo "no server running on $SOCK" >&2; exit 1; }
-            cat "$D/socket-server"
-          else
-            [ -f "$D/tmux-server" ] || { echo 'no server running on /tmp/tmux-1000/default' >&2; exit 1; }
-            cat "$D/tmux-server"
-          fi
-          printf '\n'; exit 0 ;;
-        *cursor_y*) printf '1\n'; exit 0 ;;
-        *pane_current_command*) cat "$D/command"; printf '\n'; exit 0 ;;
-        *pane_current_path*)
-          if [ -n "${FM_FAKE_CWD_RACE_READY:-}" ]; then
-            : > "$FM_FAKE_CWD_RACE_READY"
-            /bin/sleep 1
-          fi
-          cat "$D/cwd"; printf '\n'; exit 0 ;;
-      esac
-    done
-    printf 'fakepane\n'; exit 0 ;;
-  capture-pane)
-    [ -z "${FM_FAKE_COMPOSER_READ_FAIL:-}" ] || exit 1
-    if [ -s "$D/composer" ]; then
-      printf '╭────╮\n│ %s  │\n╰────╯\n' "$(cat "$D/composer")"
-    else
-      printf '╭────╮\n│    │\n╰────╯\n'
-    fi
-    exit 0 ;;
-  list-windows)
-    # The three shapes real tmux answers a per-session inventory with. The
-    # first two are DEFINITIVE and classify `missing`; the third is not and
-    # classifies `unreadable`.
-    if [ -n "$SOCK" ] && [ -f "$D/socket-windows" ]; then
-      cat "$D/socket-windows"; exit 0
-    fi
-    prev=
-    for a in "$@"; do
-      if [ "$prev" = -t ]; then
-        ses=${a#=}; ses=${ses%%:*}
-        if grep -Fqx -- "$ses" "$D/missing-sessions" 2>/dev/null; then
-          echo "can't find session: $ses" >&2
-          exit 1
-        fi
-      fi
-      prev=$a
-    done
-    if [ -f "$D/server-dead" ]; then
-      echo 'no server running on /tmp/tmux-1000/default' >&2
-      exit 1
-    fi
-    if [ -f "$D/session-missing" ]; then
-      echo "can't find session: $(cat "$D/session-name")" >&2
-      exit 1
-    fi
-    if [ -f "$D/inventory-broken" ]; then
-      echo 'lost server' >&2
-      exit 1
-    fi
-    [ -f "$D/windows" ] && cat "$D/windows"; exit 0 ;;
-  new-session)
-    # Nothing in the relaunch path may ever create a session; recording the
-    # call is how a refusal test proves that.
-    shift
-    ses=
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        -s) ses=${2:-}; shift 2 ;;
-        *) shift ;;
-      esac
-    done
-    printf '%s\n' "$ses" >> "$D/created-sessions"
-    exit 0 ;;
-  new-window)
-    # Model the one thing an endpoint re-creation depends on: the window now
-    # appears in the session inventory, so the very next agent-state read stops
-    # answering `missing`. Echo a stable window id the way the real -P -F does.
-    shift
-    name=
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        -n) name=${2:-}; shift 2 ;;
-        -c|-t) shift 2 ;;
-        *) shift ;;
-      esac
-    done
-    printf '%s\n' "$name" >> "$D/windows"
-    printf '%s\n' "$name" >> "$D/created-windows"
-    printf '@9\n'
-    exit 0 ;;
-esac
-exit 0
-SH
-  chmod +x "$fb/tmux"
-  cat > "$fb/sleep" <<'SH'
-#!/usr/bin/env bash
-[ -z "${FM_FAKE_LOCK_WAITING:-}" ] || : > "$FM_FAKE_LOCK_WAITING"
-exit 0
-SH
-  chmod +x "$fb/sleep"
-}
-
-# new_case <name> [id] -> echoes a case dir with a live claude ship task.
-new_case() {
-  local id=${2:-t1} dir="$TMP_ROOT/$1-$RANDOM"
-  mkdir -p "$dir/home/state" "$dir/home/data" "$dir/fake"
-  : > "$dir/fake/literal"
-  : > "$dir/fake/keys"
-  printf 'claude' > "$dir/fake/command"
-  printf 'claude' > "$dir/fake/becomes"
-  printf '%s\n' "fm-$id" > "$dir/fake/windows"
-  printf '%s' fmses > "$dir/fake/session-name"
-  make_tmux_stub "$dir"
-  printf '%s\n' "$dir"
-}
-
-# add_ship_task <case-dir> <id> [harness] [session]
-add_ship_task() {
-  local dir=$1 id=$2 harness=${3:-claude} ses=${4:-fmses}
-  local home="$dir/home" proj="$dir/proj" wt="$dir/wt"
-  fm_git_worktree "$proj" "$wt" "task-$id"
-  mkdir -p "$home/data/$id"
-  cat > "$home/data/$id/brief.md" <<EOF
-# Task
-## Captain's intent
-Exercise relaunch behavior for $id.
-
-## Firstmate spec
-Preserve the task while replacing its agent process.
-EOF
-  {
-    echo "window=$ses:fm-$id"
-    echo "endpoint_task_id=$id"
-    echo "worktree=$wt"
-    echo "project=$proj"
-    echo "harness=$harness"
-    echo "kind=ship"
-    echo "mode=no-mistakes"
-    echo "yolo=off"
-    echo "tasktmp=/tmp/fm-$id"
-    echo "model=default"
-    echo "effort=default"
-  } > "$home/state/$id.meta"
-  printf '%s\n' "fm-$id" > "$dir/fake/windows"
-  printf '%s' "$ses" > "$dir/fake/session-name"
-  printf '%s' "$wt" > "$dir/fake/cwd"
-  TASK_TMPS+=("/tmp/fm-$id")
-}
-
-run_control() {  # <case-dir> <args...>
-  local dir=$1; shift
-  # A claude spawn pre-registers workspace trust in the launching user's own
-  # store (bin/fm-claude-trust.sh), and a relaunch reaches it through fm-control.sh, so this runs against a throwaway HOME;
-  # without it this suite would write the developer's real ~/.claude.json.
-  mkdir -p "$dir/user-home"
-  env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SESSION -u HERDR_SOCKET_PATH \
-    -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID \
-    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
-    HOME="$dir/user-home" CLAUDE_CONFIG_DIR='' \
-    FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
-    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 FM_CONTROL_LAUNCH_WAIT=0.05 \
-    FM_REAL_GIT="${FM_REAL_GIT:-}" FM_FAKE_GIT_FAILURE="${FM_FAKE_GIT_FAILURE:-}" \
-    FM_REAL_MV="${FM_REAL_MV:-}" FM_FAKE_COMPLETE_JOURNAL_MV_FAIL="${FM_FAKE_COMPLETE_JOURNAL_MV_FAIL:-}" \
-    FM_FAKE_META_PUBLISH_MV_FAIL="${FM_FAKE_META_PUBLISH_MV_FAIL:-}" \
-    FM_FAKE_TRACE_PREPARE="${FM_FAKE_TRACE_PREPARE:-}" \
-    FM_FAKE_TRACE_RELEASE="${FM_FAKE_TRACE_RELEASE:-}" \
-    FM_FAKE_META_WRITER_READY="${FM_FAKE_META_WRITER_READY:-}" \
-    FM_FAKE_TRACE_EXPORTED="${FM_FAKE_TRACE_EXPORTED:-}" \
-    "$CONTROL" "$@" 2>&1
-}
-
-run_spawn() {  # <case-dir> <args...>
-  local dir=$1; shift
-  # A claude spawn pre-registers workspace trust in the launching user's own
-  # store (bin/fm-claude-trust.sh), so it runs against a throwaway HOME;
-  # without it this suite would write the developer's real ~/.claude.json.
-  mkdir -p "$dir/user-home"
-  env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SESSION -u HERDR_SOCKET_PATH \
-    -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID \
-    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
-    HOME="$dir/user-home" CLAUDE_CONFIG_DIR='' \
-    FM_SPAWN_NO_GUARD=1 GROK_HOME="$dir/grokhome" \
-    "$SPAWN" "$@" 2>&1
-}
-
-meta_field() {  # <case-dir> <id> <key>
-  grep "^$3=" "$1/home/state/$2.meta" | tail -1 | cut -d= -f2-
-}
-
-journal_field() {  # <case-dir> <id> <key>
-  grep "^$3=" "$1/home/state/$2.control-relaunch" | tail -1 | cut -d= -f2-
-}
-
-make_git_failure_stub() {  # <case-dir>
-  cat > "$1/fakebin/git" <<'SH'
-#!/usr/bin/env bash
-case "${FM_FAKE_GIT_FAILURE:-}:$*" in
-  head:*' rev-parse --verify HEAD'|head:*' symbolic-ref -q HEAD') exit 128 ;;
-  status:*' status --porcelain') exit 128 ;;
-esac
-exec "$FM_REAL_GIT" "$@"
-SH
-  chmod +x "$1/fakebin/git"
-}
-
-make_mv_failure_stub() {  # <case-dir>
-  cat > "$1/fakebin/mv" <<'SH'
-#!/usr/bin/env bash
-if [ -n "${FM_FAKE_COMPLETE_JOURNAL_MV_FAIL:-}" ]; then
-  for path in "$@"; do
-    if [ -f "$path" ] && grep -Fqx 'phase=complete' "$path"; then
-      exit 1
-    fi
-  done
-fi
-if [ -n "${FM_FAKE_META_PUBLISH_MV_FAIL:-}" ]; then
-  for path in "$@"; do
-    [ "$path" != "$FM_FAKE_META_PUBLISH_MV_FAIL" ] || exit 1
-  done
-fi
-source_path=
-target_path=
-for path in "$@"; do
-  source_path=$target_path
-  target_path=$path
-done
-if [ -n "${FM_FAKE_META_WRITER_TARGET:-}" ] \
-   && [ "$target_path" = "$FM_FAKE_META_WRITER_TARGET" ] \
-   && grep -q '^x_request=' "$source_path" 2>/dev/null; then
-  : > "$FM_FAKE_META_WRITER_READY"
-  while [ ! -e "$FM_FAKE_META_WRITER_RELEASE" ]; do /bin/sleep 0.01; done
-fi
-exec "$FM_REAL_MV" "$@"
-SH
-  chmod +x "$1/fakebin/mv"
-}
-
-make_rm_failure_stub() {  # <case-dir>
-  cat > "$1/fakebin/rm" <<'SH'
-#!/usr/bin/env bash
-for arg in "$@"; do
-  if [ -n "${FM_FAKE_RM_FAIL_PATH:-}" ] && [ "$arg" = "$FM_FAKE_RM_FAIL_PATH" ]; then
-    exit 1
-  fi
-done
-exec "$FM_REAL_RM" "$@"
-SH
-  chmod +x "$1/fakebin/rm"
-}
-
-# Give a case home a real backlog carrying <id>, so the relaunch path's paired
-# backlog transition (bin/fm-backlog-transition-lib.sh) is live rather than
-# skipped for want of a backlog file.
-seed_backlog() {  # <case-dir> <id> <queued|in_flight>
-  local dir=$1 id=$2 want=$3 file="$1/home/data/backlog.md"
-  printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$file"
-  tasks-axi add "$id" "relaunch fixture task" --kind ship --file "$file" >/dev/null
-  [ "$want" != in_flight ] || tasks-axi start "$id" --file "$file" >/dev/null
-}
-
-backlog_state() {  # <case-dir> <id>
-  tasks-axi show "$2" --file "$1/home/data/backlog.md" 2>/dev/null |
-    sed -n 's/^  state: *//p' | head -1
-}
-
-# Shadow tasks-axi so every `start` fails and every other verb is real. A
-# relaunch that re-reads the row before acting never calls it; one that assumes
-# it must re-run the transition trips over it.
-break_tasks_axi_start() {  # <case-dir>
-  local dir=$1 real
-  real=$(command -v tasks-axi)
-  cat > "$dir/fakebin/tasks-axi" <<SH
-#!/usr/bin/env bash
-if [ "\${1:-}" = start ]; then
-  echo 'error: "start refused"' >&2
-  exit 1
-fi
-exec "$real" "\$@"
-SH
-  chmod +x "$dir/fakebin/tasks-axi"
-}
 
 # --- 1. same-harness relaunch -----------------------------------------------
 
@@ -2501,9 +2117,13 @@ SH
 }
 
 test_concurrent_relaunch_is_refused() {
-  local dir out rc lock holder i
+  local dir out rc lock holder i agent agent_pid=
   dir=$(new_case lock rl19)
   add_ship_task "$dir" rl19 claude
+  if agent=$(agent_standin_named "$dir" claude); then
+    start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+    wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  fi
   lock="$dir/home/state/.control-rl19.lock"
   # A live holder of this task's control lock, taken through the same lock
   # library fm-control uses.
@@ -2531,15 +2151,48 @@ test_concurrent_relaunch_is_refused() {
     || fail "a refused concurrent relaunch must not stop the agent"
   [ "$(cat "$dir/home/state/rl19.composer-dialog" 2>/dev/null)" = held ] \
     || fail "a refused concurrent relaunch must not remove the lock holder's dialog file"
+  if [ -n "$agent_pid" ]; then
+    assert_contains "$out" "pid $agent_pid (claude)" "the contention refusal must also name the agent still in the worktree"
+    stop_dir_process "$agent_pid"
+  fi
   pass "fm-control relaunch: two control actions on one task serialize instead of interleaving"
+}
+
+test_lease_refused_relaunch_names_an_agent_still_in_the_worktree() {
+  local dir out rc agent agent_pid holder_pid
+  dir=$(new_case leased rl18)
+  add_ship_task "$dir" rl18 claude
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "fm-control relaunch under the other actor's lease: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  # A live lease held by the branch actor (bin/fm-lease-lib.sh's staleness
+  # contract: its pid is alive and is the home's session-lock holder).
+  start_dir_process "$dir" /bin/sleep 600; holder_pid=$STARTED_PID
+  printf '%s\n' "$holder_pid" > "$dir/home/state/.lock"
+  printf 'branch\t%s\t%s\n' "$holder_pid" "$(date +%s)" > "$dir/home/state/.lease-rl18"
+  out=$(FM_SUPERVISION_ACTOR=main run_control "$dir" rl18 relaunch --note "leased elsewhere"); rc=$?
+  expect_code 6 "$rc" "the lease refusal keeps its exit status"$'\n'"$out"
+  assert_contains "$out" "is leased to the branch supervision actor" "the lease refusal should still be reported"
+  assert_contains "$out" "pid $agent_pid (claude)" "the lease refusal must also name the agent still in the worktree"
+  ! grep -Fqx /exit "$dir/fake/literal" || fail "a lease-refused relaunch must not stop the agent"
+  stop_dir_process "$agent_pid"
+  stop_dir_process "$holder_pid"
+  pass "fm-control relaunch: a lease refusal keeps its status and names the agent still in the worktree"
 }
 
 # shellcheck disable=SC2031
 test_direct_spawn_relaunch_participates_in_the_lifecycle_lock() {
-  local dir out rc lock holder i=0
+  local dir out rc lock holder i=0 agent agent_pid=
   dir=$(new_case spawnlock rl26)
   add_ship_task "$dir" rl26 claude
   printf 'zsh' > "$dir/fake/command"
+  if agent=$(agent_standin_named "$dir" claude); then
+    start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+    wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  fi
   lock="$dir/home/state/.control-rl26.lock"
   (
     . "$ROOT/bin/fm-wake-lib.sh"
@@ -2559,6 +2212,10 @@ test_direct_spawn_relaunch_participates_in_the_lifecycle_lock() {
   assert_contains "$out" "another lifecycle action is already running" \
     "direct relaunch spawn should name lifecycle contention"
   [ -z "$(cat "$dir/fake/literal")" ] || fail "contended direct relaunch spawn must deliver no launch bytes"
+  if [ -n "$agent_pid" ]; then
+    assert_contains "$out" "pid $agent_pid (claude)" "the contention refusal must also name the agent still in the worktree"
+    stop_dir_process "$agent_pid"
+  fi
   pass "fm-spawn relaunch: direct entry participates in lifecycle serialization"
 }
 
@@ -2736,12 +2393,6 @@ test_spawn_relaunch_refuses_a_pane_outside_the_worktree() {
 # reclaimed by anything, and any no-mistakes approval it was parked on had no
 # seat left to answer it.
 
-# strand_endpoint <case-dir> <id>: make a tmux endpoint read `missing` the way
-# a destroyed window does - a successful session inventory that omits the exact
-# window.
-strand_endpoint() {  # <case-dir> <id>
-  : > "$1/fake/windows"
-}
 
 # A tmux `missing` refuses on BOTH verbs whenever the record cannot name the
 # server the window lived on - a record written before spawn recorded
@@ -2815,47 +2466,6 @@ test_tmux_refuses_when_the_server_is_gone() {
 # its windows. The pids below are real processes, so
 # the process-table half of the proof runs for real.
 
-TMUX_NAMED_PIDS=()
-TMP_TMUX_ROOTS=()
-
-# record_tmux_server <case-dir> <id> <pid:start-time>
-record_tmux_server() {
-  printf 'tmux_socket=/fake/tmux.sock\ntmux_server=%s\n' "$3" >> "$1/home/state/$2.meta"
-}
-
-# serve_tmux_from <case-dir> <pid:start-time>: the server this process now
-# addresses, which is also the identity a fresh window is recorded under.
-serve_tmux_from() {
-  printf '/fake/tmux.sock' > "$1/fake/tmux-socket"
-  printf '%s' "$2" > "$1/fake/tmux-server"
-}
-
-# exited_pid: set EXITED_PID to a pid no process holds any more.
-exited_pid() {
-  sh -c 'exit 0' &
-  # shellcheck disable=SC2031 # The background PID is captured immediately in this shell.
-  EXITED_PID=$!
-  wait "$EXITED_PID"
-}
-
-# start_tmux_named_process <case-dir>: a live process the process table names
-# tmux, standing in for a server that is still running. Sets TMUX_NAMED_PID.
-start_tmux_named_process() {
-  mkdir -p "$1/proc"
-  ln -s "$(command -v sleep)" "$1/proc/tmux"
-  "$1/proc/tmux" 300 >/dev/null 2>&1 &
-  # shellcheck disable=SC2031 # The background PID is captured immediately in this shell.
-  TMUX_NAMED_PID=$!
-  TMUX_NAMED_PIDS+=("$TMUX_NAMED_PID")
-}
-
-stop_tmux_named_processes() {
-  local pid
-  for pid in "${TMUX_NAMED_PIDS[@]:-}"; do
-    [ -n "$pid" ] && kill "$pid" 2>/dev/null
-  done
-  return 0
-}
 
 # assert_tmux_reclaimed <case-dir> <id> <expected-window>
 assert_tmux_reclaimed() {
@@ -3229,8 +2839,12 @@ EOF
   printf '%s' "$survivor" > "$dir/fake/herdr-pane"
   : > "$dir/fake/herdr-log"
   : > "$dir/fake/herdr-stopped"
-  TASK_TMPS+=("/tmp/fm-$id")
+  register_task_tmp "$id" "$home"
 }
+
+# Herdr reclaim cases spawn for real, so their task ids carry this run's own
+# token and their /tmp/fm-<id> scratch can never be a live task's.
+HERDR_RUN=hdr$$
 
 # Sets HERDR_CASE_DIR rather than echoing it, so callers invoke it as a plain
 # statement. A `dir=$(herdr_case_or_skip ...)` would run add_herdr_ship_task in
@@ -3250,18 +2864,18 @@ herdr_case_or_skip() {  # <name> <id> [session] [surviving-pane]
 test_herdr_relaunch_resumes_only_the_registered_pi_session() {
   local dir out rc=0 command registered
   for registered in pi claude; do
-    herdr_case_or_skip "resume-$registered" "resume-$registered" || {
+    herdr_case_or_skip "resume-$registered-${HERDR_RUN}" "resume-$registered-${HERDR_RUN}" || {
       echo "skip - herdr relaunch needs jq (the herdr adapter parses JSON with it)"
       return 0
     }
     dir=$HERDR_CASE_DIR
     rm -f "$dir/fake/herdr-stopped"
-    sed -i 's/^harness=claude$/harness=pi/' "$dir/home/state/resume-$registered.meta"
+    sed -i 's/^harness=claude$/harness=pi/' "$dir/home/state/resume-$registered-${HERDR_RUN}.meta"
     # Keep the pane's status authority registered to an existing Pi session,
     # while process-info proves that its previous agent has exited.
     printf '{"result":{"agent":{"agent":"%s","agent_status":"idle","agent_session":{"kind":"path","value":"/tmp/pi-bound-session.jsonl"}}}}\n' \
       "$registered" > "$dir/fake/herdr-agent-registration"
-    out=$(run_spawn "$dir" "resume-$registered" --relaunch --harness pi) || rc=$?
+    out=$(run_spawn "$dir" "resume-$registered-${HERDR_RUN}" --relaunch --harness pi) || rc=$?
     expect_code 0 "$rc" "Herdr Pi relaunch should complete ($registered registration)"$'\n'"$out"
     command=$(cat "$dir/fake/launched-command")
     if [ "$registered" = pi ]; then
@@ -3278,13 +2892,13 @@ test_herdr_relaunch_resumes_only_the_registered_pi_session() {
 
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server() {
   local dir out rc=0 log stray
-  herdr_case_or_skip gone-herdr rl68 || {
+  herdr_case_or_skip gone-herdr rl68-${HERDR_RUN} || {
     echo "skip - herdr reclaim needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
   dir=$HERDR_CASE_DIR
 
-  out=$(run_spawn "$dir" rl68 --relaunch --harness claude) || rc=$?
+  out=$(run_spawn "$dir" rl68-${HERDR_RUN} --relaunch --harness claude) || rc=$?
   log=$(cat "$dir/fake/herdr-log")
   expect_code 0 "$rc" "a pane that outlived its stopped server is adoptable"$'\n'"$out"$'\n'"$log"
 
@@ -3302,12 +2916,12 @@ test_herdr_reclaim_adopts_a_pane_that_outlived_its_server() {
   stray=$(printf '%s\n' "$log" | grep -v -- '--session fmlab$' | grep -v '^status --json$' || true)
   [ -z "$stray" ] || fail "a herdr reclaim touched a session the record does not name: $stray"
   assert_contains "$out" "window=fmlab:%7" "the reclaim should report the adopted endpoint"
-  [ "$(meta_field "$dir" rl68 herdr_pane_id)" = '%7' ] \
-    || fail "the adopted record's pane id changed, got $(meta_field "$dir" rl68 herdr_pane_id)"
-  [ "$(meta_field "$dir" rl68 herdr_tab_id)" = tab1 ] \
-    || fail "the adopted record's tab id changed, got $(meta_field "$dir" rl68 herdr_tab_id)"
-  [ "$(meta_field "$dir" rl68 window)" = 'fmlab:%7' ] \
-    || fail "the adopted record's endpoint moved, got $(meta_field "$dir" rl68 window)"
+  [ "$(meta_field "$dir" rl68-${HERDR_RUN} herdr_pane_id)" = '%7' ] \
+    || fail "the adopted record's pane id changed, got $(meta_field "$dir" rl68-${HERDR_RUN} herdr_pane_id)"
+  [ "$(meta_field "$dir" rl68-${HERDR_RUN} herdr_tab_id)" = tab1 ] \
+    || fail "the adopted record's tab id changed, got $(meta_field "$dir" rl68-${HERDR_RUN} herdr_tab_id)"
+  [ "$(meta_field "$dir" rl68-${HERDR_RUN} window)" = 'fmlab:%7' ] \
+    || fail "the adopted record's endpoint moved, got $(meta_field "$dir" rl68-${HERDR_RUN} window)"
   assert_contains "$log" "pane send-text %7 " \
     "the replacement's launch brief must be delivered into the adopted pane"
   pass "reclaim: a herdr pane that outlived its stopped server is adopted, never orphaned beside a new tab"
@@ -3315,19 +2929,19 @@ test_herdr_reclaim_adopts_a_pane_that_outlived_its_server() {
 
 test_herdr_exit_reports_already_stopped_when_the_pane_outlived_its_server() {
   local dir out rc=0
-  herdr_case_or_skip gone-herdr-exit rl72 || {
+  herdr_case_or_skip gone-herdr-exit rl72-${HERDR_RUN} || {
     echo "skip - herdr exit needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
   dir=$HERDR_CASE_DIR
 
-  out=$(run_control "$dir" rl72 exit) || rc=$?
+  out=$(run_control "$dir" rl72-${HERDR_RUN} exit) || rc=$?
   expect_code 0 "$rc" "a pane that outlived its stopped server holds no agent, which is success"$'\n'"$out"
   assert_contains "$out" "already-stopped" \
     "the endpoint is there and idle, which is the ordinary already-stopped outcome"
   assert_not_contains "$out" "endpoint-gone" \
     "a pane that survived its server's restart was never gone"
-  [ "$(meta_field "$dir" rl72 window)" = 'fmlab:%7' ] \
+  [ "$(meta_field "$dir" rl72-${HERDR_RUN} window)" = 'fmlab:%7' ] \
     || fail "exit must leave the recorded endpoint exactly as it found it"
   pass "fm-control exit: a herdr pane that outlived its stopped server is already-stopped, not gone"
 }
@@ -3338,31 +2952,31 @@ test_herdr_rebind_stays_in_the_recorded_session() {
   # the adapter's own default is `default`. The recorded pane does NOT come back
   # with the server, so this reclaim really does rebind - and the rebind must
   # land in `fmlab`, never in `default`.
-  herdr_case_or_skip gone-herdr-pin rl73 fmlab '%none' || {
+  herdr_case_or_skip gone-herdr-pin rl73-${HERDR_RUN} fmlab '%none' || {
     echo "skip - herdr rebind needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
   dir=$HERDR_CASE_DIR
 
-  out=$(run_spawn "$dir" rl73 --relaunch --harness claude) || rc=$?
+  out=$(run_spawn "$dir" rl73-${HERDR_RUN} --relaunch --harness claude) || rc=$?
   log=$(cat "$dir/fake/herdr-log")
   expect_code 0 "$rc" "a herdr pane that did not survive its server should be rebound"$'\n'"$out"$'\n'"$log"
 
   assert_contains "$log" "tab create" "a destroyed pane must be replaced by a fresh tab"
   [ -z "$(grep -v -- '--session fmlab$' <<<"$log" | grep -v '^status --json$' || true)" ] \
     || fail "the rebind used a herdr session the record does not name: $log"
-  [ "$(meta_field "$dir" rl73 herdr_session)" = fmlab ] \
-    || fail "the rebound record left its recorded herdr session, got $(meta_field "$dir" rl73 herdr_session)"
-  [ "$(meta_field "$dir" rl73 window)" = 'fmlab:%9' ] \
-    || fail "the rebound endpoint should be the new pane in the recorded session, got $(meta_field "$dir" rl73 window)"
-  [ "$(meta_field "$dir" rl73 herdr_pane_id)" = '%9' ] \
-    || fail "the rebound record should name the pane the reclaim minted, got $(meta_field "$dir" rl73 herdr_pane_id)"
+  [ "$(meta_field "$dir" rl73-${HERDR_RUN} herdr_session)" = fmlab ] \
+    || fail "the rebound record left its recorded herdr session, got $(meta_field "$dir" rl73-${HERDR_RUN} herdr_session)"
+  [ "$(meta_field "$dir" rl73-${HERDR_RUN} window)" = 'fmlab:%9' ] \
+    || fail "the rebound endpoint should be the new pane in the recorded session, got $(meta_field "$dir" rl73-${HERDR_RUN} window)"
+  [ "$(meta_field "$dir" rl73-${HERDR_RUN} herdr_pane_id)" = '%9' ] \
+    || fail "the rebound record should name the pane the reclaim minted, got $(meta_field "$dir" rl73-${HERDR_RUN} herdr_pane_id)"
   pass "reclaim: a herdr rebind is created in the session the record names, never the ambient one"
 }
 
 test_herdr_reclaim_refuses_an_agent_that_came_back() {
   local dir out rc log
-  herdr_case_or_skip gone-herdr-alive rl74 || {
+  herdr_case_or_skip gone-herdr-alive rl74-${HERDR_RUN} || {
     echo "skip - herdr reclaim needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
@@ -3372,20 +2986,20 @@ test_herdr_reclaim_refuses_an_agent_that_came_back() {
   # in this task's worktree, which is the whole reason absence is re-proven.
   : > "$dir/fake/herdr-agent-live"
 
-  out=$(run_spawn "$dir" rl74 --relaunch --harness claude); rc=$?
+  out=$(run_spawn "$dir" rl74-${HERDR_RUN} --relaunch --harness claude); rc=$?
   log=$(cat "$dir/fake/herdr-log")
   expect_code 1 "$rc" "a returning agent must refuse, never be duplicated"$'\n'"$out"$'\n'"$log"
   assert_contains "$out" "alive" "the refusal should name the state it actually read"
   assert_not_contains "$log" "tab create" "a refused reclaim must not mint a second tab"
   assert_not_contains "$log" "workspace create" "a refused reclaim must not create a workspace"
-  [ "$(meta_field "$dir" rl74 herdr_pane_id)" = '%7' ] \
+  [ "$(meta_field "$dir" rl74-${HERDR_RUN} herdr_pane_id)" = '%7' ] \
     || fail "a refused reclaim rewrote the record's pane id"
   pass "reclaim: a herdr agent that came back with its server refuses, so one worktree keeps one agent"
 }
 
 test_herdr_reclaim_keeps_the_task_whole() {
   local dir out rc=0 head_before
-  herdr_case_or_skip gone-herdr-work rl75 fmlab '%none' || {
+  herdr_case_or_skip gone-herdr-work rl75-${HERDR_RUN} fmlab '%none' || {
     echo "skip - herdr reclaim needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
@@ -3400,35 +3014,35 @@ test_herdr_reclaim_keeps_the_task_whole() {
   # the task must come through untouched: a record row the reclaim does not
   # own, the armed watcher check and the private binding that authorizes it,
   # and the status log the supervisor reads.
-  printf '%s\n' "pr=https://example.invalid/pr/7" >> "$dir/home/state/rl75.meta"
-  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$dir/home/state/rl75.check.sh"
-  chmod 0700 "$dir/home/state/rl75.check.sh"
-  FM_HOME="$dir/home" "$ROOT/bin/fm-check-register.sh" rl75 >/dev/null \
+  printf '%s\n' "pr=https://example.invalid/pr/7" >> "$dir/home/state/rl75-${HERDR_RUN}.meta"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$dir/home/state/rl75-${HERDR_RUN}.check.sh"
+  chmod 0700 "$dir/home/state/rl75-${HERDR_RUN}.check.sh"
+  FM_HOME="$dir/home" "$ROOT/bin/fm-check-register.sh" rl75-${HERDR_RUN} >/dev/null \
     || fail "could not arm a custom check for the reclaim fixture"
-  printf 'working: parked on an approval nobody can answer\n' >> "$dir/home/state/rl75.status"
+  printf 'working: parked on an approval nobody can answer\n' >> "$dir/home/state/rl75-${HERDR_RUN}.status"
 
-  out=$(run_control "$dir" rl75 relaunch --note "the pane was destroyed; pick the work back up") || rc=$?
+  out=$(run_control "$dir" rl75-${HERDR_RUN} relaunch --note "the pane was destroyed; pick the work back up") || rc=$?
   expect_code 0 "$rc" "the owning seat should be able to reclaim a task whose pane is gone"$'\n'"$out"
 
   [ "$(git -C "$dir/wt" rev-parse HEAD)" = "$head_before" ] \
     || fail "a reclaim moved the worktree's HEAD"
-  [ "$(git -C "$dir/wt" rev-parse --abbrev-ref HEAD)" = "task-rl75" ] \
+  [ "$(git -C "$dir/wt" rev-parse --abbrev-ref HEAD)" = "task-rl75-${HERDR_RUN}" ] \
     || fail "a reclaim changed the worktree's branch"
   assert_contains "$(cat "$dir/wt/dirty.txt")" "never committed" \
     "a reclaim destroyed or rewrote an uncommitted change"
   assert_present "$dir/wt/committed.txt" "a reclaim destroyed committed work"
 
-  [ "$(meta_field "$dir" rl75 worktree)" = "$dir/wt" ] \
+  [ "$(meta_field "$dir" rl75-${HERDR_RUN} worktree)" = "$dir/wt" ] \
     || fail "a reclaim must keep the recorded worktree"
-  [ "$(meta_field "$dir" rl75 pr)" = "https://example.invalid/pr/7" ] \
+  [ "$(meta_field "$dir" rl75-${HERDR_RUN} pr)" = "https://example.invalid/pr/7" ] \
     || fail "a reclaim dropped a record row it does not own"
-  assert_present "$dir/home/state/rl75.check.sh" "a reclaim retired the task's armed check"
-  assert_present "$dir/home/state/rl75.check-trust" "a reclaim broke the armed check's registration"
-  assert_contains "$(cat "$dir/home/state/rl75.status")" "parked on an approval nobody can answer" \
+  assert_present "$dir/home/state/rl75-${HERDR_RUN}.check.sh" "a reclaim retired the task's armed check"
+  assert_present "$dir/home/state/rl75-${HERDR_RUN}.check-trust" "a reclaim broke the armed check's registration"
+  assert_contains "$(cat "$dir/home/state/rl75-${HERDR_RUN}.status")" "parked on an approval nobody can answer" \
     "a reclaim truncated the status log"
-  assert_contains "$(cat "$dir/home/data/rl75/brief.md")" "the pane was destroyed" \
+  assert_contains "$(cat "$dir/home/data/rl75-${HERDR_RUN}/brief.md")" "the pane was destroyed" \
     "the replacement must inherit the progress note"
-  [ "$(journal_field "$dir" rl75 exit_result)" = endpoint-gone ] \
+  [ "$(journal_field "$dir" rl75-${HERDR_RUN} exit_result)" = endpoint-gone ] \
     || fail "the transaction should record that the endpoint was already gone"
   pass "reclaim: a herdr reclaim rebinds the endpoint and leaves the whole rest of the task alone"
 }
@@ -3440,14 +3054,14 @@ test_herdr_rebind_failure_from_a_plain_shell_names_the_real_cause() {
   # `fmlab`, but the cross-session launcher guard was never consulted - this
   # seat claims no launcher pane, so placement fell back to the recorded
   # session's labeled container and the container failed for its own reason.
-  herdr_case_or_skip gone-herdr-plain rl77 fmlab '%none' || {
+  herdr_case_or_skip gone-herdr-plain rl77-${HERDR_RUN} fmlab '%none' || {
     echo "skip - herdr reclaim needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
   dir=$HERDR_CASE_DIR
   : > "$dir/fake/herdr-workspace-create-fails"
 
-  out=$(run_spawn "$dir" rl77 --relaunch --harness claude); rc=$?
+  out=$(run_spawn "$dir" rl77-${HERDR_RUN} --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "a container that cannot be ensured must refuse"$'\n'"$out"
   assert_contains "$out" "fmlab" "the refusal should name the session the reclaim was targeting"
   assert_not_contains "$out" "this seat is running in herdr session" \
@@ -3458,17 +3072,26 @@ test_herdr_rebind_failure_from_a_plain_shell_names_the_real_cause() {
 }
 
 test_herdr_reclaim_of_a_secondmate_names_its_own_owner() {
-  local dir out rc
-  herdr_case_or_skip gone-herdr-secondmate rl76 fmlab '%none' || {
+  local dir out rc agent agent_pid=
+  herdr_case_or_skip gone-herdr-secondmate rl76-${HERDR_RUN} fmlab '%none' || {
     echo "skip - herdr reclaim needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
   dir=$HERDR_CASE_DIR
-  printf '%s\n' "kind=secondmate" "home=$dir/wt" >> "$dir/home/state/rl76.meta"
+  printf '%s\n' "kind=secondmate" "home=$dir/wt" >> "$dir/home/state/rl76-${HERDR_RUN}.meta"
+  printf '%s\n' "rl76-${HERDR_RUN}" > "$dir/wt/.fm-secondmate-home"
+  if agent=$(agent_standin_named "$dir" claude); then
+    start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+    wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the secondmate home"
+  fi
 
-  out=$(run_spawn "$dir" rl76 --relaunch --harness claude); rc=$?
+  out=$(run_spawn "$dir" rl76-${HERDR_RUN} --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "a secondmate reclaim belongs to the secondmate respawn path"
   assert_contains "$out" "--secondmate" "the refusal should name the path that owns this recovery"
+  if [ -n "$agent_pid" ]; then
+    assert_contains "$out" "pid $agent_pid (claude)" "the refusal must also name the agent still working in the home"
+    stop_dir_process "$agent_pid"
+  fi
   assert_not_contains "$(cat "$dir/fake/herdr-log")" "tab create" \
     "the refusal must happen before any endpoint is created"
   pass "reclaim: a herdr secondmate whose endpoint is gone is sent to its own respawn owner"
@@ -3667,25 +3290,87 @@ test_away_direct_spawn_relaunch_of_a_dead_worker_at_a_full_cap_defers() {
   pass "fm-spawn --relaunch: a dead worker's direct relaunch at a full away cap defers with exit 75 and touches nothing"
 }
 
-# Another launch in flight holds this home's task-set lock through its record's
-# publication (bin/fm-spawn.sh). The holder must stay alive, because
-# fm_lock_try_acquire reclaims a lock whose owning pid is gone.
-hold_home_task_set_lock() {  # <case-dir> -> echoes the holder pid
-  local lock="$1/home/state/.task-set.lock" i=0 holder
-  (
-    # shellcheck source=/dev/null
-    . "$ROOT/bin/fm-wake-lib.sh"
-    fm_lock_try_acquire "$lock" || exit 1
-    sleep 30
-  ) >/dev/null 2>&1 &
-  holder=$!
-  while [ ! -s "$lock/pid" ] && [ "$i" -lt 100 ]; do
-    sleep 0.1
-    i=$((i + 1))
-  done
-  [ -s "$lock/pid" ] || fail "the stand-in launch could not take the task-set lock"
-  printf '%s\n' "$holder"
+test_away_cap_deferral_names_an_agent_still_in_the_worktree() {
+  local dir out rc agent agent_pid holder
+  local -x FM_AFK_CONTRACT_CREW_STATE_BIN
+  dir=$(away_cap_case away-cap-live rl-cap-live 1 1 dead)
+  FM_AFK_CONTRACT_CREW_STATE_BIN=$(away_crew_state_stub "$dir")
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "away cap deferral beside a live agent: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  # The recorded window reads dead while the worker still runs beside it.
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  out=$(run_control "$dir" rl-cap-live relaunch --note "continue after the crash"); rc=$?
+  expect_code 75 "$rc" "the cap deferral keeps its exit status"$'\n'"$out"
+  assert_contains "$out" "deferred: relaunch of rl-cap-live refused" "the deferral should still be reported"
+  assert_contains "$out" "pid $agent_pid (claude)" "the deferral must also name the agent still in the worktree"
+  out=$(run_spawn "$dir" rl-cap-live --relaunch); rc=$?
+  expect_code 75 "$rc" "the direct relaunch's cap deferral keeps its exit status"$'\n'"$out"
+  assert_contains "$out" "pid $agent_pid (claude)" "the direct relaunch's deferral must also name the agent still in the worktree"
+  # A task set locked by another launch defers both entry points the same way.
+  holder=$(hold_home_task_set_lock "$dir")
+  out=$(run_control "$dir" rl-cap-live relaunch --note "continue after the crash"); rc=$?
+  expect_code 75 "$rc" "the locked-task-set deferral keeps its exit status"$'\n'"$out"
+  assert_contains "$out" "deferred: relaunch of rl-cap-live waits" "the lock deferral should still be reported"
+  assert_contains "$out" "pid $agent_pid (claude)" "the lock deferral must also name the agent still in the worktree"
+  out=$(run_spawn "$dir" rl-cap-live --relaunch); rc=$?
+  expect_code 75 "$rc" "the direct relaunch's lock deferral keeps its exit status"$'\n'"$out"
+  assert_contains "$out" "pid $agent_pid (claude)" "the direct relaunch's lock deferral must also name the agent still in the worktree"
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  assert_no_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "a deferred relaunch must launch nothing"
+  stop_dir_process "$agent_pid"
+  pass "away cap: a relaunch deferral keeps exit 75 and names the agent still working in the worktree"
 }
+
+test_away_cap_deferral_precedes_the_pre_stop_scan() {
+  local dir out rc other_pid real_python
+  local -x FM_AFK_CONTRACT_CREW_STATE_BIN
+  if [ -e /proc/self/cwd ] || ! real_python=$(command -v python3); then
+    pass "away cap before the pre-stop scan: skipped - this host does not read argv through bin/fm-procinfo.py"
+    return 0
+  fi
+  dir=$(away_cap_case away-cap-scan rl-cap-scan 1 1 dead)
+  FM_AFK_CONTRACT_CREW_STATE_BIN=$(away_crew_state_stub "$dir")
+  # A process in the worktree the pre-stop scan cannot identify: a full cap
+  # must still answer as the wait (75) supervision retries, never a failure.
+  start_dir_process "$dir/wt" /bin/sleep 600; other_pid=$STARTED_PID
+  # shellcheck disable=SC2016
+  printf '#!/bin/sh\n[ "$3" = "%s" ] && exit 1\nexec "%s" "$@"\n' "$other_pid" "$real_python" > "$dir/fakebin/python3"
+  chmod +x "$dir/fakebin/python3"
+  out=$(run_control "$dir" rl-cap-scan relaunch --note "continue after the crash"); rc=$?
+  expect_code 75 "$rc" "a full away cap must defer before the pre-stop scan can refuse"$'\n'"$out"
+  assert_contains "$out" "deferred: relaunch of rl-cap-scan refused" "the cap deferral should be the reported outcome"
+  stop_dir_process "$other_pid"
+  pass "fm-control relaunch: a full away cap defers with 75 before the pre-stop worktree scan"
+}
+
+test_away_lock_deferral_never_attributes_a_remote_task_a_local_pid() {
+  local dir out rc agent agent_pid holder
+  local -x FM_AFK_CONTRACT_CREW_STATE_BIN
+  dir=$(away_cap_case away-remote rl-cap-remote 2 1 dead)
+  FM_AFK_CONTRACT_CREW_STATE_BIN=$(away_crew_state_stub "$dir")
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "remote task lock deferral: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  # The record names a remote host; a local agent that happens to work in a
+  # local directory of the same path is no evidence about that task.
+  printf 'remote_host=build-box\n' >> "$dir/home/state/rl-cap-remote.meta"
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  holder=$(hold_home_task_set_lock "$dir")
+  out=$(run_control "$dir" rl-cap-remote relaunch --note "remote"); rc=$?
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  expect_code 75 "$rc" "the lock deferral keeps its exit status"$'\n'"$out"
+  assert_not_contains "$out" "pid $agent_pid" "a remote task's deferral must not name a local process"
+  stop_dir_process "$agent_pid"
+  pass "away lock: a remote task's deferral never names a local pid as its survivor"
+}
+
 
 test_away_relaunch_defers_while_another_launch_takes_the_last_slot() {
   local dir out rc before holder
@@ -3779,6 +3464,7 @@ SH
   pass "fm-control exit removes the dialog file before it releases the control lock"
 }
 
+
 test_relaunch_off_opencode_removes_tracked_wiring
 test_exit_and_relaunch_remove_the_dialog_file
 test_exit_removes_the_dialog_file_before_releasing_the_lock
@@ -3856,6 +3542,7 @@ test_secondmate_relaunch_refuses_an_unmarked_home
 test_secondmate_checkpoint_refuses_unreadable_child_state
 test_secondmate_checkpoint_ignores_a_vanished_scratch_find_walk
 test_concurrent_relaunch_is_refused
+test_lease_refused_relaunch_names_an_agent_still_in_the_worktree
 test_direct_spawn_relaunch_participates_in_the_lifecycle_lock
 test_promotion_participates_in_the_lifecycle_lock_before_metadata_resolution
 test_spawn_relaunch_refuses_a_live_agent
@@ -3890,5 +3577,8 @@ test_away_relaunch_of_a_dead_worker_at_a_full_cap_defers_and_touches_nothing
 test_away_relaunch_of_a_counted_worker_at_a_full_cap_proceeds
 test_away_relaunch_of_a_dead_worker_below_the_cap_proceeds
 test_away_direct_spawn_relaunch_of_a_dead_worker_at_a_full_cap_defers
+test_away_cap_deferral_names_an_agent_still_in_the_worktree
+test_away_cap_deferral_precedes_the_pre_stop_scan
+test_away_lock_deferral_never_attributes_a_remote_task_a_local_pid
 test_away_relaunch_defers_while_another_launch_takes_the_last_slot
 test_away_direct_spawn_relaunch_defers_while_another_launch_takes_the_last_slot
