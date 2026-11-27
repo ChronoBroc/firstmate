@@ -285,6 +285,18 @@ test_refusal_note_never_reads_a_foreign_state_directory() {
   [ "$rc" -ne 0 ] || fail "a relaunch beside the live agent must still refuse"$'\n'"$out"
   assert_not_contains "$out" "resolves outside this home" "../state from the home's bin directory is this home's own state"
   assert_contains "$out" "pid $agent_pid (claude)" "a relaunch through ../state must still name the agent in the worktree"
+  out=$(cd "$dir/home/bin" && FM_STATE_OVERRIDE=../typo-state run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relative state override naming no directory must refuse"$'\n'"$out"
+  assert_contains "$out" "FM_STATE_OVERRIDE directory cannot be resolved: ../typo-state" "the refusal should name the missing relative override"
+  [ ! -e "$dir/home/typo-state" ] || fail "a refused relative override must never be created"
+  mkdir -p "$dir/home/t"$'\t'"x"
+  out=$(FM_STATE_OVERRIDE="$dir/home/t"$'\t'"x/../state" run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "spawn must refuse a state override holding a control byte"$'\n'"$out"
+  assert_contains "$out" "invalid control byte" "spawn should name the control byte in the original override"
+  out=$(FM_STATE_OVERRIDE="$dir/home/t"$'\t'"x/../state" run_control "$dir" rl86-${RL_RUN} exit); rc=$?
+  [ "$rc" -ne 0 ] || fail "fm-control must refuse a state override holding a control byte"$'\n'"$out"
+  assert_contains "$out" "control character" "fm-control should name the control byte in the override"
+  rm -rf "$dir/home/t"$'\t'"x"
   # A relative override is used exactly where the containment check found it:
   # alias/.. is the alias target's parent, never this home.
   mkdir -p "$dir/home/nested/leaf" "$dir/home/nested/linked-state"

@@ -221,7 +221,8 @@ fm_backlog_home_contained "$STATE" "state dir" || {
   echo "error: $FM_BACKLOG_TRANSITION_ERROR; fm-control reads task records only from this home's own state" >&2
   exit 1
 }
-[ -z "${FM_STATE_OVERRIDE:-}" ] || { STATE=$FM_BACKLOG_CONTAINED_PATH; FM_STATE_OVERRIDE=$STATE; }
+STATE_OVERRIDE_INPUT=${FM_STATE_OVERRIDE:-}
+[ -z "$STATE_OVERRIDE_INPUT" ] || { STATE=$FM_BACKLOG_CONTAINED_PATH; FM_STATE_OVERRIDE=$STATE; }
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
@@ -1430,6 +1431,7 @@ do_relaunch() {
       FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || exit 75
       ;;
   esac
+  safe_checkpoint
   if view_gap=$(fm_agent_process_argv_reader_unusable) \
      || { view_gap=$(fm_agent_process_live_in_dir "$LIVE_DIR" "$RECORDED_HARNESS" strict); [ "$?" -eq 2 ]; }; then
     die "relaunch of $ID refused before its agent was touched: ${view_gap}, and the replacement's launch would refuse on that after the stop"
@@ -1460,7 +1462,6 @@ do_relaunch() {
   else
     note_line="note=none"
   fi
-  safe_checkpoint
   cp -p "$META" "$META_PRIOR" || die "could not preserve task $ID's durable record before relaunching"
   RELAUNCH_ACTIVE=1
   journal_write checkpoint "${CHECKPOINT_LINES[@]}" "$note_line"
@@ -1480,7 +1481,7 @@ do_relaunch() {
   [ "$TARGET_MODEL" = default ] || spawn_args+=(--model "$TARGET_MODEL")
   [ "$TARGET_EFFORT" = default ] || spawn_args+=(--effort "$TARGET_EFFORT")
   [ -z "$TARGET_ACCOUNT" ] || spawn_args+=(--account "$TARGET_ACCOUNT")
-  if FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
+  if FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" FM_STATE_OVERRIDE="$STATE_OVERRIDE_INPUT" \
       "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" >/dev/null; then
     release_task_set_lock
     RELAUNCH_META_PUBLISHED=1

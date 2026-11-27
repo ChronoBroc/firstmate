@@ -692,6 +692,7 @@ fm_backlog_home_contained() {  # <path> <label>
   [ -n "${FM_HOME:-}" ] || { FM_BACKLOG_CONTAINED_PATH=$path; return 0; }
   resolved=$(LC_ALL=C perl -MCwd=realpath,getcwd -e '
     my ($path, $home) = @ARGV;
+    exit 5 if $path =~ /[\x00-\x1f\x7f]/;
     my $home_real = realpath($home);
     exit 3 unless defined $home_real && -d $home_real;
     $path = getcwd() . "/" . $path unless $path =~ m{^/};
@@ -712,6 +713,7 @@ fm_backlog_home_contained() {  # <path> <label>
     }
     exit 1 if $through && $last ne $home_real && index($last, "$home_real/") != 0;
     my $physical = @rest ? ($last eq "/" ? "" : $last) . "/" . join("/", @rest) : $last;
+    exit 5 if $physical =~ /[\x00-\x1f\x7f]/;
     print $physical;
   ' "$path" "$FM_HOME" 2>/dev/null) || rc=$?
   case "$rc" in
@@ -724,6 +726,7 @@ fm_backlog_home_contained() {  # <path> <label>
       ;;
     1) FM_BACKLOG_TRANSITION_ERROR="$label resolves outside this home at $path" ;;
     4) FM_BACKLOG_TRANSITION_ERROR="$label steps through a part that does not exist yet at $path" ;;
+    5) FM_BACKLOG_TRANSITION_ERROR="$label resolves through a control character at $path" ;;
     *) FM_BACKLOG_TRANSITION_ERROR="$label home directory cannot be resolved at $FM_HOME" ;;
   esac
   return 1
