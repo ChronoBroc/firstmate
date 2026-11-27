@@ -558,10 +558,14 @@ test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
   # while it shuts down, so the replacement is due while it still runs. It
   # exits only after the endpoint received /exit while it was alive.
   printf '%s' "$agent_pid" > "$dir/fake/stop-pid"
+  observe_stop_polls "$dir"
   (
     i=0
     until [ -e "$dir/fake/exit-ack" ] || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
     [ -e "$dir/fake/exit-ack" ] || exit 1
+    i=0
+    until [ -e "$dir/fake/stop-pid-polled" ] || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
+    [ -e "$dir/fake/stop-pid-polled" ] || exit 2
     sleep 2
     kill "$agent_pid" 2>/dev/null
   ) </dev/null >/dev/null 2>&1 &
@@ -571,7 +575,8 @@ test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
   out=$(RUN_CONTROL_EXIT_WAIT=10 run_control "$dir" rl91-${RL_RUN} relaunch --note "stopped mid-refactor"); rc=$?
   wait "$waiter_pid"; waiter_rc=$?
   reap_dir_process "$waiter_pid"
-  [ "$waiter_rc" -eq 0 ] || { stop_dir_process "$agent_pid"; fail "the endpoint never received /exit while the agent ran"$'\n'"$out"; }
+  [ "$waiter_rc" -ne 1 ] || { stop_dir_process "$agent_pid"; fail "the endpoint never received /exit while the agent ran"$'\n'"$out"; }
+  [ "$waiter_rc" -eq 0 ] || { stop_dir_process "$agent_pid"; fail "the relaunch never checked the agent it stopped after the stop was submitted"$'\n'"$out"; }
   reap_dir_process "$agent_pid"
   expect_code 0 "$rc" "an agent the relaunch stopped must be waited for until it leaves the worktree"$'\n'"$out"
   assert_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "the replacement should have been launched"
@@ -593,11 +598,15 @@ test_relaunch_waits_only_for_the_agent_it_stopped() {
   start_dir_process "$dir/wt" "$agent" 600; other_pid=$STARTED_PID
   wait_probe_rc "$dir/wt" 0 || fail "the stand-in agents never appeared in the worktree"
   printf '%s' "$stopped_pid" > "$dir/fake/stop-pid"
+  observe_stop_polls "$dir"
   (
     i=0
     until [ -e "$dir/fake/exit-ack" ] || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
     [ -e "$dir/fake/exit-ack" ] || exit 1
     date +%s > "$dir/fake/exit-acked-at"
+    i=0
+    until [ -e "$dir/fake/stop-pid-polled" ] || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
+    [ -e "$dir/fake/stop-pid-polled" ] || exit 2
     sleep 1
     kill "$stopped_pid" 2>/dev/null
   ) </dev/null >/dev/null 2>&1 &
@@ -607,7 +616,8 @@ test_relaunch_waits_only_for_the_agent_it_stopped() {
   out=$(RUN_CONTROL_EXIT_WAIT=30 run_control "$dir" rl94-${RL_RUN} relaunch --note "beside an unrelated agent"); rc=$?
   wait "$waiter_pid"; waiter_rc=$?
   reap_dir_process "$waiter_pid"
-  [ "$waiter_rc" -eq 0 ] || { stop_dir_process "$stopped_pid"; stop_dir_process "$other_pid"; fail "the endpoint never received /exit while the stopped agent ran"$'\n'"$out"; }
+  [ "$waiter_rc" -ne 1 ] || { stop_dir_process "$stopped_pid"; stop_dir_process "$other_pid"; fail "the endpoint never received /exit while the stopped agent ran"$'\n'"$out"; }
+  [ "$waiter_rc" -eq 0 ] || { stop_dir_process "$stopped_pid"; stop_dir_process "$other_pid"; fail "the relaunch never checked the agent it stopped after the stop was submitted"$'\n'"$out"; }
   reap_dir_process "$stopped_pid"
   acked_at=$(cat "$dir/fake/exit-acked-at")
   [ $(( $(date +%s) - acked_at )) -lt 20 ] \

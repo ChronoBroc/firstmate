@@ -101,7 +101,7 @@ case "${1:-}" in
           # The replacement's arrival records whether the process named in
           # watch-pid is still running then (a zombie has exited).
           if [ -f "$D/watch-pid" ]; then
-            case "$(ps -o stat= -p "$(cat "$D/watch-pid")" 2>/dev/null)" in
+            case "$(FM_FAKE_PS_UNOBSERVED=1 ps -o stat= -p "$(cat "$D/watch-pid")" 2>/dev/null)" in
               ''|*Z*) echo exited ;;
               *) echo running ;;
             esac > "$D/watch-pid-at-launch"
@@ -514,6 +514,27 @@ start_dir_process() {
   # shellcheck disable=SC2031 # The background PID is captured immediately in this shell.
   STARTED_PID=$!
   LIVE_PIDS+=("$STARTED_PID")
+}
+
+# observe_stop_polls <case-dir>: a ps on the case's PATH that, once the stub
+# acknowledged a submitted stop, records in fake/stop-pid-polled each status
+# read (`ps -o stat= -p <pid>`) of the pid in fake/stop-pid - the relaunch's
+# wait for the agent it stopped.
+observe_stop_polls() {  # <case-dir>
+  cat > "$1/fakebin/ps" <<'SH'
+#!/usr/bin/env bash
+D=$FM_FAKE_DIR
+if [ -z "${FM_FAKE_PS_UNOBSERVED:-}" ] && [ -e "$D/exit-ack" ] && [ -f "$D/stop-pid" ]; then
+  want=$(cat "$D/stop-pid") prev= stat=
+  for a in "$@"; do
+    [ "$a" != stat= ] || stat=1
+    [ "$prev" != -p ] || [ "$a" != "$want" ] || [ -z "$stat" ] || : > "$D/stop-pid-polled"
+    prev=$a
+  done
+fi
+exec /bin/ps "$@"
+SH
+  chmod +x "$1/fakebin/ps"
 }
 
 # stop_dir_process <pid>: the one owner of a started process: stop it and any
