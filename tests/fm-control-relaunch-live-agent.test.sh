@@ -306,6 +306,10 @@ test_refusal_note_never_reads_a_foreign_state_directory() {
   [ "$rc" -ne 0 ] || fail "a relaunch from an empty state directory must refuse"$'\n'"$out"
   assert_contains "$out" "no $dir/home/nested/linked-state/rl86-${RL_RUN}.meta" "the override must be read from the directory the check evaluated"$'\n'"$out"
   assert_not_contains "$out" "pid $agent_pid" "alias/.. must never reach a linked home's task record"
+  out=$(cd "$dir/home" && FM_STATE_OVERRIDE=alias/../state run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relative override whose evaluated directory is missing must refuse"$'\n'"$out"
+  assert_contains "$out" "FM_STATE_OVERRIDE directory cannot be resolved: alias/../state" "the refusal should name the missing evaluated directory"
+  [ ! -e "$dir/home/nested/state" ] || fail "a refused relative override must never create its evaluated directory"
   # The absolute spelling of that path is used the same way, by both commands.
   out=$(FM_STATE_OVERRIDE="$dir/home/alias/../linked-state" run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
   [ "$rc" -ne 0 ] || fail "a relaunch from an empty absolute state directory must refuse"$'\n'"$out"
@@ -537,7 +541,7 @@ test_relaunch_refuses_an_agent_still_working_in_the_worktree() {
 }
 
 test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
-  local dir agent out rc agent_pid waiter_pid
+  local dir agent out rc agent_pid waiter_pid waiter_rc
   dir=$(new_case settling rl91-${RL_RUN})
   add_ship_task "$dir" rl91-${RL_RUN} claude
   agent=$(agent_standin_named "$dir" claude) || {
@@ -549,10 +553,13 @@ test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
   printf '%s' "$agent_pid" > "$dir/fake/watch-pid"
   wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
   # The stand-in outlives the stop by a few seconds, as a real harness can
-  # while it shuts down, so the replacement is due while it still runs.
+  # while it shuts down, so the replacement is due while it still runs. It
+  # exits only after the endpoint received /exit while it was alive.
+  printf '%s' "$agent_pid" > "$dir/fake/stop-pid"
   (
     i=0
-    until grep -Fqx /exit "$dir/fake/literal" 2>/dev/null || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
+    until [ -e "$dir/fake/exit-ack" ] || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
+    [ -e "$dir/fake/exit-ack" ] || exit 1
     sleep 2
     kill "$agent_pid" 2>/dev/null
   ) </dev/null >/dev/null 2>&1 &
@@ -560,7 +567,9 @@ test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
   waiter_pid=$!
   LIVE_PIDS+=("$waiter_pid")
   out=$(RUN_CONTROL_EXIT_WAIT=10 run_control "$dir" rl91-${RL_RUN} relaunch --note "stopped mid-refactor"); rc=$?
+  wait "$waiter_pid"; waiter_rc=$?
   reap_dir_process "$waiter_pid"
+  [ "$waiter_rc" -eq 0 ] || { stop_dir_process "$agent_pid"; fail "the endpoint never received /exit while the agent ran"$'\n'"$out"; }
   reap_dir_process "$agent_pid"
   expect_code 0 "$rc" "an agent the relaunch stopped must be waited for until it leaves the worktree"$'\n'"$out"
   assert_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "the replacement should have been launched"
@@ -570,7 +579,7 @@ test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
 }
 
 test_relaunch_waits_only_for_the_agent_it_stopped() {
-  local dir agent out rc stopped_pid other_pid waiter_pid started
+  local dir agent out rc stopped_pid other_pid waiter_pid waiter_rc acked_at
   dir=$(new_case attributed rl94-${RL_RUN})
   add_ship_task "$dir" rl94-${RL_RUN} claude
   agent=$(agent_standin_named "$dir" claude) || {
@@ -581,21 +590,26 @@ test_relaunch_waits_only_for_the_agent_it_stopped() {
   printf '%s' "$stopped_pid" > "$dir/fake/pane-pid"
   start_dir_process "$dir/wt" "$agent" 600; other_pid=$STARTED_PID
   wait_probe_rc "$dir/wt" 0 || fail "the stand-in agents never appeared in the worktree"
+  printf '%s' "$stopped_pid" > "$dir/fake/stop-pid"
   (
     i=0
-    until grep -Fqx /exit "$dir/fake/literal" 2>/dev/null || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
+    until [ -e "$dir/fake/exit-ack" ] || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
+    [ -e "$dir/fake/exit-ack" ] || exit 1
+    date +%s > "$dir/fake/exit-acked-at"
     sleep 1
     kill "$stopped_pid" 2>/dev/null
   ) </dev/null >/dev/null 2>&1 &
   # shellcheck disable=SC2031 # The background PID is captured immediately in this shell.
   waiter_pid=$!
   LIVE_PIDS+=("$waiter_pid")
-  started=$SECONDS
   out=$(RUN_CONTROL_EXIT_WAIT=30 run_control "$dir" rl94-${RL_RUN} relaunch --note "beside an unrelated agent"); rc=$?
+  wait "$waiter_pid"; waiter_rc=$?
   reap_dir_process "$waiter_pid"
+  [ "$waiter_rc" -eq 0 ] || { stop_dir_process "$stopped_pid"; stop_dir_process "$other_pid"; fail "the endpoint never received /exit while the stopped agent ran"$'\n'"$out"; }
   reap_dir_process "$stopped_pid"
-  [ $((SECONDS - started)) -lt 20 ] \
-    || fail "the relaunch must wait only for the agent it stopped, never the exit wait for an unrelated one (took $((SECONDS - started))s)"
+  acked_at=$(cat "$dir/fake/exit-acked-at")
+  [ $(( $(date +%s) - acked_at )) -lt 20 ] \
+    || fail "the relaunch must wait only for the agent it stopped, never the exit wait for an unrelated one (took $(( $(date +%s) - acked_at ))s after the stop)"
   [ "$rc" -ne 0 ] || fail "a relaunch beside an unrelated live agent must refuse"$'\n'"$out"
   assert_contains "$out" "pid $other_pid (claude)" "the refusal must name the unrelated agent still in the worktree"
   assert_not_contains "$out" "pid $stopped_pid (claude)" "the stopped agent was waited for and is gone"

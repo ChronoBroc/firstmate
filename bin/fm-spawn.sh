@@ -834,6 +834,7 @@ resolve_directory_input() {
 FM_HOME=$(resolve_directory_input FM_HOME "$FM_HOME") || exit 1
 if [ -n "${FM_STATE_OVERRIDE:-}" ]; then
   resolve_directory_input FM_STATE_OVERRIDE "$FM_STATE_OVERRIDE" >/dev/null || exit 1
+  case "$FM_STATE_OVERRIDE" in /*) state_override_relative= ;; *) state_override_relative=1 ;; esac
   ! fm_backlog_path_final_symlink "$FM_STATE_OVERRIDE" || {
     echo "error: spawn refused: state directory is not a real directory at $FM_STATE_OVERRIDE" >&2
     exit 1
@@ -842,6 +843,11 @@ if [ -n "${FM_STATE_OVERRIDE:-}" ]; then
     echo "error: spawn refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
     exit 1
   }
+  [ -z "$state_override_relative" ] || [ -d "$FM_BACKLOG_CONTAINED_PATH" ] || {
+    echo "error: FM_STATE_OVERRIDE directory cannot be resolved: $FM_STATE_OVERRIDE" >&2
+    exit 1
+  }
+  unset state_override_relative
   FM_STATE_OVERRIDE=$(resolve_directory_input FM_STATE_OVERRIDE "$FM_BACKLOG_CONTAINED_PATH") || exit 1
 fi
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"

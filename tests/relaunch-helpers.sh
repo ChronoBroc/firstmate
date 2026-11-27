@@ -91,6 +91,9 @@ case "${1:-}" in
       printf '%s\n' "$payload" >> "$D/literal"
       case "$payload" in
         /exit|/quit)
+          if [ -f "$D/stop-pid" ] && kill -0 "$(cat "$D/stop-pid")" 2>/dev/null; then
+            : > "$D/exit-ack"
+          fi
           printf 'zsh' > "$D/command"
           [ -z "${FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP:-}" ] || exit 1
           ;;
