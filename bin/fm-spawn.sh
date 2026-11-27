@@ -824,7 +824,7 @@ resolve_directory_input() {
     return 0
     ;;
   esac
-  resolved=$(CDPATH='' cd -P -- "$path" 2>/dev/null && pwd -P) || {
+  resolved=$(CDPATH='' cd -- "$path" 2>/dev/null && pwd -P) || {
     echo "error: $name directory cannot be resolved: $path" >&2
     return 1
   }
@@ -841,7 +841,7 @@ if [ -n "${FM_STATE_OVERRIDE:-}" ]; then
     echo "error: spawn refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
     exit 1
   }
-  FM_STATE_OVERRIDE=$(resolve_directory_input FM_STATE_OVERRIDE "$FM_STATE_OVERRIDE") || exit 1
+  FM_STATE_OVERRIDE=$(resolve_directory_input FM_STATE_OVERRIDE "$FM_BACKLOG_CONTAINED_PATH") || exit 1
 fi
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 # spawn_refusal_note <status>: a relaunch, or a --secondmate respawn of an

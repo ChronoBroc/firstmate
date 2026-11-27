@@ -682,16 +682,20 @@ fm_backlog_canonical_existing() {
 # inside it and then resolve outside it - a link in its spelling redirecting
 # into another home - and the part not created yet may hold no `..` or link.
 # Both resolve physically from the same working directory; a path that never
-# enters FM_HOME is an explicit external choice and passes.
+# enters FM_HOME is an explicit external choice and passes. On success
+# FM_BACKLOG_CONTAINED_PATH names the directory the check evaluated: <path>
+# itself, or its physical spelling when a `..` component would let a logical
+# `cd` reach a different directory.
 fm_backlog_home_contained() {  # <path> <label>
-  local path=$1 label=$2 rc=0
-  [ -n "${FM_HOME:-}" ] || return 0
-  LC_ALL=C perl -MCwd=realpath,getcwd -e '
+  local path=$1 label=$2 rc=0 resolved
+  FM_BACKLOG_CONTAINED_PATH=
+  [ -n "${FM_HOME:-}" ] || { FM_BACKLOG_CONTAINED_PATH=$path; return 0; }
+  resolved=$(LC_ALL=C perl -MCwd=realpath,getcwd -e '
     my ($path, $home) = @ARGV;
     my $home_real = realpath($home);
     exit 3 unless defined $home_real && -d $home_real;
     $path = getcwd() . "/" . $path unless $path =~ m{^/};
-    my ($prefix, $through, $last, $missing) = ("", 0, realpath("/"), 0);
+    my ($prefix, $through, $last, $missing, @rest) = ("", 0, realpath("/"), 0);
     for my $part (split m{/}, $path) {
       next if $part eq "";
       $prefix .= "/$part";
@@ -704,13 +708,20 @@ fm_backlog_home_contained() {  # <path> <label>
       }
       $missing = 1;
       exit 4 if $part eq ".." || -l $prefix;
+      push @rest, $part unless $part eq ".";
     }
-    exit 0 unless $through;
-    exit 0 if $last eq $home_real || index($last, "$home_real/") == 0;
-    exit 1;
-  ' "$path" "$FM_HOME" 2>/dev/null || rc=$?
+    exit 1 if $through && $last ne $home_real && index($last, "$home_real/") != 0;
+    my $physical = @rest ? ($last eq "/" ? "" : $last) . "/" . join("/", @rest) : $last;
+    print $physical;
+  ' "$path" "$FM_HOME" 2>/dev/null) || rc=$?
   case "$rc" in
-    0) return 0 ;;
+    0)
+      case "/$path/" in
+        */../*) FM_BACKLOG_CONTAINED_PATH=$resolved ;;
+        *) FM_BACKLOG_CONTAINED_PATH=$path ;;
+      esac
+      return 0
+      ;;
     1) FM_BACKLOG_TRANSITION_ERROR="$label resolves outside this home at $path" ;;
     4) FM_BACKLOG_TRANSITION_ERROR="$label steps through a part that does not exist yet at $path" ;;
     *) FM_BACKLOG_TRANSITION_ERROR="$label home directory cannot be resolved at $FM_HOME" ;;

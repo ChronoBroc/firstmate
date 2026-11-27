@@ -221,6 +221,7 @@ fm_backlog_home_contained "$STATE" "state dir" || {
   echo "error: $FM_BACKLOG_TRANSITION_ERROR; fm-control reads task records only from this home's own state" >&2
   exit 1
 }
+[ -z "${FM_STATE_OVERRIDE:-}" ] || { STATE=$FM_BACKLOG_CONTAINED_PATH; FM_STATE_OVERRIDE=$STATE; }
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"

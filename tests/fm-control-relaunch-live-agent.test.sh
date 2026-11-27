@@ -294,6 +294,17 @@ test_refusal_note_never_reads_a_foreign_state_directory() {
   [ "$rc" -ne 0 ] || fail "a relaunch from an empty state directory must refuse"$'\n'"$out"
   assert_contains "$out" "no $dir/home/nested/linked-state/rl86-${RL_RUN}.meta" "the override must be read from the directory the check evaluated"$'\n'"$out"
   assert_not_contains "$out" "pid $agent_pid" "alias/.. must never reach a linked home's task record"
+  # The absolute spelling of that path is used the same way, by both commands.
+  out=$(FM_STATE_OVERRIDE="$dir/home/alias/../linked-state" run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch from an empty absolute state directory must refuse"$'\n'"$out"
+  assert_contains "$out" "/home/nested/linked-state/rl86-${RL_RUN}.meta" "spawn must use the physical directory the check evaluated"$'\n'"$out"
+  assert_not_contains "$out" "alias/../linked-state/rl86-${RL_RUN}.meta" "spawn must not keep a spelling a later logical cd could redirect"
+  assert_not_contains "$out" "pid $agent_pid" "an absolute alias/.. must never reach a linked home's task record"
+  out=$(FM_STATE_OVERRIDE="$dir/home/alias/../linked-state" run_control "$dir" rl86-${RL_RUN} exit); rc=$?
+  [ "$rc" -ne 0 ] || fail "fm-control must refuse a task absent from the evaluated state directory"$'\n'"$out"
+  assert_contains "$out" "/home/nested/linked-state" "fm-control must use the physical directory the check evaluated"$'\n'"$out"
+  assert_not_contains "$out" "alias/../linked-state" "fm-control must not keep a spelling a later logical cd could redirect"
+  assert_not_contains "$out" "pid $agent_pid" "fm-control must never reach a linked home's task record through alias/.."
   rm "$dir/home/alias" "$dir/home/linked-state"
   rm -rf "$dir/home/nested"
   out=$(FM_STATE_OVERRIDE="$dir/home/state/fresh-leaf" run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
