@@ -1,0 +1,27 @@
+## Original agent: real claude CLI on SECOND tmux server fm-lab2, pid=85471, cwd=task worktree
+## Recorded endpoint crew:fm-hgsw-livetest on server fm-lab: idle zsh (agent-free, like the 2026-11-25 fault)
+   fm-hgsw-livetest pid=48167 cmd=zsh
+
+$ bin/fm-control.sh hgsw-livetest relaunch --note "manual relaunch"
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fm-lab.RzGpuo
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fm-lab.RzGpuo
+error: refusing to start an agent for hgsw-livetest: the recorded worktree /private/tmp/fm-lab.RzGpuo/work/wt already has a live agent process working in it, whatever its recorded endpoint reads from here; stop that agent, or confirm it is not this task's, before launching another
+An agent process is still working in its worktree /private/tmp/fm-lab.RzGpuo/work/wt: pid 85471 (claude).
+error: the replacement agent for hgsw-livetest could not be launched on claude
+error: hgsw-livetest's recorded endpoint holds no agent now, but no replacement was launched because an agent is still working in /private/tmp/fm-lab.RzGpuo/work/wt (pid 85471 (claude)); its original instructions were restored and the durable record was retained
+An agent process is still working in its worktree /private/tmp/fm-lab.RzGpuo/work/wt: pid 85471 (claude).
+[exit ]
+
+$ bin/fm-spawn.sh hgsw-livetest --relaunch   (recovery/automatic path)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fm-lab.RzGpuo
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: refusing to start an agent for hgsw-livetest: the recorded worktree /private/tmp/fm-lab.RzGpuo/work/wt already has a live agent process working in it, whatever its recorded endpoint reads from here; stop that agent, or confirm it is not this task's, before launching another
+An agent process is still working in its worktree /private/tmp/fm-lab.RzGpuo/work/wt: pid 85471 (claude).
+[exit ]
+
+## after: panes on recorded server fm-lab (no replacement launched):
+   fm-hgsw-livetest pid=48167 cmd=zsh
+## brief unchanged (no note appended):
+0
+## original agent still alive:
+85471 claude

@@ -1,0 +1,38 @@
+## Original agent: real claude CLI on a SECOND tmux server (fm-lab2), pid=85471, cwd=task worktree
+## Recorded endpoint crew:fm-hgsw-livetest on server fm-lab runs only 'sleep' (reads agent-free)
+
+$ bin/fm-control.sh hgsw-livetest relaunch --note "manual relaunch"
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fm-lab.RzGpuo
+error: task hgsw-livetest's endpoint reads 'ambiguous' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint
+error: relaunch of hgsw-livetest failed while stopping the old agent and its state is 'ambiguous', so it was not proven stopped; its original instructions were restored and the durable record was retained for recovery
+An agent process is still working in its worktree /private/tmp/fm-lab.RzGpuo/work/wt: pid 85471 (claude).
+[exit 1]
+
+$ bin/fm-spawn.sh hgsw-livetest --relaunch   (recovery/automatic path)
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fm-lab.RzGpuo
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: task hgsw-livetest's endpoint reads 'ambiguous'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh hgsw-livetest exit)
+An agent process is still working in its worktree /private/tmp/fm-lab.RzGpuo/work/wt: pid 85471 (claude).
+[exit 1]
+
+## state after refusals
+.guard-watcher-stale-banner
+hgsw-livetest.control-relaunch
+hgsw-livetest.control-relaunch.brief-prior
+hgsw-livetest.control-relaunch.meta-prior
+hgsw-livetest.control-relaunch.note
+hgsw-livetest.meta
+--- brief tail:
+
+## Firstmate spec
+none
+## panes on recorded server fm-lab:
+fm-hgsw-livetest 85451 sleep
+## original agent still alive?
+85471 claude

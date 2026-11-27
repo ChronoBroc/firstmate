@@ -1,0 +1,18 @@
+ok - fm-control relaunch: an incomplete process view refuses before the agent is stopped
+ok - fm-control relaunch: a host whose working directories or argv cannot be read refuses before the agent is stopped
+ok - fm-control relaunch: an unidentifiable worktree process refuses before the agent is stopped
+ok - early relaunch refusals (missing note file, malformed configuration, unresolvable data directory, lost task-set lock) name the agent still in the worktree
+ok - refusal note: a symlinked state directory or an ambiguous record is never read for the survivor diagnostic
+ok - refusal survivor: the session-start and watcher first-line summaries carry the pid beside the reason
+ok - fm-control relaunch: pending-composer and journal-write refusals name the agent still in the worktree
+ok - fm-spawn --relaunch: a secondmate relaunch checks the home it launches in, not a stale recorded worktree
+ok - fm-control relaunch: a brief backup that cannot be taken refuses before the note is appended
+ok - fm-spawn --relaunch: refuses and names a raw-launch worker still working in the worktree
+ok - fm-control relaunch: refuses and names the pid of an agent still working in the worktree
+ok - fm-control relaunch: the agent it stopped is waited for until it exits, then replaced
+ok - fm-control relaunch: waits for the agent it stopped, not for an unrelated one, then refuses naming it
+ok - fm-control relaunch: a rollback from stopping reports and restores for an agent surviving in the worktree
+ok - fm-control relaunch: a rollback never restores a backup it did not take
+ok - relaunch refusing an unprovable endpoint absence names the agent still in the worktree
+ok - fm-spawn --relaunch: an inconclusive worktree probe refuses rather than launching
+ok - fm-spawn --secondmate: refuses and names the pid of an agent still working in the home

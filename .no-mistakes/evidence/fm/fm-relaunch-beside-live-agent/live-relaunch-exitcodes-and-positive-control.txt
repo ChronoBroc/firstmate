@@ -1,0 +1,24 @@
+$ bin/fm-control.sh hgsw-livetest relaunch --note "manual relaunch"  (claude pid 85471 alive on fm-lab2)
+An agent process is still working in its worktree /private/tmp/fm-lab.RzGpuo/work/wt: pid 85471 (claude).
+error: the replacement agent for hgsw-livetest could not be launched on claude
+error: hgsw-livetest's recorded endpoint holds no agent now, but no replacement was launched because an agent is still working in /private/tmp/fm-lab.RzGpuo/work/wt (pid 85471 (claude)); its original instructions were restored and the durable record was retained
+An agent process is still working in its worktree /private/tmp/fm-lab.RzGpuo/work/wt: pid 85471 (claude).
+[exit 1]
+$ bin/fm-spawn.sh hgsw-livetest --relaunch
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /private/tmp/fm-lab.RzGpuo
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: refusing to start an agent for hgsw-livetest: the recorded worktree /private/tmp/fm-lab.RzGpuo/work/wt already has a live agent process working in it, whatever its recorded endpoint reads from here; stop that agent, or confirm it is not this task's, before launching another
+An agent process is still working in its worktree /private/tmp/fm-lab.RzGpuo/work/wt: pid 85471 (claude).
+[exit 1]
+
+## POSITIVE CONTROL: stop the original agent (kill the fm-lab2 server), then relaunch
+$ bin/fm-control.sh hgsw-livetest relaunch --note "manual relaunch"
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+warning: /private/tmp/fm-lab.RzGpuo/data/hgsw-livetest/launch-brief.md records no ship branch; defaulting to legacy branch fm/hgsw-livetest
+warning: /private/tmp/fm-lab.RzGpuo/data/hgsw-livetest/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+relaunched hgsw-livetest harness=claude from=claude model=default effort=default backend=tmux endpoint=crew:fm-hgsw-livetest worktree=/private/tmp/fm-lab.RzGpuo/work/wt
+[exit 0]
+## panes on fm-lab after:
+   fm-hgsw-livetest pid=48167 cmd=2.1.332
+## brief note appended:
+1

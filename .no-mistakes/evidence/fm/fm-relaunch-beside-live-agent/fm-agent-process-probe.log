@@ -1,0 +1,4 @@
+ok - worktree agent probe: finds the agent working in the directory and nothing else
+ok - worktree agent probe: names a verified agent beside an unreadable process
+ok - worktree agent probe: counts the task's raw launch executable, never ngrok or a shell
+ok - worktree agent probe: identifies without ps, reads a partial listing, and never proves absence on Windows
