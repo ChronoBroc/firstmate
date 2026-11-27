@@ -258,22 +258,30 @@ release_task_set_lock() {
   fm_lock_release "$TASK_SET_LOCK" || true
 }
 
+control_note_release() {
+  [ -n "$CONTROL_NOTE_BUFFER" ] || return 0
+  exec 2>&5 5>&-
+  cat "$CONTROL_NOTE_BUFFER" >&2 2>/dev/null
+  rm -f "$CONTROL_NOTE_BUFFER"
+  CONTROL_NOTE_BUFFER=
+}
+
 control_cleanup() {
-  local status=$? phase=$RELAUNCH_PHASE note
+  local status=$? note=
   if [ "$RELAUNCH_ACTIVE" = 1 ] \
      && declare -F relaunch_rollback >/dev/null 2>&1; then
     relaunch_rollback || true
   fi
   # Every relaunch that ends before it touches the agent - refused, deferred,
   # or failed on its own preconditions - names any agent still working in the
-  # recorded worktree, keeping its own reason and status.
-  if [ "$status" -ne 0 ] && [ "$VERB" = relaunch ] && [ -n "${ID:-}" ]; then
-    case "$phase" in
-      start|checkpoint|noted)
-        note=$(fm_agent_process_record_note "$STATE/$ID.meta" 2>/dev/null) || note=
-        [ -z "$note" ] || printf '%s\n' "${note# }" >&2
-        ;;
-    esac
+  # recorded worktree on the first line of its own refusal, keeping its reason
+  # and status.
+  if [ -n "${CONTROL_NOTE_BUFFER:-}" ]; then
+    exec 2>&5 5>&-
+    [ "$status" -eq 0 ] || note=$(fm_agent_process_record_note "$STATE" "$ID" 2>/dev/null) || note=
+    fm_agent_process_emit_refusal "$CONTROL_NOTE_BUFFER" "$note"
+    rm -f "$CONTROL_NOTE_BUFFER"
+    CONTROL_NOTE_BUFFER=
   fi
   # Remove the dialog file while the lock is still held: once it is released,
   # the next lifecycle command for this task writes the same path.
@@ -321,6 +329,15 @@ if ! fm_task_id_creation_valid "$RAW_ID"; then
 fi
 ID=$RAW_ID
 CONTROL_LOCK="$STATE/.control-$ID.lock"
+# A relaunch holds its stderr until it is about to stop the agent
+# (control_note_release), so a refusal before then can carry any agent still
+# working in the worktree on its first reported line (control_cleanup).
+CONTROL_NOTE_BUFFER=
+if [ "$VERB" = relaunch ] && CONTROL_NOTE_BUFFER=$(mktemp "${TMPDIR:-/tmp}/fm-control-refusal.XXXXXX" 2>/dev/null); then
+  exec 5>&2 2>"$CONTROL_NOTE_BUFFER"
+else
+  CONTROL_NOTE_BUFFER=
+fi
 trap control_cleanup EXIT
 
 NEW_HARNESS=
@@ -1460,6 +1477,7 @@ do_relaunch() {
   record_note
   journal_write noted "${CHECKPOINT_LINES[@]}" "$note_line"
 
+  control_note_release
   journal_write stopping "${CHECKPOINT_LINES[@]}" "$note_line"
   exit_result=$(do_exit)
   journal_write exited "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"

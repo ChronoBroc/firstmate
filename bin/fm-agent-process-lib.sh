@@ -390,14 +390,47 @@ fm_agent_process_format_live() {  # <probe-output>
   printf '%s\n' "$1" | awk -F'\t' 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }'
 }
 
-# fm_agent_process_record_note <meta>: fm_agent_process_live_note for the
-# worktree and launch executable a task record names, only when that record is
-# a regular file and not a symlink and the task runs on this host (no
-# remote_host); nothing otherwise.
-fm_agent_process_record_note() {  # <meta>
-  [ -f "${1:-}" ] && [ ! -L "$1" ] || return 0
-  [ -z "$(fm_meta_get "$1" remote_host)" ] || return 0
-  fm_agent_process_live_note "$(fm_meta_get "$1" worktree)" "$(fm_meta_get "$1" harness)"
+# fm_agent_process_record_note <state-dir> <id>: fm_agent_process_live_note for
+# the worktree and launch executable task <id>'s record names, only when the
+# state directory is a real directory, the record passes this home's
+# record-ownership check (bin/fm-backlog-transition-lib.sh), and the task runs
+# on this host (no remote_host); nothing otherwise.
+fm_agent_process_record_note() {  # <state-dir> <id>
+  local state=${1:-} meta="${1:-}/${2:-}.meta" lib_dir=${_FM_AGENT_PROCESS_PROCINFO%/*}
+  [ -n "$state" ] && [ -n "${2:-}" ] || return 0
+  if ! declare -F fm_backlog_record_present >/dev/null 2>&1; then
+    . "$lib_dir/fm-tasks-axi-lib.sh" >/dev/null 2>&1 \
+      && . "$lib_dir/fm-backlog-transition-lib.sh" >/dev/null 2>&1 || return 0
+  fi
+  fm_backlog_directory_present "$state" "state directory" || return 0
+  fm_backlog_record_present "$meta" "task record" "$state" || return 0
+  [ ! -L "$meta" ] || return 0
+  [ -z "$(fm_meta_get "$meta" remote_host)" ] || return 0
+  fm_agent_process_live_note "$(fm_meta_get "$meta" worktree)" "$(fm_meta_get "$meta" harness)"
+}
+
+# fm_agent_process_emit_refusal <buffered-stderr-file> <note>: write a
+# refusal's buffered stderr to stderr with <note> (fm_agent_process_live_note)
+# appended to its first line, so a caller that keeps only the first reported
+# line still carries the surviving agent's pid.
+fm_agent_process_emit_refusal() {  # <file> <note>
+  local file=$1 note=${2# } first=1 line
+  if [ -z "$note" ]; then
+    cat "$file" >&2 2>/dev/null
+    return 0
+  fi
+  if [ ! -s "$file" ]; then
+    printf '%s\n' "$note" >&2
+    return 0
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$first" = 1 ]; then
+      first=0
+      printf '%s; %s\n' "$line" "$note" >&2
+    else
+      printf '%s\n' "$line" >&2
+    fi
+  done < "$file"
 }
 
 # fm_agent_process_live_note <dir> [launch-exe]: a sentence naming the agent

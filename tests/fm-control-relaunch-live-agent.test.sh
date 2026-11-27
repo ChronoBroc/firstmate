@@ -405,7 +405,7 @@ test_relaunch_beside_an_unreadable_worktree_process_refuses_before_the_stop() {
 
 test_early_relaunch_refusals_name_an_agent_still_in_the_worktree() {
   local dir agent out rc agent_pid holder case_name
-  for case_name in missing-note-file malformed-config secondmate-lock; do
+  for case_name in missing-note-file malformed-config data-override secondmate-lock; do
     dir=$(new_case "early-$case_name" rl87-${RL_RUN})
     agent=$(agent_standin_named "$dir" claude) || {
       pass "early relaunch refusals beside a live agent: skipped - no stand-in survives a rename on this host"
@@ -431,6 +431,15 @@ test_early_relaunch_refusals_name_an_agent_still_in_the_worktree() {
         expect_code 1 "$rc" "a malformed launch configuration keeps its refusal status"$'\n'"$out"
         assert_contains "$out" "config/claude-permission-mode holds 'bogus'" "the refusal keeps its own reason"
         ;;
+      data-override)
+        add_ship_task "$dir" rl87-${RL_RUN} claude
+        printf 'zsh' > "$dir/fake/command"
+        start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+        wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+        out=$(FM_DATA_OVERRIDE=no-such-relative-data run_spawn "$dir" rl87-${RL_RUN} --relaunch --harness claude); rc=$?
+        expect_code 1 "$rc" "an unresolvable data directory keeps its refusal status"$'\n'"$out"
+        assert_contains "$out" "FM_DATA_OVERRIDE directory cannot be resolved" "the refusal keeps its own reason"
+        ;;
       secondmate-lock)
         mkdir -p "$dir/smhome" "$dir/home/data/rl87-${RL_RUN}"
         printf '# secondmate brief\n' > "$dir/home/data/rl87-${RL_RUN}/brief.md"
@@ -446,11 +455,33 @@ test_early_relaunch_refusals_name_an_agent_still_in_the_worktree() {
         assert_contains "$out" "task set is locked" "the refusal keeps its own reason"
         ;;
     esac
-    assert_contains "$out" "pid $agent_pid (claude)" "the $case_name refusal must also name the agent still in the worktree"
+    assert_contains "$(printf '%s\n' "$out" | head -n 1)" "pid $agent_pid (claude)" \
+      "the $case_name refusal's first reported line - all a first-line consumer such as the liveness sweep keeps - must name the agent still in the worktree"$'\n'"$out"
     ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no replacement agent may be launched ($case_name)"
     stop_dir_process "$agent_pid"
   done
-  pass "early relaunch refusals (missing note file, malformed configuration, lost task-set lock) name the agent still in the worktree"
+  pass "early relaunch refusals (missing note file, malformed configuration, unresolvable data directory, lost task-set lock) name the agent still in the worktree on their first line"
+}
+
+test_refusal_note_never_reads_a_foreign_state_directory() {
+  local dir agent out rc agent_pid
+  dir=$(new_case foreign rl86-${RL_RUN})
+  add_ship_task "$dir" rl86-${RL_RUN} claude
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "refusal note and a foreign state directory: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  # This home's state directory is a symlink into another home's state.
+  mv "$dir/home/state" "$dir/other-state"
+  ln -s "$dir/other-state" "$dir/home/state"
+  out=$(run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a symlinked state directory must refuse"$'\n'"$out"
+  assert_contains "$out" "state directory" "the refusal should name the unsafe state directory"
+  assert_not_contains "$out" "pid $agent_pid" "a refusal must never report another home's task record"
+  stop_dir_process "$agent_pid"
+  pass "refusal note: a symlinked state directory is never read for the survivor diagnostic"
 }
 
 test_relaunch_refuses_a_brief_backup_it_cannot_take() {
@@ -727,6 +758,7 @@ test_relaunch_on_an_incomplete_process_view_refuses_before_the_stop
 test_relaunch_without_a_cwd_provider_refuses_before_the_stop
 test_relaunch_beside_an_unreadable_worktree_process_refuses_before_the_stop
 test_early_relaunch_refusals_name_an_agent_still_in_the_worktree
+test_refusal_note_never_reads_a_foreign_state_directory
 test_relaunch_refuses_a_brief_backup_it_cannot_take
 test_relaunch_refuses_a_raw_launch_worker_still_in_the_worktree
 test_relaunch_refuses_an_agent_still_working_in_the_worktree
