@@ -454,10 +454,10 @@ test_secondmate_relaunch_checks_the_home_it_launches_in() {
   [ "$rc" -ne 0 ] || fail "a secondmate relaunch beside its live agent must refuse"$'\n'"$out"
   assert_contains "$out" "pid $agent_pid (claude)" "the refusal must name the agent working in the home the relaunch would launch in"
   assert_contains "$out" "the secondmate home $dir/smhome" "the refusal should come from the check of the home itself"
-  # fm-control reads the same split record: its refusals probe the home too.
+  # fm-control reads the same split record: its relaunch refusals probe the home too.
   printf 'vim' > "$dir/fake/command"
-  out=$(run_control "$dir" rl83-${RL_RUN} exit); rc=$?
-  [ "$rc" -ne 0 ] || fail "exit must refuse an unattributed endpoint"$'\n'"$out"
+  out=$(run_control "$dir" rl83-${RL_RUN} relaunch); rc=$?
+  [ "$rc" -ne 0 ] || fail "relaunch must refuse an unattributed endpoint"$'\n'"$out"
   assert_contains "$out" "pid $agent_pid (claude)" "fm-control must name the agent working in the secondmate's home"
   # A home whose marker names another mate is no evidence about this one.
   printf 'zsh' > "$dir/fake/command"
@@ -467,14 +467,14 @@ test_secondmate_relaunch_checks_the_home_it_launches_in() {
   assert_contains "$out" "marked for secondmate some-other-mate" "the refusal should name the mismatched marker"
   assert_not_contains "$out" "pid $agent_pid" "a mismatched home's agent must never be attributed to this task"
   printf 'vim' > "$dir/fake/command"
-  out=$(run_control "$dir" rl83-${RL_RUN} exit); rc=$?
-  [ "$rc" -ne 0 ] || fail "exit must refuse when the secondmate's home is marked for another mate"$'\n'"$out"
+  out=$(run_control "$dir" rl83-${RL_RUN} relaunch); rc=$?
+  [ "$rc" -ne 0 ] || fail "relaunch must refuse when the secondmate's home is marked for another mate"$'\n'"$out"
   assert_not_contains "$out" "pid $agent_pid" "fm-control must never attribute a mismatched home's agent"
   # A legacy record names the home in its worktree row; the marker still rules.
   sed -i.bak -e '/^home=/d' -e "s|^worktree=.*|worktree=$dir/smhome|" "$dir/home/state/rl83-${RL_RUN}.meta"
   rm -f "$dir/home/state/rl83-${RL_RUN}.meta.bak"
-  out=$(run_control "$dir" rl83-${RL_RUN} exit); rc=$?
-  [ "$rc" -ne 0 ] || fail "exit must refuse a legacy record whose home is marked for another mate"$'\n'"$out"
+  out=$(run_control "$dir" rl83-${RL_RUN} relaunch); rc=$?
+  [ "$rc" -ne 0 ] || fail "relaunch must refuse a legacy record whose home is marked for another mate"$'\n'"$out"
   assert_not_contains "$out" "pid $agent_pid" "fm-control must never attribute a legacy record's mismatched home"
   printf 'zsh' > "$dir/fake/command"
   out=$(run_spawn "$dir" rl83-${RL_RUN} --relaunch --harness claude); rc=$?
@@ -526,7 +526,6 @@ test_relaunch_refuses_an_agent_still_working_in_the_worktree() {
   out=$(run_control "$dir" rl90-${RL_RUN} exit); rc=$?
   expect_code 1 "$rc" "exit must refuse an unattributed endpoint"$'\n'"$out"
   assert_contains "$out" "unattributed endpoint" "exit should refuse the unattributed endpoint"
-  assert_contains "$out" "pid $agent_pid (claude)" "exit's unattributed-endpoint refusal must name the agent in the worktree"
   printf 'claude' > "$dir/fake/command"
   : > "$dir/fake/literal"
   out=$(run_control "$dir" rl90-${RL_RUN} relaunch --note "lost its terminal"); rc=$?
@@ -564,9 +563,8 @@ test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
     until [ -e "$dir/fake/exit-ack" ] || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
     [ -e "$dir/fake/exit-ack" ] || exit 1
     i=0
-    until [ -e "$dir/fake/stop-pid-polled" ] || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
-    [ -e "$dir/fake/stop-pid-polled" ] || exit 2
-    sleep 2
+    until [ "$(wc -l < "$dir/fake/stop-pid-polls" 2>/dev/null || echo 0)" -ge 2 ] || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
+    [ "$(wc -l < "$dir/fake/stop-pid-polls" 2>/dev/null || echo 0)" -ge 2 ] || exit 2
     kill "$agent_pid" 2>/dev/null
   ) </dev/null >/dev/null 2>&1 &
   # shellcheck disable=SC2031 # The background PID is captured immediately in this shell.
@@ -576,7 +574,7 @@ test_relaunch_waits_for_a_stopping_agent_to_finish_exiting() {
   wait "$waiter_pid"; waiter_rc=$?
   reap_dir_process "$waiter_pid"
   [ "$waiter_rc" -ne 1 ] || { stop_dir_process "$agent_pid"; fail "the endpoint never received /exit while the agent ran"$'\n'"$out"; }
-  [ "$waiter_rc" -eq 0 ] || { stop_dir_process "$agent_pid"; fail "the relaunch never checked the agent it stopped after the stop was submitted"$'\n'"$out"; }
+  [ "$waiter_rc" -eq 0 ] || { stop_dir_process "$agent_pid"; fail "the relaunch did not keep checking the agent it stopped after the stop was submitted"$'\n'"$out"; }
   reap_dir_process "$agent_pid"
   expect_code 0 "$rc" "an agent the relaunch stopped must be waited for until it leaves the worktree"$'\n'"$out"
   assert_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "the replacement should have been launched"
@@ -605,9 +603,8 @@ test_relaunch_waits_only_for_the_agent_it_stopped() {
     [ -e "$dir/fake/exit-ack" ] || exit 1
     date +%s > "$dir/fake/exit-acked-at"
     i=0
-    until [ -e "$dir/fake/stop-pid-polled" ] || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
-    [ -e "$dir/fake/stop-pid-polled" ] || exit 2
-    sleep 1
+    until [ "$(wc -l < "$dir/fake/stop-pid-polls" 2>/dev/null || echo 0)" -ge 2 ] || [ "$i" -ge 300 ]; do sleep 0.1; i=$((i + 1)); done
+    [ "$(wc -l < "$dir/fake/stop-pid-polls" 2>/dev/null || echo 0)" -ge 2 ] || exit 2
     kill "$stopped_pid" 2>/dev/null
   ) </dev/null >/dev/null 2>&1 &
   # shellcheck disable=SC2031 # The background PID is captured immediately in this shell.
@@ -617,7 +614,7 @@ test_relaunch_waits_only_for_the_agent_it_stopped() {
   wait "$waiter_pid"; waiter_rc=$?
   reap_dir_process "$waiter_pid"
   [ "$waiter_rc" -ne 1 ] || { stop_dir_process "$stopped_pid"; stop_dir_process "$other_pid"; fail "the endpoint never received /exit while the stopped agent ran"$'\n'"$out"; }
-  [ "$waiter_rc" -eq 0 ] || { stop_dir_process "$stopped_pid"; stop_dir_process "$other_pid"; fail "the relaunch never checked the agent it stopped after the stop was submitted"$'\n'"$out"; }
+  [ "$waiter_rc" -eq 0 ] || { stop_dir_process "$stopped_pid"; stop_dir_process "$other_pid"; fail "the relaunch did not keep checking the agent it stopped after the stop was submitted"$'\n'"$out"; }
   reap_dir_process "$stopped_pid"
   acked_at=$(cat "$dir/fake/exit-acked-at")
   [ $(( $(date +%s) - acked_at )) -lt 20 ] \
@@ -697,13 +694,12 @@ test_relaunch_refusal_of_an_unprovable_absence_names_the_worktree_agent() {
   assert_contains "$out" "pid $agent_pid (claude)" "fm-spawn's endpoint refusal must name the agent still in the worktree"
   out=$(run_control "$dir" rl93-${RL_RUN} exit); rc=$?
   expect_code 1 "$rc" "exit must refuse an endpoint it cannot prove absent"$'\n'"$out"
-  assert_contains "$out" "pid $agent_pid (claude)" "exit's endpoint refusal must name the agent still in the worktree"
   out=$(run_control "$dir" rl93-${RL_RUN} relaunch --note "after the server fault"); rc=$?
   expect_code 1 "$rc" "relaunch must refuse an endpoint it cannot prove absent"$'\n'"$out"
   assert_contains "$out" "pid $agent_pid (claude)" "relaunch's endpoint refusal must name the agent still in the worktree"
   [ ! -s "$dir/fake/literal" ] || fail "no replacement agent may be launched"
   stop_dir_process "$agent_pid"
-  pass "relaunch and exit: refusing an unprovable endpoint absence names the agent still in the worktree"
+  pass "relaunch and exit refuse an unprovable endpoint absence; relaunch names the agent still in the worktree"
 }
 
 test_spawn_relaunch_refuses_when_the_worktree_probe_is_inconclusive() {

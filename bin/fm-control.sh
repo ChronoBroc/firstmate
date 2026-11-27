@@ -579,7 +579,7 @@ wait_pids_gone() {  # <timeout> <pid>...
 
 require_state_verified_backend() {  # <verb>
   fm_control_backend_state_verified "$BACKEND" && return 0
-  die "task $ID runs on the $BACKEND backend, which has no recovery-grade agent-state classifier, so '$1' cannot prove the agent actually stopped; refusing rather than reporting an unproven transition as done.$( [ "$VERB" = relaunch ] || fm_agent_process_live_note "$LIVE_DIR" "$RECORDED_HARNESS")"
+  die "task $ID runs on the $BACKEND backend, which has no recovery-grade agent-state classifier, so '$1' cannot prove the agent actually stopped; refusing rather than reporting an unproven transition as done"
 }
 
 # refuse_blocking_prompt: the screen is a dialog a confirming Enter would
@@ -854,7 +854,7 @@ do_exit() {
     alive) ;;
     *)
       fm_control_absence_recheck_applies "$BACKEND" "$state" \
-        || die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint.$( [ "$VERB" = relaunch ] || fm_agent_process_live_note "$LIVE_DIR" "$RECORDED_HARNESS")"
+        || die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint"
       # `missing` on its own is not a finding about the endpoint: it conflates
       # "destroyed" with "unreachable from this seat". Route it through the
       # control plane's one absence proof - the same one the relaunch gate uses
@@ -884,7 +884,7 @@ do_exit() {
           # alive path: interrupt if busy, then the harness's exit command.
           ;;
         *)
-          die "task $ID's endpoint $T reads '$state', but ${absence#*$'\t'}; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one.$( [ "$VERB" = relaunch ] || fm_agent_process_live_note "$LIVE_DIR" "$RECORDED_HARNESS")"
+          die "task $ID's endpoint $T reads '$state', but ${absence#*$'\t'}; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one"
           ;;
       esac
       ;;

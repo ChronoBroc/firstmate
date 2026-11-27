@@ -48,8 +48,9 @@ relaunch_cleanup() {
 trap relaunch_cleanup EXIT
 
 # The same lifecycle-modelling tmux stub as tests/fm-control.test.sh: the
-# harness's exit command, once Enter submits it, stops the agent, and a launch-brief literal starts the
-# harness named in `becomes`.
+# harness's exit command, once Enter submits it, stops the agent, and a launch-brief literal, once Enter
+# submits it, starts the harness named in `becomes`. FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP models an agent
+# that exits on its own while the exit command's send fails.
 make_tmux_stub() {  # <dir>
   local fb="$1/fakebin"
   mkdir -p "$fb"
@@ -98,16 +99,7 @@ case "${1:-}" in
           : > "$D/exit-pending"
           ;;
         *'encode launch-brief'* | *'Firstmate operational input waiting: read'*)
-          # The replacement's arrival records whether the process named in
-          # watch-pid is still running then (a zombie has exited).
-          if [ -f "$D/watch-pid" ]; then
-            case "$(FM_FAKE_PS_UNOBSERVED=1 ps -o stat= -p "$(cat "$D/watch-pid")" 2>/dev/null)" in
-              ''|*Z*) echo exited ;;
-              *) echo running ;;
-            esac > "$D/watch-pid-at-launch"
-          fi
-          cat "$D/becomes" > "$D/command"
-          [ -z "${FM_FAKE_LAUNCH_TRANSPORT_FAIL_AFTER_START:-}" ] || exit 1
+          : > "$D/launch-pending"
           ;;
       esac
     else
@@ -120,6 +112,19 @@ case "${1:-}" in
               : > "$D/exit-ack"
             fi
             printf 'zsh' > "$D/command"
+          fi
+          if [ -e "$D/launch-pending" ]; then
+            rm -f "$D/launch-pending"
+            # The replacement's arrival records whether the process named in
+            # watch-pid is still running then (a zombie has exited).
+            if [ -f "$D/watch-pid" ]; then
+              case "$(FM_FAKE_PS_UNOBSERVED=1 ps -o stat= -p "$(cat "$D/watch-pid")" 2>/dev/null)" in
+                ''|*Z*) echo exited ;;
+                *) echo running ;;
+              esac > "$D/watch-pid-at-launch"
+            fi
+            cat "$D/becomes" > "$D/command"
+            [ -z "${FM_FAKE_LAUNCH_TRANSPORT_FAIL_AFTER_START:-}" ] || exit 1
           fi
           ;;
         'export GOTMPDIR='*)
@@ -517,9 +522,9 @@ start_dir_process() {
 }
 
 # observe_stop_polls <case-dir>: a ps on the case's PATH that, once the stub
-# acknowledged a submitted stop, records in fake/stop-pid-polled each status
-# read (`ps -o stat= -p <pid>`) of the pid in fake/stop-pid - the relaunch's
-# wait for the agent it stopped.
+# acknowledged a submitted stop, appends a line to fake/stop-pid-polls for each
+# status read (`ps -o stat= -p <pid>`) of the pid in fake/stop-pid - the
+# relaunch's wait for the agent it stopped.
 observe_stop_polls() {  # <case-dir>
   cat > "$1/fakebin/ps" <<'SH'
 #!/usr/bin/env bash
@@ -528,7 +533,7 @@ if [ -z "${FM_FAKE_PS_UNOBSERVED:-}" ] && [ -e "$D/exit-ack" ] && [ -f "$D/stop-
   want=$(cat "$D/stop-pid") prev= stat=
   for a in "$@"; do
     [ "$a" != stat= ] || stat=1
-    [ "$prev" != -p ] || [ "$a" != "$want" ] || [ -z "$stat" ] || : > "$D/stop-pid-polled"
+    [ "$prev" != -p ] || [ "$a" != "$want" ] || [ -z "$stat" ] || echo polled >> "$D/stop-pid-polls"
     prev=$a
   done
 fi
