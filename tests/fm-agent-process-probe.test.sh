@@ -13,7 +13,7 @@ set -u
 . "$(dirname "${BASH_SOURCE[0]}")/relaunch-helpers.sh"
 
 test_worktree_agent_probe_finds_only_agents_working_there() {
-  local dir agent out rc agent_pid other_pid sub_pid shell_pid server_pid cursor_pid ui_pid
+  local dir agent out rc agent_pid other_pid sub_pid shell_pid server_pid cursor_pid ui_pid nl_pid
   dir="$TMP_ROOT/probe-$RANDOM"
   mkdir -p "$dir/wt/sub"
   agent=$(agent_standin_named "$dir" claude) || {
@@ -38,6 +38,15 @@ test_worktree_agent_probe_finds_only_agents_working_there() {
   expect_code 0 "$rc" "the worktree reached through a link should still hold the agent"$'\n'"$out"
   [ "$(printf '%s\n' "$out" | cut -f1)" = "$agent_pid" ] \
     || fail "the probe must name the agent through the linked path ($agent_pid), got: $out"
+  # A link to a sibling whose name ends in a newline is never read as the
+  # sibling without it: the probe answers undecided instead.
+  mkdir "$dir/slot" "$dir/slot"$'\n'
+  ln -s "$dir/slot"$'\n' "$dir/slot-link"
+  start_dir_process "$dir/slot"$'\n' "$agent" 600; nl_pid=$STARTED_PID
+  rc=0; out=$(fm_agent_process_live_in_dir "$dir/slot-link") || rc=$?
+  expect_code 2 "$rc" "a link into a newline-suffixed directory must be undecided, never absent"$'\n'"$out"
+  assert_contains "$out" "control character" "the undecided answer should say why"
+  stop_dir_process "$nl_pid"
   # A bind mount, where this host permits one, lives only in a private mount
   # namespace that ends with the probe, so nothing can outlive the test.
   mkdir -p "$dir/wt-bind"

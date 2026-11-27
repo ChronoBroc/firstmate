@@ -186,10 +186,17 @@ fm_agent_process_live_in_dir() {  # <dir> [launch-exe] [strict]
   [ "$(fm_agent_process_classify_name "$exe")" != shell ] || exe=
   [ -n "$dir" ] || { printf 'no directory was named to probe\n'; return 2; }
   undecided=$(fm_agent_process_view_incomplete) || undecided=
-  dir_real=$(cd "$dir" 2>/dev/null && pwd -P) || {
+  dir_real=$(cd "$dir" 2>/dev/null && pwd -P && printf x) || {
     printf 'the directory %s does not resolve\n' "${dir:-<empty>}"
     return 2
   }
+  dir_real=${dir_real%$'\n'x}
+  case "$dir$dir_real" in
+    *[[:cntrl:]]*)
+      printf 'the directory %q has a control character in its name or physical path\n' "$dir"
+      return 2
+      ;;
+  esac
   uid=$(id -u 2>/dev/null) || { printf 'the current user id could not be read\n'; return 2; }
   selves=" $$ "
   self=${BASHPID:-$$}

@@ -460,10 +460,6 @@ LABEL="fm-$ID"
 RECORDED_HARNESS=$(fm_meta_get "$META" harness)
 KIND=$(fm_meta_get "$META" kind)
 WT=$(fm_meta_get "$META" worktree)
-# The directory this task's agent works in - its worktree, or a secondmate's
-# marked home - for every live-agent check below; empty when the record
-# cannot name it, which leaves those checks undecided.
-LIVE_DIR=$(fm_agent_process_task_dir "$META" "$ID" 2>/dev/null) || LIVE_DIR=
 [ -n "$KIND" ] || KIND=ship
 # OpenCode's composer exit key changed between its 1.x and 2.x lines; the major
 # spawn detected is recorded here so the exit command below matches the running
@@ -1413,6 +1409,10 @@ record_note() {
 }
 
 do_relaunch() {
+  # The directory this task's agent works in - its worktree, or a secondmate's
+  # marked home - for every live-agent check of the relaunch; empty when the
+  # record cannot name it, which leaves those checks undecided.
+  LIVE_DIR=$(fm_agent_process_task_dir "$META" "$ID" 2>/dev/null) || LIVE_DIR=
   local exit_result state note_line view_gap
   local -a spawn_args
 

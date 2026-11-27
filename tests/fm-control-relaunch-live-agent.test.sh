@@ -11,7 +11,7 @@
 # server fault of 2026-11-25, without a second server.
 #   (the probe's own process identification lives in
 #   tests/fm-agent-process-probe.test.sh)
-#   - fm-spawn --relaunch, fm-control relaunch/exit, and the secondmate
+#   - fm-spawn --relaunch, fm-control relaunch, and the secondmate
 #     respawn refuse naming the pid, and the rollback restores the
 #     instructions it rewrote;
 #   - a relaunch waits only for the agent processes of the endpoint it stopped.
@@ -522,10 +522,6 @@ test_relaunch_refuses_an_agent_still_working_in_the_worktree() {
   expect_code 1 "$rc" "fm-spawn --relaunch must refuse an endpoint that reads alive"$'\n'"$out"
   assert_contains "$out" "a relaunch requires a positively agent-free endpoint" "fm-spawn should refuse on the endpoint state"
   assert_contains "$out" "pid $agent_pid (claude)" "fm-spawn's endpoint-state refusal must name the agent in the worktree"
-  printf 'vim' > "$dir/fake/command"
-  out=$(run_control "$dir" rl90-${RL_RUN} exit); rc=$?
-  expect_code 1 "$rc" "exit must refuse an unattributed endpoint"$'\n'"$out"
-  assert_contains "$out" "unattributed endpoint" "exit should refuse the unattributed endpoint"
   printf 'claude' > "$dir/fake/command"
   : > "$dir/fake/literal"
   out=$(run_control "$dir" rl90-${RL_RUN} relaunch --note "lost its terminal"); rc=$?
@@ -692,14 +688,12 @@ test_relaunch_refusal_of_an_unprovable_absence_names_the_worktree_agent() {
   expect_code 1 "$rc" "fm-spawn --relaunch must refuse an endpoint it cannot prove absent"$'\n'"$out"
   assert_contains "$out" "cannot be proven absent" "fm-spawn should refuse on the endpoint check"
   assert_contains "$out" "pid $agent_pid (claude)" "fm-spawn's endpoint refusal must name the agent still in the worktree"
-  out=$(run_control "$dir" rl93-${RL_RUN} exit); rc=$?
-  expect_code 1 "$rc" "exit must refuse an endpoint it cannot prove absent"$'\n'"$out"
   out=$(run_control "$dir" rl93-${RL_RUN} relaunch --note "after the server fault"); rc=$?
   expect_code 1 "$rc" "relaunch must refuse an endpoint it cannot prove absent"$'\n'"$out"
   assert_contains "$out" "pid $agent_pid (claude)" "relaunch's endpoint refusal must name the agent still in the worktree"
   [ ! -s "$dir/fake/literal" ] || fail "no replacement agent may be launched"
   stop_dir_process "$agent_pid"
-  pass "relaunch and exit refuse an unprovable endpoint absence; relaunch names the agent still in the worktree"
+  pass "relaunch refusing an unprovable endpoint absence names the agent still in the worktree"
 }
 
 test_spawn_relaunch_refuses_when_the_worktree_probe_is_inconclusive() {
