@@ -3369,25 +3369,6 @@ test_away_lock_deferral_never_attributes_a_remote_task_a_local_pid() {
   pass "away lock: a remote task's deferral never names a local pid as its survivor"
 }
 
-# Another launch in flight holds this home's task-set lock through its record's
-# publication (bin/fm-spawn.sh). The holder must stay alive, because
-# fm_lock_try_acquire reclaims a lock whose owning pid is gone.
-hold_home_task_set_lock() {  # <case-dir> -> echoes the holder pid
-  local lock="$1/home/state/.task-set.lock" i=0 holder
-  (
-    # shellcheck source=/dev/null
-    . "$ROOT/bin/fm-wake-lib.sh"
-    fm_lock_try_acquire "$lock" || exit 1
-    sleep 30
-  ) >/dev/null 2>&1 &
-  holder=$!
-  while [ ! -s "$lock/pid" ] && [ "$i" -lt 100 ]; do
-    sleep 0.1
-    i=$((i + 1))
-  done
-  [ -s "$lock/pid" ] || fail "the stand-in launch could not take the task-set lock"
-  printf '%s\n' "$holder"
-}
 
 test_away_relaunch_defers_while_another_launch_takes_the_last_slot() {
   local dir out rc before holder

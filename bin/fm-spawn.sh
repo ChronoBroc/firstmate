@@ -840,6 +840,34 @@ if [ -n "${FM_DATA_OVERRIDE:-}" ]; then
 fi
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
+# spawn_refusal_note <status>: a relaunch, or a --secondmate respawn of an
+# existing local task, that exits nonzero without an fm-control transaction
+# owning its report names any agent still working in the recorded worktree
+# (fm_agent_process_record_note), keeping its own reason and status. Armed
+# here, before any precondition can fail, and kept by spawn_abort_cleanup.
+SPAWN_NOTE_ID=
+case "${1:-}" in -*|'') ;; *) SPAWN_NOTE_ID=$1 ;; esac
+SPAWN_NOTE_MODE=
+for spawn_note_arg in "$@"; do
+  case "$spawn_note_arg" in --relaunch|--secondmate) SPAWN_NOTE_MODE=$spawn_note_arg ;; esac
+done
+unset spawn_note_arg
+SPAWN_LIVE_NOTE_SHOWN=0
+spawn_refusal_note() {  # <status>
+  [ "$1" -ne 0 ] && [ -n "$SPAWN_NOTE_MODE" ] && [ -n "$SPAWN_NOTE_ID" ] || return 0
+  [ "$SPAWN_LIVE_NOTE_SHOWN" != 1 ] && [ -z "${FM_CONTROL_RELAUNCH_TX:-}" ] || return 0
+  (
+    declare -F fm_agent_process_record_note >/dev/null 2>&1 || {
+      . "$SCRIPT_DIR/fm-backend.sh" && . "$SCRIPT_DIR/fm-agent-process-lib.sh"
+    } >/dev/null 2>&1 || exit 0
+    declare -F fm_task_id_creation_valid >/dev/null 2>&1 || . "$SCRIPT_DIR/fm-pr-lib.sh" >/dev/null 2>&1 || exit 0
+    fm_task_id_creation_valid "$SPAWN_NOTE_ID" || exit 0
+    note=$(fm_agent_process_record_note "$STATE/$SPAWN_NOTE_ID.meta" 2>/dev/null) || note=
+    [ -z "$note" ] || printf '%s\n' "${note# }" >&2
+  )
+  return 0
+}
+trap 'spawn_refusal_note "$?"' EXIT
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 # shellcheck source=bin/fm-config-inherit-lib.sh
@@ -1738,7 +1766,6 @@ SPAWN_TASK_LOCK_HELD=0
 SPAWN_CONTROL_LOCK=
 SPAWN_CONTROL_LOCK_HELD=0
 SPAWN_CONTROL_PARENT=0
-SPAWN_LIVE_NOTE_SHOWN=0
 SPAWN_META_TMP=
 SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
@@ -1809,17 +1836,8 @@ spawn_orca_reclaim_launch_file() {
 }
 
 spawn_abort_cleanup() {
-  local status=$? live_note
-  # A direct relaunch that ends without launching - refused, deferred, or
-  # failed on its own preconditions - names any agent still working in the
-  # recorded worktree, keeping its own reason and status; under fm-control the
-  # transaction owns that report.
-  if [ "$status" -ne 0 ] && [ "$RELAUNCH" = 1 ] && [ "$SPAWN_CONTROL_PARENT" != 1 ] \
-     && [ "$SPAWN_LIVE_NOTE_SHOWN" != 1 ] && fm_task_id_creation_valid "${ID:-}" \
-     && declare -F fm_agent_process_record_note >/dev/null 2>&1; then
-    live_note=$(fm_agent_process_record_note "$STATE/$ID.meta" 2>/dev/null) || live_note=
-    [ -z "$live_note" ] || printf '%s\n' "${live_note# }" >&2
-  fi
+  local status=$?
+  spawn_refusal_note "$status"
   if [ "$RELAUNCH_REPLACEMENT_PENDING" = 1 ] &&
     [ "$SPAWN_META_PUBLISH_STARTED" = 1 ] &&
     [ -n "$SPAWN_META_TMP" ] &&
@@ -2273,6 +2291,7 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   exit "$rc"
 fi
 ID=${POS[0]}
+SPAWN_NOTE_ID=$ID
 fm_task_id_creation_valid "$ID" || {
   echo "error: invalid task id" >&2
   exit 2

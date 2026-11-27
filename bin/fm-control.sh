@@ -311,6 +311,18 @@ if ! fm_control_verb_allowed "$VERB"; then
   exit 2
 fi
 
+# --- exact task-id resolution ----------------------------------------------
+
+case "$RAW_ID" in
+  *:*) die "'$RAW_ID' is an explicit backend endpoint; fm-control accepts an exact task id only, so a lifecycle command can never land on an endpoint this home does not own" ;;
+esac
+if ! fm_task_id_creation_valid "$RAW_ID"; then
+  die "'$RAW_ID' is not a valid task id"
+fi
+ID=$RAW_ID
+CONTROL_LOCK="$STATE/.control-$ID.lock"
+trap control_cleanup EXIT
+
 NEW_HARNESS=
 NEW_MODEL=
 NEW_EFFORT=
@@ -383,17 +395,6 @@ case "$NEW_EFFORT" in
   *) die "--effort must be one of default, low, medium, high, xhigh, max, ultra" ;;
 esac
 
-# --- exact task-id resolution ----------------------------------------------
-
-case "$RAW_ID" in
-  *:*) die "'$RAW_ID' is an explicit backend endpoint; fm-control accepts an exact task id only, so a lifecycle command can never land on an endpoint this home does not own" ;;
-esac
-if ! fm_task_id_creation_valid "$RAW_ID"; then
-  die "'$RAW_ID' is not a valid task id"
-fi
-ID=$RAW_ID
-CONTROL_LOCK="$STATE/.control-$ID.lock"
-trap control_cleanup EXIT
 # Supervision lease guard: lifecycle control is overlap territory between the
 # two Pi supervision actors; refuse while the OTHER actor holds this task's
 # live lease (contract: bin/fm-lease-lib.sh; no-op in homes without leases).

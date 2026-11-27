@@ -403,6 +403,56 @@ test_relaunch_beside_an_unreadable_worktree_process_refuses_before_the_stop() {
   pass "fm-control relaunch: an unidentifiable worktree process refuses before the agent is stopped"
 }
 
+test_early_relaunch_refusals_name_an_agent_still_in_the_worktree() {
+  local dir agent out rc agent_pid holder case_name
+  for case_name in missing-note-file malformed-config secondmate-lock; do
+    dir=$(new_case "early-$case_name" rl87-${RL_RUN})
+    agent=$(agent_standin_named "$dir" claude) || {
+      pass "early relaunch refusals beside a live agent: skipped - no stand-in survives a rename on this host"
+      return 0
+    }
+    case "$case_name" in
+      missing-note-file)
+        add_ship_task "$dir" rl87-${RL_RUN} claude
+        start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+        wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+        out=$(run_control "$dir" rl87-${RL_RUN} relaunch --note-file "$dir/no-such-note"); rc=$?
+        expect_code 1 "$rc" "a missing note file keeps its refusal status"$'\n'"$out"
+        assert_contains "$out" "is not a readable file" "the refusal keeps its own reason"
+        ;;
+      malformed-config)
+        add_ship_task "$dir" rl87-${RL_RUN} claude
+        printf 'zsh' > "$dir/fake/command"
+        mkdir -p "$dir/home/config"
+        printf 'bogus\n' > "$dir/home/config/claude-permission-mode"
+        start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+        wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+        out=$(run_spawn "$dir" rl87-${RL_RUN} --relaunch --harness claude); rc=$?
+        expect_code 1 "$rc" "a malformed launch configuration keeps its refusal status"$'\n'"$out"
+        assert_contains "$out" "config/claude-permission-mode holds 'bogus'" "the refusal keeps its own reason"
+        ;;
+      secondmate-lock)
+        mkdir -p "$dir/smhome" "$dir/home/data/rl87-${RL_RUN}"
+        printf '# secondmate brief\n' > "$dir/home/data/rl87-${RL_RUN}/brief.md"
+        printf 'window=fmses:fm-rl87-%s\nkind=secondmate\nharness=claude\nworktree=%s\nhome=%s\n' \
+          "$RL_RUN" "$dir/smhome" "$dir/smhome" > "$dir/home/state/rl87-${RL_RUN}.meta"
+        start_dir_process "$dir/smhome" "$agent" 600; agent_pid=$STARTED_PID
+        wait_probe_rc "$dir/smhome" 0 || fail "the stand-in agent never appeared in the secondmate home"
+        holder=$(hold_home_task_set_lock "$dir")
+        out=$(run_spawn "$dir" rl87-${RL_RUN} "$dir/smhome" --secondmate claude); rc=$?
+        kill "$holder" 2>/dev/null || true
+        wait "$holder" 2>/dev/null || true
+        expect_code 1 "$rc" "a lost task-set lock keeps its refusal status"$'\n'"$out"
+        assert_contains "$out" "task set is locked" "the refusal keeps its own reason"
+        ;;
+    esac
+    assert_contains "$out" "pid $agent_pid (claude)" "the $case_name refusal must also name the agent still in the worktree"
+    ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no replacement agent may be launched ($case_name)"
+    stop_dir_process "$agent_pid"
+  done
+  pass "early relaunch refusals (missing note file, malformed configuration, lost task-set lock) name the agent still in the worktree"
+}
+
 test_relaunch_refuses_a_brief_backup_it_cannot_take() {
   local dir out rc
   dir=$(new_case unusablebackup rl97-${RL_RUN})
@@ -676,6 +726,7 @@ test_worktree_agent_probe_survives_a_denied_ps_and_a_partial_listing
 test_relaunch_on_an_incomplete_process_view_refuses_before_the_stop
 test_relaunch_without_a_cwd_provider_refuses_before_the_stop
 test_relaunch_beside_an_unreadable_worktree_process_refuses_before_the_stop
+test_early_relaunch_refusals_name_an_agent_still_in_the_worktree
 test_relaunch_refuses_a_brief_backup_it_cannot_take
 test_relaunch_refuses_a_raw_launch_worker_still_in_the_worktree
 test_relaunch_refuses_an_agent_still_working_in_the_worktree
