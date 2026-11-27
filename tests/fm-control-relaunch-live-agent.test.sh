@@ -566,20 +566,22 @@ test_relaunch_refusal_of_an_unprovable_absence_names_the_worktree_agent() {
 }
 
 test_spawn_relaunch_refuses_when_the_worktree_probe_is_inconclusive() {
-  local dir out rc
-  if [ -e /proc/self/cwd ]; then
-    pass "fm-spawn --relaunch inconclusive probe: skipped - this host reads working directories from /proc, not lsof"
+  local dir out rc real_lsof
+  if [ -e /proc/self/cwd ] || ! real_lsof=$(command -v lsof); then
+    pass "fm-spawn --relaunch inconclusive probe: skipped - this host does not read working directories through lsof"
     return 0
   fi
   dir=$(new_case inconclusive rl92-${RL_RUN})
   add_ship_task "$dir" rl92-${RL_RUN} claude
   printf 'zsh' > "$dir/fake/command"
-  printf '#!/bin/sh\nprintf "p1\\nn/\\n"\nexit 1\n' > "$dir/fakebin/lsof"
+  # The provider answers for one process (its self-check passes), but the
+  # user-wide enumeration lists only an unrelated cwd record and then fails.
+  printf '#!/bin/sh\nfor a in "$@"; do [ "$a" = -u ] && { printf "p1\\nfcwd\\nD0x1\\ni2\\n"; exit 1; }; done\nexec "%s" "$@"\n' "$real_lsof" > "$dir/fakebin/lsof"
   chmod +x "$dir/fakebin/lsof"
   out=$(run_spawn "$dir" rl92-${RL_RUN} --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "an inconclusive worktree probe must refuse the relaunch"$'\n'"$out"
   assert_contains "$out" "could not establish whether an agent process is still working" "the refusal should say the probe was inconclusive"
-  assert_contains "$out" "lsof can" "a failed lsof that listed some rows must still refuse, naming lsof as the cause"
+  assert_contains "$out" "lsof could not list every working directory" "an incomplete listing must refuse, naming the incomplete listing as the cause"
   ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no replacement agent may be launched"
   pass "fm-spawn --relaunch: an inconclusive worktree probe refuses rather than launching"
 }
