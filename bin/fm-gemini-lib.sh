@@ -55,7 +55,10 @@ fm_gemini_pid_is_gemini() {  # <pid>
 }
 
 # True when the argument vector "$@" (argv[0] first, boundaries intact) is a
-# Gemini process: the same structural rule as fm_gemini_pid_is_gemini.
+# Gemini process: argv[0] is Gemini's own path, or a node interpreter whose
+# first non-flag argument is - node's own options are skipped, so
+# `node --max-old-space-size=10000 <script>`, the exact shape the installed
+# launcher execs, still resolves.
 fm_gemini_argv_is_gemini() {  # <argv...>
   local token argv0=${1:-}
   [ "$#" -gt 0 ] || return 1
@@ -85,29 +88,7 @@ fm_gemini_argv_is_gemini() {  # <argv...>
 # prompt string - only argv[0] and the script argument are ever consulted, so
 # an unrelated command that merely TALKS about gemini never matches.
 fm_gemini_args_are_gemini() {  # <args>
-  local args=$1 argv0 rest token
-  [ -n "$args" ] || return 1
-  args=${args#"${args%%[![:space:]]*}"}
-  argv0=${args%%[[:space:]]*}
-  fm_gemini_path_is_gemini "$argv0" && return 0
-  case "${argv0##*/}" in
-    node|node-*|node[0-9]*|MainThread) ;;
-    *) return 1 ;;
-  esac
-  rest=${args#"$argv0"}
-  # The first non-flag token after the interpreter is the script it runs.
-  # Node's own options are skipped so `node --max-old-space-size=10000 <script>`
-  # - the exact shape the installed launcher execs - still resolves.
-  while [ -n "$rest" ]; do
-    rest=${rest#"${rest%%[![:space:]]*}"}
-    [ -n "$rest" ] || break
-    token=${rest%%[[:space:]]*}
-    rest=${rest#"$token"}
-    case "$token" in
-      -*) continue ;;
-    esac
-    fm_gemini_path_is_gemini "$token" && return 0
-    return 1
-  done
-  return 1
+  local words=()
+  read -r -a words <<< "${1:-}"
+  fm_gemini_argv_is_gemini ${words[@]+"${words[@]}"}
 }

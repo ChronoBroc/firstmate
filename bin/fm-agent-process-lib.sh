@@ -180,7 +180,7 @@ _fm_agent_process_verdict() {  # <name> <argv0> <argv...> -> agent|shell|other
 #      Callers that would start an agent in <dir> must treat this as a
 #      refusal, never as 1.
 fm_agent_process_live_in_dir() {  # <dir> [launch-exe]
-  local dir=${1:-} exe=${2:-} dir_real dir_id uid pid cwd self selves found='' undecided='' lsof_out lsof_rc p candidates=''
+  local dir=${1:-} exe=${2:-} dir_real dir_id uid pid self selves found='' undecided='' lsof_out lsof_rc p candidates=''
   exe=${exe##*/}
   [ "$(fm_agent_process_classify_name "$exe")" != shell ] || exe=
   undecided=$(fm_agent_process_view_incomplete) || undecided=
@@ -200,8 +200,8 @@ fm_agent_process_live_in_dir() {  # <dir> [launch-exe]
     for p in /proc/[0-9]*; do
       [ -O "$p" ] || continue
       pid=${p#/proc/}
-      if cwd=$(readlink "$p/cwd" 2>/dev/null); then
-        [ "$cwd" = "$dir_real" ] && candidates="$candidates $pid"
+      if readlink "$p/cwd" >/dev/null 2>&1; then
+        [ "$p/cwd" -ef "$dir_real" ] && candidates="$candidates $pid"
         continue
       fi
       [ -d "$p" ] || continue

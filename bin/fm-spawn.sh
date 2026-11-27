@@ -4246,12 +4246,16 @@ validate_firstmate_operational_dirs() {
 }
 
 if [ "$KIND" = secondmate ]; then
-  if [ -z "$FIRSTMATE_HOME" ] && { [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; }; then
+  SECONDMATE_RECORD=
+  if [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; then
     fm_backlog_record_present "$STATE/$ID.meta" "task record" "$STATE" || {
       echo "error: secondmate task record is unsafe: $FM_BACKLOG_TRANSITION_ERROR" >&2
       exit 1
     }
-    FIRSTMATE_HOME=$(grep '^home=' "$STATE/$ID.meta" | cut -d= -f2- || true)
+    SECONDMATE_RECORD=$STATE/$ID.meta
+  fi
+  if [ -z "$FIRSTMATE_HOME" ] && [ -n "$SECONDMATE_RECORD" ]; then
+    FIRSTMATE_HOME=$(grep '^home=' "$SECONDMATE_RECORD" | cut -d= -f2- || true)
   fi
   if [ -z "$FIRSTMATE_HOME" ]; then
     FIRSTMATE_HOME=$(secondmate_registry_value "$ID" home || true)
@@ -4266,7 +4270,7 @@ if [ "$KIND" = secondmate ]; then
   PROJ_ABS=$(validate_firstmate_home_for_spawn "$ID" "$FIRSTMATE_HOME")
   if [ "$RELAUNCH" -ne 1 ]; then
     spawn_refuse_if_live_agent_in "$PROJ_ABS" "the secondmate home" \
-      "$( { [ -f "$STATE/$ID.meta" ] && fm_meta_get "$STATE/$ID.meta" harness; } || true)"
+      "$( { [ -n "$SECONDMATE_RECORD" ] && fm_meta_get "$SECONDMATE_RECORD" harness; } || true)"
   fi
   if [ -e "$DATA/secondmates.md" ] || [ -L "$DATA/secondmates.md" ]; then
     if ! secondmate_registry_validate_bindings "$DATA/secondmates.md" resolve_path "$ID" "$FIRSTMATE_HOME"; then

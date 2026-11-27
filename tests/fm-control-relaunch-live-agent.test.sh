@@ -24,7 +24,6 @@ set -u
 # Task ids carry this run's own token, so a fixture's /tmp/fm-<id> scratch,
 # and the launch staging beside it, can never be a real task's.
 RL_RUN=rlt$$
-TASK_TMP_GLOBS+=("/tmp/fm-*-$RL_RUN" "/tmp/fm-*-$RL_RUN+*")
 
 test_worktree_agent_probe_finds_only_agents_working_there() {
   local dir agent out rc agent_pid other_pid sub_pid shell_pid
@@ -45,6 +44,18 @@ test_worktree_agent_probe_finds_only_agents_working_there() {
   [ "$(printf '%s\n' "$out" | cut -f1)" = "$agent_pid" ] \
     || fail "the probe must name exactly the agent working in the worktree ($agent_pid), got: $out"
   assert_contains "$out" $'\t'claude "the probe should name the agent's process"
+  # The same directory reached through another path names the same agent:
+  # the probe compares directory objects, never path strings.
+  ln -s "$dir/wt" "$dir/wt-link"
+  rc=0; out=$(fm_agent_process_live_in_dir "$dir/wt-link") || rc=$?
+  expect_code 0 "$rc" "the worktree reached through a link should still hold the agent"$'\n'"$out"
+  [ "$(printf '%s\n' "$out" | cut -f1)" = "$agent_pid" ] \
+    || fail "the probe must name the agent through the linked path ($agent_pid), got: $out"
+  if [ "$(id -u)" = 0 ] && [ -e /proc/self/cwd ] && mkdir -p "$dir/wt-bind" && mount --bind "$dir/wt" "$dir/wt-bind" 2>/dev/null; then
+    rc=0; out=$(fm_agent_process_live_in_dir "$dir/wt-bind") || rc=$?
+    umount "$dir/wt-bind" 2>/dev/null
+    expect_code 0 "$rc" "the worktree reached through a bind mount should still hold the agent"$'\n'"$out"
+  fi
   # The checking process itself is never a finding, but an agent that is its
   # ancestor and works in the worktree is one.
   ln -s "$(command -v bash)" "$dir/agentbin/claude-checker" || fail "could not name a checker shell like an agent"
@@ -242,6 +253,12 @@ test_relaunch_refuses_a_raw_launch_worker_still_in_the_worktree() {
   out=$(run_spawn "$dir" rl98-${RL_RUN} --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "a relaunch beside the task's surviving raw-launch worker must refuse"$'\n'"$out"
   assert_contains "$out" "pid $raw_pid (" "the refusal must name the raw-launch script's process"
+  # fm-control refuses a raw launch it has no control mechanics for, and
+  # still names the worker that refusal leaves running.
+  out=$(run_control "$dir" rl98-${RL_RUN} relaunch --harness claude --note "manual"); rc=$?
+  expect_code 1 "$rc" "fm-control cannot stop a raw-launch worker"$'\n'"$out"
+  assert_contains "$out" "no verified control mechanics" "the refusal should keep its reason"
+  assert_contains "$out" "pid $raw_pid (" "fm-control's refusal must name the raw-launch worker too"
   ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no replacement agent may be launched"
   stop_dir_process "$raw_pid"
   pass "fm-spawn --relaunch: refuses and names a raw-launch worker still working in the worktree"
@@ -503,6 +520,14 @@ test_secondmate_respawn_refuses_an_agent_still_working_in_its_home() {
   printf 'zsh' > "$dir/fake/command"
   start_dir_process "$dir/smhome" "$agent" 600; agent_pid=$STARTED_PID
   wait_probe_rc "$dir/smhome" 0 || fail "the stand-in agent never appeared in the secondmate home"
+  # A task record that is a symlink is never read, even with the home given.
+  printf 'harness=codex\nhome=%s\n' "$dir/smhome" > "$dir/foreign.meta"
+  mkdir -p "$home/state"
+  ln -s "$dir/foreign.meta" "$home/state/sm90-${RL_RUN}.meta"
+  out=$(run_spawn "$dir" sm90-${RL_RUN} "$dir/smhome" --secondmate claude); rc=$?
+  expect_code 1 "$rc" "a symlinked secondmate task record must refuse"$'\n'"$out"
+  assert_contains "$out" "secondmate task record is unsafe" "the refusal should name the unsafe record"
+  rm -f "$home/state/sm90-${RL_RUN}.meta"
   out=$(run_spawn "$dir" sm90-${RL_RUN} "$dir/smhome" --secondmate claude); rc=$?
   expect_code 1 "$rc" "a secondmate respawn beside its live agent must refuse"$'\n'"$out"
   assert_contains "$out" "the secondmate home" "the refusal should name the secondmate home"
@@ -512,7 +537,7 @@ test_secondmate_respawn_refuses_an_agent_still_working_in_its_home() {
   wait_probe_rc "$dir/smhome" 1 || fail "the stand-in agent should be gone"
   : > "$dir/fake/literal"
   : > "$dir/fake/windows"
-  register_task_tmp "sm90-${RL_RUN}"
+  register_task_tmp "sm90-${RL_RUN}" "$dir/home"
   out=$(run_spawn "$dir" sm90-${RL_RUN} "$dir/smhome" --secondmate claude); rc=$?
   expect_code 0 "$rc" "once its agent has exited, the secondmate respawn must succeed"$'\n'"$out"
   assert_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "the respawn should deliver the replacement launch"
