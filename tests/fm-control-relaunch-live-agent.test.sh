@@ -76,25 +76,31 @@ test_worktree_agent_probe_finds_only_agents_working_there() {
   # Cursor's legacy alias inside the worktree ($WT/bin/agent) resolves into its
   # versioned install (tests/fm-cursor-harness.test.sh make_cursor_tree): the
   # alias's real path, not one cut below the worktree, decides its identity.
-  mkdir -p "$dir/share/cursor-agent/versions/2026.08.11-e8db854" "$dir/wt/bin"
-  cp -L "$dir/standin/standin" "$dir/share/cursor-agent/versions/2026.08.11-e8db854/cursor-agent"
-  ln -sf "$dir/share/cursor-agent/versions/2026.08.11-e8db854/cursor-agent" "$dir/wt/bin/agent"
-  start_dir_process "$dir/wt" "$dir/wt/bin/agent" 600; cursor_pid=$STARTED_PID
-  wait_dir_process_alive "$cursor_pid" || fail "the Cursor alias stand-in must keep running"
-  rc=0; out=$(fm_agent_process_live_in_dir "$dir/wt" cursor) || rc=$?
-  expect_code 0 "$rc" "a live Cursor worker run through its worktree-local alias must be found"$'\n'"$out"
-  printf '%s\n' "$out" | cut -f1 | grep -Fqx "$cursor_pid" \
-    || fail "the probe must name the Cursor worker ($cursor_pid), got: $out"
-  stop_dir_process "$cursor_pid"
-  # The same alias reached relatively (`PATH=./bin` resolves `./bin/agent`)
-  # is resolved against the worker's own directory, not the checker's.
-  start_dir_process "$dir/wt" ./bin/agent 600; cursor_pid=$STARTED_PID
-  wait_dir_process_alive "$cursor_pid" || fail "the relative Cursor alias stand-in must keep running"
-  rc=0; out=$(cd "$dir" && fm_agent_process_live_in_dir "$dir/wt" cursor) || rc=$?
-  expect_code 0 "$rc" "a live Cursor worker run through a relative alias must be found"$'\n'"$out"
-  printf '%s\n' "$out" | cut -f1 | grep -Fqx "$cursor_pid" \
-    || fail "the probe must name the relatively launched Cursor worker ($cursor_pid), got: $out"
-  stop_dir_process "$cursor_pid"
+  # The install needs a copy of the stand-in, which only the compiled one
+  # survives (a copied platform sleep is killed by code signing on macOS arm64).
+  if [ -L "$dir/standin/standin" ]; then
+    echo "skip - Cursor alias cases need the compiled stand-in, and none could be built here"
+  else
+    mkdir -p "$dir/share/cursor-agent/versions/2026.08.11-e8db854" "$dir/wt/bin"
+    cp "$dir/standin/standin" "$dir/share/cursor-agent/versions/2026.08.11-e8db854/cursor-agent"
+    ln -sf "$dir/share/cursor-agent/versions/2026.08.11-e8db854/cursor-agent" "$dir/wt/bin/agent"
+    start_dir_process "$dir/wt" "$dir/wt/bin/agent" 600; cursor_pid=$STARTED_PID
+    wait_dir_process_alive "$cursor_pid" || fail "the Cursor alias stand-in must keep running"
+    rc=0; out=$(fm_agent_process_live_in_dir "$dir/wt" cursor) || rc=$?
+    expect_code 0 "$rc" "a live Cursor worker run through its worktree-local alias must be found"$'\n'"$out"
+    printf '%s\n' "$out" | cut -f1 | grep -Fqx "$cursor_pid" \
+      || fail "the probe must name the Cursor worker ($cursor_pid), got: $out"
+    stop_dir_process "$cursor_pid"
+    # The same alias reached relatively (`PATH=./bin` resolves `./bin/agent`)
+    # is resolved against the worker's own directory, not the checker's.
+    start_dir_process "$dir/wt" ./bin/agent 600; cursor_pid=$STARTED_PID
+    wait_dir_process_alive "$cursor_pid" || fail "the relative Cursor alias stand-in must keep running"
+    rc=0; out=$(cd "$dir" && fm_agent_process_live_in_dir "$dir/wt" cursor) || rc=$?
+    expect_code 0 "$rc" "a live Cursor worker run through a relative alias must be found"$'\n'"$out"
+    printf '%s\n' "$out" | cut -f1 | grep -Fqx "$cursor_pid" \
+      || fail "the probe must name the relatively launched Cursor worker ($cursor_pid), got: $out"
+    stop_dir_process "$cursor_pid"
+  fi
   # A script operand is judged below the worktree too: a UI server at
   # <checkout named ui-tui>/dist/entry.js is not Hermes's TUI.
   mkdir -p "$dir/ui-tui/dist" "$dir/Node Dir"
@@ -340,7 +346,7 @@ test_relaunch_on_an_incomplete_process_view_refuses_before_the_stop() {
 }
 
 test_relaunch_without_a_cwd_provider_refuses_before_the_stop() {
-  local dir out rc path_without_lsof d
+  local dir out rc path_without_lsof path_without_python
   if [ -e /proc/self/cwd ]; then
     pass "fm-control relaunch without a working-directory source: skipped - this host reads them from /proc"
     return 0
@@ -348,18 +354,21 @@ test_relaunch_without_a_cwd_provider_refuses_before_the_stop() {
   dir=$(new_case nolsof rl89-${RL_RUN})
   add_ship_task "$dir" rl89-${RL_RUN} claude
   cp -p "$dir/home/data/rl89-${RL_RUN}/brief.md" "$dir/brief.orig"
-  path_without_lsof=
-  local IFS=:
-  for d in $PATH; do
-    [ -x "$d/lsof" ] || path_without_lsof=${path_without_lsof:+$path_without_lsof:}$d
-  done
-  unset IFS
+  path_without_lsof=$(fm_test_base_path_sans "$PATH" lsof) || fail "could not build a PATH without lsof"
   out=$(PATH="$path_without_lsof" run_control "$dir" rl89-${RL_RUN} relaunch --note "no lsof"); rc=$?
   [ "$rc" -ne 0 ] || fail "a relaunch whose replacement could only be refused must refuse first"$'\n'"$out"
   assert_contains "$out" "neither /proc nor lsof" "the refusal should name the missing working-directory source"
   ! grep -Fqx /exit "$dir/fake/literal" || fail "the running agent must not be stopped"
   cmp -s "$dir/brief.orig" "$dir/home/data/rl89-${RL_RUN}/brief.md" || fail "the instructions must be left untouched"
-  pass "fm-control relaunch: a host with no working-directory source refuses before the agent is stopped"
+  # lsof works but the argv reader does not: the probe could not identify the
+  # pane shell left after the stop, so it refuses before the stop too.
+  path_without_python=$(fm_test_base_path_sans "$PATH" python3) || fail "could not build a PATH without python3"
+  out=$(PATH="$path_without_python" run_control "$dir" rl89-${RL_RUN} relaunch --note "no python3"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch whose replacement could only be refused must refuse first"$'\n'"$out"
+  assert_contains "$out" "argv reader" "the refusal should name the unusable argv reader"
+  ! grep -Fqx /exit "$dir/fake/literal" || fail "the running agent must not be stopped"
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl89-${RL_RUN}/brief.md" || fail "the instructions must be left untouched"
+  pass "fm-control relaunch: a host whose working directories or argv cannot be read refuses before the agent is stopped"
 }
 
 test_relaunch_refuses_a_brief_backup_it_cannot_take() {
@@ -570,7 +579,7 @@ test_spawn_relaunch_refuses_when_the_worktree_probe_is_inconclusive() {
   out=$(run_spawn "$dir" rl92-${RL_RUN} --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "an inconclusive worktree probe must refuse the relaunch"$'\n'"$out"
   assert_contains "$out" "could not establish whether an agent process is still working" "the refusal should say the probe was inconclusive"
-  assert_contains "$out" "lsof could not list every working directory" "a failed lsof that listed some rows must still refuse, naming the cause"
+  assert_contains "$out" "lsof can" "a failed lsof that listed some rows must still refuse, naming lsof as the cause"
   ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no replacement agent may be launched"
   pass "fm-spawn --relaunch: an inconclusive worktree probe refuses rather than launching"
 }

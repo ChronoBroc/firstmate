@@ -20,8 +20,6 @@ _FM_AGENT_PROCESS_PROCINFO=$(cd "${_FM_AGENT_PROCESS_LIB_DIR:-/}" 2>/dev/null &&
 . "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-session-lock-lib.sh"
 # shellcheck source=bin/fm-gemini-lib.sh
 . "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-gemini-lib.sh"
-# shellcheck source=bin/fm-hermes-process-lib.sh
-. "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-hermes-process-lib.sh"
 unset _FM_AGENT_PROCESS_LIB_DIR
 
 # fm_agent_process_classify_name: the single owner of the process-name
@@ -357,14 +355,26 @@ _fm_agent_process_script_operand() {  # <argv...>
 # Cygwin-family userspace native Windows harnesses live outside the process
 # table; inside a private Linux pid namespace (a sandboxed command whose
 # /proc/self/status NSpid has more than one level) host processes are hidden;
-# and a host with neither /proc nor lsof has no working-directory source.
+# and without /proc the probe's own providers - the lsof working-directory
+# listing and the kernel argv reader (python3 bin/fm-procinfo.py) - must each
+# answer for this very process, or nothing can be read at all.
 # Neither boundary is reached into: the probe can still name what it sees, never
 # absence.
 fm_agent_process_view_incomplete() {
   local levels
-  if ! { [ -r /proc/self/cwd ] || [ -L /proc/self/cwd ]; } && ! command -v lsof >/dev/null 2>&1; then
-    printf 'neither /proc nor lsof is available to read process working directories\n'
-    return 0
+  if ! { [ -r /proc/self/cwd ] || [ -L /proc/self/cwd ]; }; then
+    if ! command -v lsof >/dev/null 2>&1; then
+      printf 'neither /proc nor lsof is available to read process working directories\n'
+      return 0
+    fi
+    if [ -z "$(LC_ALL=C lsof -w -a -p "$$" -d cwd -Fi 2>/dev/null | grep '^i')" ]; then
+      printf 'lsof cannot list process working directories on this host\n'
+      return 0
+    fi
+    if ! _fm_agent_process_identify "$$"; then
+      printf 'the process argv reader (python3 %s --argv) cannot read process identities on this host\n' "$_FM_AGENT_PROCESS_PROCINFO"
+      return 0
+    fi
   fi
   if fm_win_boundary_applies; then
     printf 'native Windows processes are outside the process table this probe reads, so their absence cannot be proven\n'
