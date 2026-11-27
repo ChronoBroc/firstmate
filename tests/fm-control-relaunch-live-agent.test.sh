@@ -253,7 +253,23 @@ test_refusal_note_never_reads_a_foreign_state_directory() {
   [ "$rc" -ne 0 ] || fail "a fresh state override beneath a linked home must refuse"$'\n'"$out"
   assert_contains "$out" "resolves outside this home" "the refusal should name the escaping fresh override"
   [ ! -e "$dir/foreign/fresh-state" ] || fail "a refused override must never create state inside a linked home"
+  out=$(cd "$dir/home" && RUN_FM_HOME=. FM_STATE_OVERRIDE=other/state run_control "$dir" rl86-${RL_RUN} exit); rc=$?
+  [ "$rc" -ne 0 ] || fail "fm-control must refuse a linked state override beside a relative home"$'\n'"$out"
+  assert_contains "$out" "resolves outside this home" "fm-control should name the linked override beside a relative home"
+  assert_not_contains "$out" "pid $agent_pid" "a relative home must never report a linked home's task record"
+  ln -s "$dir/home" "$dir/home-alias"
+  out=$(cd "$dir/home-alias" && FM_STATE_OVERRIDE=other/state run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a linked state override from a symlinked working directory must refuse"$'\n'"$out"
+  assert_contains "$out" "resolves outside this home" "the refusal should name the linked override reached through an aliased directory"
+  assert_not_contains "$out" "pid $agent_pid" "an aliased working directory must never report a linked home's task record"
+  rm "$dir/home-alias"
   rm "$dir/home/other"
+  # A parent step that lands on this home's own state is this home's state.
+  mkdir -p "$dir/home/bin"
+  out=$(cd "$dir/home/bin" && FM_STATE_OVERRIDE=../state run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch beside the live agent must still refuse"$'\n'"$out"
+  assert_not_contains "$out" "resolves outside this home" "../state from the home's bin directory is this home's own state"
+  assert_contains "$out" "pid $agent_pid (claude)" "a relaunch through ../state must still name the agent in the worktree"
   # A record that names two worktrees is no evidence about which agent is its.
   printf 'worktree=%s\n' "$dir/wt" >> "$dir/home/state/rl86-${RL_RUN}.meta"
   printf 'zsh' > "$dir/fake/command"
@@ -295,10 +311,10 @@ test_refusal_survivor_reaches_first_line_summaries() {
   assert_contains "$(printf '%s\n' "$summary" | grep '^bootstrap: ')" "pid $agent_pid (claude)" "the session-start summary must carry the survivor pid"$'\n'"$summary"
   assert_contains "$(printf '%s\n' "$summary" | grep '^bootstrap: ')" "task set is locked" "the session-start summary must keep the refusal reason"
   assert_contains "$(printf '%s\n' "$summary" | grep '^watch: ')" "pid $agent_pid (claude)" "the watcher summary must carry the survivor pid"$'\n'"$summary"
-  # A recovery skipped before any spawn (here an unreadable relaunch ledger)
+  # A recovery skipped before any spawn (here a dangling, so unreadable,
+  # relaunch ledger)
   # names the survivor on the skip-reason line both sweeps publish.
-  printf '' > "$dir/home/state/.secondmate-relaunch-rl85-${RL_RUN}"
-  chmod 000 "$dir/home/state/.secondmate-relaunch-rl85-${RL_RUN}"
+  ln -sf "$dir/no-such-ledger" "$dir/home/state/.secondmate-relaunch-rl85-${RL_RUN}"
   # shellcheck disable=SC2016
   summary=$(PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_ROOT="$ROOT" STATE="$dir/home/state" HOME="$dir/user-home" \
     bash -c '. "$1/bin/fm-ff-lib.sh"; . "$1/bin/fm-secondmate-liveness-lib.sh"

@@ -837,12 +837,10 @@ if [ -n "${FM_STATE_OVERRIDE:-}" ]; then
     echo "error: spawn refused: state directory is not a real directory at $FM_STATE_OVERRIDE" >&2
     exit 1
   }
-  case "$FM_STATE_OVERRIDE" in /*) state_spelling=$FM_STATE_OVERRIDE ;; *) state_spelling=$PWD/$FM_STATE_OVERRIDE ;; esac
-  fm_backlog_home_contained "$state_spelling" "state directory" || {
+  fm_backlog_home_contained "$FM_STATE_OVERRIDE" "state directory" || {
     echo "error: spawn refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
     exit 1
   }
-  unset state_spelling
   FM_STATE_OVERRIDE=$(resolve_directory_input FM_STATE_OVERRIDE "$FM_STATE_OVERRIDE") || exit 1
 fi
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"

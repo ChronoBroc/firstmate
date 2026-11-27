@@ -677,66 +677,39 @@ fm_backlog_canonical_existing() {
   ' "$1" 2>/dev/null
 }
 
-# fm_backlog_lexical_path <path>: <path> with empty and `.` components and
-# trailing slashes dropped, symlinks left unresolved; fails on a `..`
-# component, which only resolution could place.
-fm_backlog_lexical_path() {  # <path>
-  local path=$1 out='' lead='' part
-  local -a parts=()
-  case "$path" in /*) lead=/ ;; esac
-  IFS=/ read -r -a parts <<<"$path"
-  for part in ${parts[@]+"${parts[@]}"}; do
-    case "$part" in
-      ''|.) ;;
-      ..) return 1 ;;
-      *) out=${out:+$out/}$part ;;
-    esac
-  done
-  out=$lead$out
-  printf '%s\n' "${out:-.}"
-}
-
-# fm_backlog_home_contained <path> <label>: a <path> spelled inside FM_HOME
-# (compared as fm_backlog_lexical_path spellings) must resolve inside FM_HOME,
-# judged by its nearest existing ancestor when it does not exist yet; a path
-# spelled elsewhere is an explicit external choice and passes.
+# fm_backlog_home_contained <path> <label>: <path> (or, while it does not
+# exist, its nearest existing ancestor) may not be reached through FM_HOME and
+# then resolve outside it - a link in its spelling redirecting into another
+# home. Both resolve physically from the same working directory; a path that
+# never passes through FM_HOME is an explicit external choice and passes.
 fm_backlog_home_contained() {  # <path> <label>
-  local path=$1 label=$2 path_lex home_lex check path_resolved home_resolved
+  local path=$1 label=$2 rc=0
   [ -n "${FM_HOME:-}" ] || return 0
-  home_lex=$(fm_backlog_lexical_path "$FM_HOME") || {
-    FM_BACKLOG_TRANSITION_ERROR="$label home directory has a .. component at $FM_HOME"
-    return 1
-  }
-  path_lex=$(fm_backlog_lexical_path "$path") || {
-    FM_BACKLOG_TRANSITION_ERROR="$label has a .. component at $path"
-    return 1
-  }
-  case "$path_lex" in
-    "$home_lex"|"${home_lex%/}"/*) ;;
-    *) return 0 ;;
+  LC_ALL=C perl -MCwd=realpath,getcwd -e '
+    my ($path, $home) = @ARGV;
+    my $home_real = realpath($home);
+    exit 3 unless defined $home_real && -d $home_real;
+    $path = getcwd() . "/" . $path unless $path =~ m{^/};
+    my ($prefix, $through, $last) = ("", 0, realpath("/"));
+    for my $part (split m{/}, $path) {
+      next if $part eq "";
+      $prefix .= "/$part";
+      last unless -e $prefix;
+      my $real = realpath($prefix);
+      last unless defined $real;
+      $through = 1 if $real eq $home_real;
+      $last = $real;
+    }
+    exit 0 unless $through;
+    exit 0 if $last eq $home_real || index($last, "$home_real/") == 0;
+    exit 1;
+  ' "$path" "$FM_HOME" 2>/dev/null || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    1) FM_BACKLOG_TRANSITION_ERROR="$label resolves outside this home at $path" ;;
+    *) FM_BACKLOG_TRANSITION_ERROR="$label home directory cannot be resolved at $FM_HOME" ;;
   esac
-  home_resolved=$(fm_backlog_canonical_existing "$FM_HOME") || {
-    FM_BACKLOG_TRANSITION_ERROR="$label home directory cannot be resolved at $FM_HOME"
-    return 1
-  }
-  check=$path_lex
-  while [ ! -e "$check" ] && [ ! -L "$check" ]; do
-    case "$check" in
-      */*) check=${check%/*}; [ -n "$check" ] || check=/ ;;
-      *) check=. ;;
-    esac
-  done
-  path_resolved=$(fm_backlog_canonical_existing "$check") || {
-    FM_BACKLOG_TRANSITION_ERROR="$label cannot be resolved at $path"
-    return 1
-  }
-  case "$path_resolved" in
-    "$home_resolved"|"${home_resolved%/}"/*) ;;
-    *)
-      FM_BACKLOG_TRANSITION_ERROR="$label resolves outside this home at $path"
-      return 1
-      ;;
-  esac
+  return 1
 }
 
 fm_backlog_record_parent_authorized() {  # <path> <label> <root> [parent-only]

@@ -217,12 +217,10 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
   echo "error: state dir '$STATE' is a symlink, not a real directory; fm-control reads task records only from this home's own state" >&2
   exit 1
 }
-case "$STATE" in /*) state_spelling=$STATE ;; *) state_spelling=$PWD/$STATE ;; esac
-fm_backlog_home_contained "$state_spelling" "state dir" || {
+fm_backlog_home_contained "$STATE" "state dir" || {
   echo "error: $FM_BACKLOG_TRANSITION_ERROR; fm-control reads task records only from this home's own state" >&2
   exit 1
 }
-unset state_spelling
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
