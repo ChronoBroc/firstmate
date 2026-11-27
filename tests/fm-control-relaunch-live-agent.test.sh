@@ -263,6 +263,21 @@ test_refusal_note_never_reads_a_foreign_state_directory() {
   assert_contains "$out" "resolves outside this home" "the refusal should name the linked override reached through an aliased directory"
   assert_not_contains "$out" "pid $agent_pid" "an aliased working directory must never report a linked home's task record"
   rm "$dir/home-alias"
+  out=$(FM_STATE_OVERRIDE="$dir/home/fresh/../other/new-state" run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a parent step through a part that does not exist yet must refuse"$'\n'"$out"
+  assert_contains "$out" "does not exist yet" "the refusal should name the unresolved parent step"
+  [ ! -e "$dir/foreign/new-state" ] && [ ! -e "$dir/home/fresh" ] \
+    || fail "a refused override must never create state through an unresolved parent step"
+  mkdir "$dir/home/group"
+  mv "$dir/home/other" "$dir/home/group/other"
+  ln -s "$dir/home/group" "$dir/group-alias"
+  out=$(FM_STATE_OVERRIDE="$dir/group-alias/other/state" run_control "$dir" rl86-${RL_RUN} exit); rc=$?
+  [ "$rc" -ne 0 ] || fail "fm-control must refuse an alias into this home that then leaves through a link"$'\n'"$out"
+  assert_contains "$out" "resolves outside this home" "fm-control should name the override that enters through an alias"
+  assert_not_contains "$out" "pid $agent_pid" "an alias into this home must never report a linked home's task record"
+  rm "$dir/group-alias"
+  mv "$dir/home/group/other" "$dir/home/other"
+  rmdir "$dir/home/group"
   rm "$dir/home/other"
   # A parent step that lands on this home's own state is this home's state.
   mkdir -p "$dir/home/bin"
@@ -270,6 +285,9 @@ test_refusal_note_never_reads_a_foreign_state_directory() {
   [ "$rc" -ne 0 ] || fail "a relaunch beside the live agent must still refuse"$'\n'"$out"
   assert_not_contains "$out" "resolves outside this home" "../state from the home's bin directory is this home's own state"
   assert_contains "$out" "pid $agent_pid (claude)" "a relaunch through ../state must still name the agent in the worktree"
+  out=$(FM_STATE_OVERRIDE="$dir/home/state/fresh-leaf" run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  assert_not_contains "$out" "resolves outside this home" "a fresh leaf inside this home's state is this home's own"
+  assert_not_contains "$out" "does not exist yet" "a fresh leaf is an ordinary path to create"
   # A record that names two worktrees is no evidence about which agent is its.
   printf 'worktree=%s\n' "$dir/wt" >> "$dir/home/state/rl86-${RL_RUN}.meta"
   printf 'zsh' > "$dir/fake/command"
