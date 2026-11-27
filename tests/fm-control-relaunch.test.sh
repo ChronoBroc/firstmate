@@ -3337,6 +3337,7 @@ test_away_cap_deferral_precedes_the_pre_stop_scan() {
   # A process in the worktree the pre-stop scan cannot identify: a full cap
   # must still answer as the wait (75) supervision retries, never a failure.
   start_dir_process "$dir/wt" /bin/sleep 600; other_pid=$STARTED_PID
+  # shellcheck disable=SC2016
   printf '#!/bin/sh\n[ "$3" = "%s" ] && exit 1\nexec "%s" "$@"\n' "$other_pid" "$real_python" > "$dir/fakebin/python3"
   chmod +x "$dir/fakebin/python3"
   out=$(run_control "$dir" rl-cap-scan relaunch --note "continue after the crash"); rc=$?

@@ -188,6 +188,7 @@ test_worktree_agent_probe_names_an_agent_beside_an_unreadable_process() {
   real_python=$(command -v python3) || { pass "worktree agent probe beside an unreadable process: skipped - no python3"; return 0; }
   start_dir_process "$dir/wt" /bin/sleep 600; other_pid=$STARTED_PID
   # The argv provider fails for that one process, as a protected process does.
+  # shellcheck disable=SC2016
   printf '#!/bin/sh\n[ "$3" = "%s" ] && exit 1\nexec "%s" "$@"\n' "$other_pid" "$real_python" > "$dir/fakebin/python3"
   chmod +x "$dir/fakebin/python3"
   rc=0; out=$(PATH="$dir/fakebin:$PATH" fm_agent_process_live_in_dir "$dir/wt") || rc=$?

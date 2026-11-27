@@ -119,6 +119,7 @@ test_relaunch_beside_an_unreadable_worktree_process_refuses_before_the_stop() {
   printf '%s' "$agent_pid" > "$dir/fake/pane-pid"
   start_dir_process "$dir/wt" /bin/sleep 600; other_pid=$STARTED_PID
   wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  # shellcheck disable=SC2016
   printf '#!/bin/sh\n[ "$3" = "%s" ] && exit 1\nexec "%s" "$@"\n' "$other_pid" "$real_python" > "$dir/fakebin/python3"
   chmod +x "$dir/fakebin/python3"
   out=$(run_control "$dir" rl88-${RL_RUN} relaunch --note "beside an unreadable process"); rc=$?
@@ -707,6 +708,7 @@ test_spawn_relaunch_refuses_when_the_worktree_probe_is_inconclusive() {
   printf 'zsh' > "$dir/fake/command"
   # The provider answers for one process (its self-check passes), but the
   # user-wide enumeration lists only an unrelated cwd record and then fails.
+  # shellcheck disable=SC2016
   printf '#!/bin/sh\nfor a in "$@"; do [ "$a" = -u ] && { printf "p1\\nfcwd\\nD0x1\\ni2\\n"; exit 1; }; done\nexec "%s" "$@"\n' "$real_lsof" > "$dir/fakebin/lsof"
   chmod +x "$dir/fakebin/lsof"
   out=$(run_spawn "$dir" rl92-${RL_RUN} --relaunch --harness claude); rc=$?
