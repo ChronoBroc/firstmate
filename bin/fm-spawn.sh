@@ -838,7 +838,7 @@ if [ -n "${FM_STATE_OVERRIDE:-}" ]; then
     exit 1
   }
   case "$FM_STATE_OVERRIDE" in /*) state_spelling=$FM_STATE_OVERRIDE ;; *) state_spelling=$PWD/$FM_STATE_OVERRIDE ;; esac
-  { [ ! -e "$state_spelling" ] && [ ! -L "$state_spelling" ]; } || fm_backlog_home_contained "$state_spelling" "state directory" || {
+  fm_backlog_home_contained "$state_spelling" "state directory" || {
     echo "error: spawn refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
     exit 1
   }

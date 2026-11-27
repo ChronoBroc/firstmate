@@ -241,6 +241,18 @@ test_refusal_note_never_reads_a_foreign_state_directory() {
   [ "$rc" -ne 0 ] || fail "fm-control must refuse a state override through a linked home"$'\n'"$out"
   assert_contains "$out" "resolves outside this home" "fm-control should name the escaping state override"
   assert_not_contains "$out" "pid $agent_pid" "fm-control must never report a linked home's task record"
+  out=$(cd "$dir" && FM_STATE_OVERRIDE=./home//other/./state run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a dotted spelling of a state override through a linked home must refuse"$'\n'"$out"
+  assert_contains "$out" "resolves outside this home" "the refusal should name the escaping dotted override"
+  assert_not_contains "$out" "pid $agent_pid" "a dotted spelling must never report a linked home's task record"
+  out=$(FM_STATE_OVERRIDE="$dir/./home/other/state" run_control "$dir" rl86-${RL_RUN} exit); rc=$?
+  [ "$rc" -ne 0 ] || fail "fm-control must refuse a dotted state override through a linked home"$'\n'"$out"
+  assert_contains "$out" "resolves outside this home" "fm-control should name the escaping dotted override"
+  assert_not_contains "$out" "pid $agent_pid" "fm-control must never report a linked home's task record for a dotted spelling"
+  out=$(FM_STATE_OVERRIDE="$dir/home/other/fresh-state" run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a fresh state override beneath a linked home must refuse"$'\n'"$out"
+  assert_contains "$out" "resolves outside this home" "the refusal should name the escaping fresh override"
+  [ ! -e "$dir/foreign/fresh-state" ] || fail "a refused override must never create state inside a linked home"
   rm "$dir/home/other"
   # A record that names two worktrees is no evidence about which agent is its.
   printf 'worktree=%s\n' "$dir/wt" >> "$dir/home/state/rl86-${RL_RUN}.meta"
@@ -283,6 +295,20 @@ test_refusal_survivor_reaches_first_line_summaries() {
   assert_contains "$(printf '%s\n' "$summary" | grep '^bootstrap: ')" "pid $agent_pid (claude)" "the session-start summary must carry the survivor pid"$'\n'"$summary"
   assert_contains "$(printf '%s\n' "$summary" | grep '^bootstrap: ')" "task set is locked" "the session-start summary must keep the refusal reason"
   assert_contains "$(printf '%s\n' "$summary" | grep '^watch: ')" "pid $agent_pid (claude)" "the watcher summary must carry the survivor pid"$'\n'"$summary"
+  # A recovery skipped before any spawn (here an unreadable relaunch ledger)
+  # names the survivor on the skip-reason line both sweeps publish.
+  printf '' > "$dir/home/state/.secondmate-relaunch-rl85-${RL_RUN}"
+  chmod 000 "$dir/home/state/.secondmate-relaunch-rl85-${RL_RUN}"
+  # shellcheck disable=SC2016
+  summary=$(PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_ROOT="$ROOT" STATE="$dir/home/state" HOME="$dir/user-home" \
+    bash -c '. "$1/bin/fm-ff-lib.sh"; . "$1/bin/fm-secondmate-liveness-lib.sh"
+      FM_SM_LIVE_KILL=0 FM_SM_LIVE_RESUME=0 FM_SM_LIVE_STATE=missing
+      rc=0; fm_secondmate_liveness_relaunch "$2" "$3" || rc=$?
+      printf "rc: %s status: %s\nreason: %s\n" "$rc" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_REASON"' _ "$ROOT" "$dir/home/state/rl85-${RL_RUN}.meta" rl85-${RL_RUN} 2>&1)
+  rm -f "$dir/home/state/.secondmate-relaunch-rl85-${RL_RUN}"
+  assert_contains "$summary" "rc: 1 status: skipped" "an unreadable ledger keeps its skipped verdict and status"$'\n'"$summary"
+  assert_contains "$(printf '%s\n' "$summary" | grep '^reason: ')" "is unreadable; endpoint left missing" "the skip keeps its own reason"$'\n'"$summary"
+  assert_contains "$(printf '%s\n' "$summary" | grep '^reason: ')" "pid $agent_pid (claude)" "the skip reason must name the agent still in the home"$'\n'"$summary"
   # The home probe itself refuses, after a warning that leads the output.
   mkdir -p "$dir/home/config"
   printf 'claude default not-an-effort\n' > "$dir/home/config/secondmate-harness"

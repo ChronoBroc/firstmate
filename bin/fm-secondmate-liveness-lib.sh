@@ -300,7 +300,22 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
 # killed or spawned and no attempt is recorded: the verdict becomes
 # FM_SM_LIVE_STATUS=skipped with FM_SM_LIVE_REASON set and this returns 1.
 # Caller holds the liveness lock and owns reporting.
+# A skipped relaunch names any agent still working in the mate's home
+# (fm_agent_process_record_note) at the end of FM_SM_LIVE_REASON.
 fm_secondmate_liveness_relaunch() {  # <meta> <id> [timeout-secs]
+  local rc=0 note
+  fm_sm_live_relaunch_once "$@" || rc=$?
+  [ "$rc" -ne 0 ] && [ "${FM_SM_LIVE_STATUS:-}" = skipped ] || return "$rc"
+  note=$(
+    declare -F fm_agent_process_record_note >/dev/null 2>&1 \
+      || . "$FM_SM_LIVE_LIB_DIR/fm-agent-process-lib.sh" >/dev/null 2>&1 || exit 0
+    fm_agent_process_record_note "$STATE" "$2" 2>/dev/null
+  ) || note=
+  [ -z "$note" ] || FM_SM_LIVE_REASON="$FM_SM_LIVE_REASON;$note"
+  return "$rc"
+}
+
+fm_sm_live_relaunch_once() {  # <meta> <id> [timeout-secs]
   local meta=$1 id=$2 timeout=${3:-} relaunch_lock wait_seconds rc=0
   FM_SM_LIVE_OUT='' FM_SM_LIVE_RC=0
   if ! fm_secondmate_liveness_recent_attempts "$id" 0 >/dev/null; then
@@ -309,7 +324,12 @@ fm_secondmate_liveness_relaunch() {  # <meta> <id> [timeout-secs]
     FM_SM_LIVE_RC=1
     return 1
   fi
-  fm_sm_live_require_locks || return 1
+  if ! fm_sm_live_require_locks; then
+    FM_SM_LIVE_STATUS=skipped
+    FM_SM_LIVE_REASON="the relaunch lock helpers could not be loaded; endpoint left $FM_SM_LIVE_STATE"
+    FM_SM_LIVE_RC=1
+    return 1
+  fi
   relaunch_lock="$STATE/.secondmate-relaunch.lock"
   wait_seconds=${timeout:-600}
   if ! fm_lock_acquire_wait_bounded "$relaunch_lock" "$wait_seconds"; then
