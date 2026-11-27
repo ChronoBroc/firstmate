@@ -285,9 +285,22 @@ test_refusal_note_never_reads_a_foreign_state_directory() {
   [ "$rc" -ne 0 ] || fail "a relaunch beside the live agent must still refuse"$'\n'"$out"
   assert_not_contains "$out" "resolves outside this home" "../state from the home's bin directory is this home's own state"
   assert_contains "$out" "pid $agent_pid (claude)" "a relaunch through ../state must still name the agent in the worktree"
+  # A relative override is used exactly where the containment check found it:
+  # alias/.. is the alias target's parent, never this home.
+  mkdir -p "$dir/home/nested/leaf" "$dir/home/nested/linked-state"
+  ln -s "$dir/home/nested/leaf" "$dir/home/alias"
+  ln -s "$dir/foreign/state" "$dir/home/linked-state"
+  out=$(cd "$dir/home" && FM_STATE_OVERRIDE=alias/../linked-state run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch from an empty state directory must refuse"$'\n'"$out"
+  assert_contains "$out" "no $dir/home/nested/linked-state/rl86-${RL_RUN}.meta" "the override must be read from the directory the check evaluated"$'\n'"$out"
+  assert_not_contains "$out" "pid $agent_pid" "alias/.. must never reach a linked home's task record"
+  rm "$dir/home/alias" "$dir/home/linked-state"
+  rm -rf "$dir/home/nested"
   out=$(FM_STATE_OVERRIDE="$dir/home/state/fresh-leaf" run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
-  assert_not_contains "$out" "resolves outside this home" "a fresh leaf inside this home's state is this home's own"
-  assert_not_contains "$out" "does not exist yet" "a fresh leaf is an ordinary path to create"
+  [ "$rc" -ne 0 ] || fail "a relaunch from a fresh state directory must refuse"$'\n'"$out"
+  [ -d "$dir/home/state/fresh-leaf" ] || fail "a fresh state override inside this home should be created"$'\n'"$out"
+  assert_contains "$out" "needs an existing task record; no $dir/home/state/fresh-leaf/rl86-${RL_RUN}.meta" "a fresh state directory holds no record of the task"$'\n'"$out"
+  assert_not_contains "$out" "pid $agent_pid" "a fresh state directory must never report the default state's worker"
   # A record that names two worktrees is no evidence about which agent is its.
   printf 'worktree=%s\n' "$dir/wt" >> "$dir/home/state/rl86-${RL_RUN}.meta"
   printf 'zsh' > "$dir/fake/command"
