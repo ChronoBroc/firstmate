@@ -1392,13 +1392,13 @@ record_note() {
 }
 
 do_relaunch() {
-  local exit_result state note_line view_gap
+  local exit_result state note_line view_gap cap_note
   local -a spawn_args
 
   require_state_verified_backend relaunch
   fm_control_backend_relaunch_supported "$BACKEND" \
     || die "task $ID runs on the $BACKEND backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
-  if view_gap=$(fm_agent_process_view_incomplete); then
+  if view_gap=$(fm_agent_process_view_incomplete) || view_gap=$(fm_agent_process_providers_unusable); then
     die "relaunch of $ID refused before its agent was touched: ${view_gap}, and the replacement's launch would refuse on that after the stop.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
   fi
   resolve_relaunch_profile
@@ -1410,7 +1410,11 @@ do_relaunch() {
   # from this decision through the replacement's publication.
   case "$KIND" in
     ship|scout)
-      FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || exit 75
+      FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || {
+        cap_note=$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")
+        [ -z "$cap_note" ] || printf '%s\n' "${cap_note# }" >&2
+        exit 75
+      }
       ;;
   esac
 

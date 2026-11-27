@@ -3248,6 +3248,30 @@ test_away_direct_spawn_relaunch_of_a_dead_worker_at_a_full_cap_defers() {
   pass "fm-spawn --relaunch: a dead worker's direct relaunch at a full away cap defers with exit 75 and touches nothing"
 }
 
+test_away_cap_deferral_names_an_agent_still_in_the_worktree() {
+  local dir out rc agent agent_pid
+  local -x FM_AFK_CONTRACT_CREW_STATE_BIN
+  dir=$(away_cap_case away-cap-live rl-cap-live 1 1 dead)
+  FM_AFK_CONTRACT_CREW_STATE_BIN=$(away_crew_state_stub "$dir")
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "away cap deferral beside a live agent: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  # The recorded window reads dead while the worker still runs beside it.
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  out=$(run_control "$dir" rl-cap-live relaunch --note "continue after the crash"); rc=$?
+  expect_code 75 "$rc" "the cap deferral keeps its exit status"$'\n'"$out"
+  assert_contains "$out" "deferred: relaunch of rl-cap-live refused" "the deferral should still be reported"
+  assert_contains "$out" "pid $agent_pid (claude)" "the deferral must also name the agent still in the worktree"
+  out=$(run_spawn "$dir" rl-cap-live --relaunch); rc=$?
+  expect_code 75 "$rc" "the direct relaunch's cap deferral keeps its exit status"$'\n'"$out"
+  assert_contains "$out" "pid $agent_pid (claude)" "the direct relaunch's deferral must also name the agent still in the worktree"
+  assert_no_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "a deferred relaunch must launch nothing"
+  stop_dir_process "$agent_pid"
+  pass "away cap: a relaunch deferral keeps exit 75 and names the agent still working in the worktree"
+}
+
 # Another launch in flight holds this home's task-set lock through its record's
 # publication (bin/fm-spawn.sh). The holder must stay alive, because
 # fm_lock_try_acquire reclaims a lock whose owning pid is gone.
@@ -3472,5 +3496,6 @@ test_away_relaunch_of_a_dead_worker_at_a_full_cap_defers_and_touches_nothing
 test_away_relaunch_of_a_counted_worker_at_a_full_cap_proceeds
 test_away_relaunch_of_a_dead_worker_below_the_cap_proceeds
 test_away_direct_spawn_relaunch_of_a_dead_worker_at_a_full_cap_defers
+test_away_cap_deferral_names_an_agent_still_in_the_worktree
 test_away_relaunch_defers_while_another_launch_takes_the_last_slot
 test_away_direct_spawn_relaunch_defers_while_another_launch_takes_the_last_slot

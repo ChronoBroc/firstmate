@@ -582,6 +582,15 @@ test_spawn_relaunch_refuses_when_the_worktree_probe_is_inconclusive() {
   expect_code 1 "$rc" "an inconclusive worktree probe must refuse the relaunch"$'\n'"$out"
   assert_contains "$out" "could not establish whether an agent process is still working" "the refusal should say the probe was inconclusive"
   assert_contains "$out" "lsof could not list every working directory" "an incomplete listing must refuse, naming the incomplete listing as the cause"
+  # The same incomplete listing stops fm-control relaunch before it touches a
+  # live endpoint: the replacement could only be refused after the stop.
+  printf 'claude' > "$dir/fake/command"
+  : > "$dir/fake/literal"
+  out=$(run_control "$dir" rl92-${RL_RUN} relaunch --note "incomplete listing"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch whose replacement could only be refused must refuse first"$'\n'"$out"
+  assert_contains "$out" "refused before its agent was touched" "the refusal should come before the stop"
+  assert_contains "$out" "lsof could not list every working directory" "the refusal should name the incomplete listing"
+  ! grep -Fqx /exit "$dir/fake/literal" || fail "the live agent must not be stopped"
   ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no replacement agent may be launched"
   pass "fm-spawn --relaunch: an inconclusive worktree probe refuses rather than launching"
 }

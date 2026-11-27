@@ -2326,7 +2326,12 @@ spawn_refuse_if_away_spend_cap() {
     # fm-control asked before it stopped the old agent, the only moment the
     # replaced worker's own count can still be read.
     [ "$SPAWN_CONTROL_PARENT" -ne 1 ] || return 0
-    FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || exit 75
+    FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || {
+      local live_note
+      live_note=$(spawn_relaunch_live_note)
+      [ -z "$live_note" ] || printf '%s\n' "${live_note# }" >&2
+      exit 75
+    }
     return 0
   fi
   FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" || exit 1

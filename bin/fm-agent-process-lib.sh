@@ -354,28 +354,11 @@ _fm_agent_process_script_operand() {  # <argv...>
 # prove a worktree agent-free and succeed, or fail when it can. Under a
 # Cygwin-family userspace native Windows harnesses live outside the process
 # table; inside a private Linux pid namespace (a sandboxed command whose
-# /proc/self/status NSpid has more than one level) host processes are hidden;
-# and without /proc the probe's own providers - the lsof working-directory
-# listing and the kernel argv reader (python3 bin/fm-procinfo.py) - must each
-# answer for this very process, or nothing can be read at all.
+# /proc/self/status NSpid has more than one level) host processes are hidden.
 # Neither boundary is reached into: the probe can still name what it sees, never
 # absence.
 fm_agent_process_view_incomplete() {
   local levels
-  if ! { [ -r /proc/self/cwd ] || [ -L /proc/self/cwd ]; }; then
-    if ! command -v lsof >/dev/null 2>&1; then
-      printf 'neither /proc nor lsof is available to read process working directories\n'
-      return 0
-    fi
-    if [ -z "$(LC_ALL=C lsof -w -a -p "$$" -d cwd -Fi 2>/dev/null | grep '^i')" ]; then
-      printf 'lsof cannot list process working directories on this host\n'
-      return 0
-    fi
-    if ! _fm_agent_process_identify "$$"; then
-      printf 'the process argv reader (python3 %s --argv) cannot read process identities on this host\n' "$_FM_AGENT_PROCESS_PROCINFO"
-      return 0
-    fi
-  fi
   if fm_win_boundary_applies; then
     printf 'native Windows processes are outside the process table this probe reads, so their absence cannot be proven\n'
     return 0
@@ -383,6 +366,33 @@ fm_agent_process_view_incomplete() {
   levels=$(awk '/^NSpid:/ { print NF - 1; exit }' /proc/self/status 2>/dev/null) || levels=
   if [ -n "$levels" ] && [ "$levels" -gt 1 ] 2>/dev/null; then
     printf 'this process runs in a private pid namespace that hides host processes, so their absence cannot be proven\n'
+    return 0
+  fi
+  return 1
+}
+
+# fm_agent_process_providers_unusable: print why the probe's own providers
+# cannot answer on this host and succeed, or fail when they can. Without /proc
+# the probe reads every working directory from one user-wide lsof listing and
+# each identity through the kernel argv reader (python3 bin/fm-procinfo.py);
+# a missing lsof, a listing that does not complete, or an argv reader that
+# cannot read this very process leaves every probe undecided. For a caller
+# about to stop an agent whose replacement the probe must then admit.
+fm_agent_process_providers_unusable() {
+  local uid rc=0 out
+  [ ! -r /proc/self/cwd ] && [ ! -L /proc/self/cwd ] || return 1
+  if ! command -v lsof >/dev/null 2>&1; then
+    printf 'neither /proc nor lsof is available to read process working directories\n'
+    return 0
+  fi
+  uid=$(id -u 2>/dev/null) || { printf 'the current user id could not be read\n'; return 0; }
+  out=$(LC_ALL=C lsof -w -a -u "$uid" -d cwd -FpDi 2>/dev/null) || rc=$?
+  if [ "$rc" -ne 0 ] || [ -z "$out" ]; then
+    printf 'lsof could not list every working directory of this user'"'"'s processes (exit %s)\n' "$rc"
+    return 0
+  fi
+  if ! _fm_agent_process_identify "$$"; then
+    printf 'the process argv reader (python3 %s --argv) cannot read process identities on this host\n' "$_FM_AGENT_PROCESS_PROCINFO"
     return 0
   fi
   return 1
