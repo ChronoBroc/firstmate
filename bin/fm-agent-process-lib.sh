@@ -373,31 +373,15 @@ fm_agent_process_view_incomplete() {
   return 1
 }
 
-# fm_agent_process_providers_unusable: print why the probe's own providers
-# cannot answer on this host and succeed, or fail when they can. Without /proc
-# the probe reads every working directory from one user-wide lsof listing and
-# each identity through the kernel argv reader (python3 bin/fm-procinfo.py);
-# a missing lsof, a listing that does not complete, or an argv reader that
-# cannot read this very process leaves every probe undecided. For a caller
-# about to stop an agent whose replacement the probe must then admit.
-fm_agent_process_providers_unusable() {
-  local uid rc=0 out
+# fm_agent_process_argv_reader_unusable: print why the kernel argv reader the
+# probe identifies processes through without /proc (python3
+# bin/fm-procinfo.py) cannot read this very process, and succeed; fail when it
+# can, or when /proc serves identities instead. For a caller about to stop an
+# agent whose replacement the probe must then admit.
+fm_agent_process_argv_reader_unusable() {
   [ ! -r /proc/self/cwd ] && [ ! -L /proc/self/cwd ] || return 1
-  if ! command -v lsof >/dev/null 2>&1; then
-    printf 'neither /proc nor lsof is available to read process working directories\n'
-    return 0
-  fi
-  uid=$(id -u 2>/dev/null) || { printf 'the current user id could not be read\n'; return 0; }
-  out=$(LC_ALL=C lsof -w -a -u "$uid" -d cwd -FpDi 2>/dev/null) || rc=$?
-  if [ "$rc" -ne 0 ] || [ -z "$out" ]; then
-    printf 'lsof could not list every working directory of this user'"'"'s processes (exit %s)\n' "$rc"
-    return 0
-  fi
-  if ! _fm_agent_process_identify "$$"; then
-    printf 'the process argv reader (python3 %s --argv) cannot read process identities on this host\n' "$_FM_AGENT_PROCESS_PROCINFO"
-    return 0
-  fi
-  return 1
+  _fm_agent_process_identify "$$" && return 1
+  printf 'the process argv reader (python3 %s --argv) cannot read process identities on this host\n' "$_FM_AGENT_PROCESS_PROCINFO"
 }
 
 # fm_agent_process_format_live <probe-output>: fm_agent_process_live_in_dir's
@@ -408,9 +392,11 @@ fm_agent_process_format_live() {  # <probe-output>
 
 # fm_agent_process_record_note <meta>: fm_agent_process_live_note for the
 # worktree and launch executable a task record names, only when that record is
-# a regular file and not a symlink; nothing otherwise.
+# a regular file and not a symlink and the task runs on this host (no
+# remote_host); nothing otherwise.
 fm_agent_process_record_note() {  # <meta>
   [ -f "${1:-}" ] && [ ! -L "$1" ] || return 0
+  [ -z "$(fm_meta_get "$1" remote_host)" ] || return 0
   fm_agent_process_live_note "$(fm_meta_get "$1" worktree)" "$(fm_meta_get "$1" harness)"
 }
 

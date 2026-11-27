@@ -1738,6 +1738,7 @@ SPAWN_TASK_LOCK_HELD=0
 SPAWN_CONTROL_LOCK=
 SPAWN_CONTROL_LOCK_HELD=0
 SPAWN_CONTROL_PARENT=0
+SPAWN_LIVE_NOTE_SHOWN=0
 SPAWN_META_TMP=
 SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
@@ -1808,7 +1809,17 @@ spawn_orca_reclaim_launch_file() {
 }
 
 spawn_abort_cleanup() {
-  local status=$?
+  local status=$? live_note
+  # A direct relaunch that ends without launching - refused, deferred, or
+  # failed on its own preconditions - names any agent still working in the
+  # recorded worktree, keeping its own reason and status; under fm-control the
+  # transaction owns that report.
+  if [ "$status" -ne 0 ] && [ "$RELAUNCH" = 1 ] && [ "$SPAWN_CONTROL_PARENT" != 1 ] \
+     && [ "$SPAWN_LIVE_NOTE_SHOWN" != 1 ] && fm_task_id_creation_valid "${ID:-}" \
+     && declare -F fm_agent_process_record_note >/dev/null 2>&1; then
+    live_note=$(fm_agent_process_record_note "$STATE/$ID.meta" 2>/dev/null) || live_note=
+    [ -z "$live_note" ] || printf '%s\n' "${live_note# }" >&2
+  fi
   if [ "$RELAUNCH_REPLACEMENT_PENDING" = 1 ] &&
     [ "$SPAWN_META_PUBLISH_STARTED" = 1 ] &&
     [ -n "$SPAWN_META_TMP" ] &&
@@ -2297,17 +2308,13 @@ fi
 if [ "$RELAUNCH" -ne 1 ]; then
   fm_lease_forbid_branch "new-task spawn (fm-spawn)" --away-relocated
 fi
-# spawn_relaunch_live_note: fm_agent_process_live_note for the relaunch
-# record's worktree, appended to every relaunch refusal.
-spawn_relaunch_live_note() {
-  fm_agent_process_live_note "$(fm_meta_get "$RELAUNCH_META" worktree)" "$(fm_meta_get "$RELAUNCH_META" harness)"
-}
 # spawn_refuse_if_live_agent_in <dir> <what> [launch-exe]: exit 1 naming the
 # pid when a live agent process - or one running the task's recorded raw
 # launch executable - works in <dir>; an inconclusive probe also exits 1.
 spawn_refuse_if_live_agent_in() {
   local dir=$1 what=$2 exe=${3:-} out rc=0
   out=$(fm_agent_process_live_in_dir "$dir" "$exe") || rc=$?
+  [ "$rc" -eq 1 ] || SPAWN_LIVE_NOTE_SHOWN=1
   case "$rc" in
     1) return 0 ;;
     0)
@@ -2326,12 +2333,7 @@ spawn_refuse_if_away_spend_cap() {
     # fm-control asked before it stopped the old agent, the only moment the
     # replaced worker's own count can still be read.
     [ "$SPAWN_CONTROL_PARENT" -ne 1 ] || return 0
-    FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || {
-      local live_note
-      live_note=$(spawn_relaunch_live_note)
-      [ -z "$live_note" ] || printf '%s\n' "${live_note# }" >&2
-      exit 75
-    }
+    FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || exit 75
     return 0
   fi
   FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" || exit 1
@@ -2379,7 +2381,7 @@ spawn_hold_task_set_for_relaunch() {
     exit 1
   }
   if ! fm_lock_try_acquire "$SPAWN_TASK_SET_LOCK"; then
-    echo "deferred: relaunch of $ID waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh).$(fm_agent_process_record_note "$STATE/$ID.meta")" >&2
+    echo "deferred: relaunch of $ID waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh)" >&2
     return 1
   fi
   SPAWN_TASK_SET_LOCK_HELD=1
@@ -2583,14 +2585,14 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # one into the same endpoint, and only a backend with a recovery-grade
   # classifier can (bin/fm-control-lib.sh owns that capability table).
   fm_control_backend_state_verified "$BACKEND" || {
-    echo "error: backend '$BACKEND' has no recovery-grade agent-state classifier, so a relaunch cannot prove the previous agent exited; refusing rather than risking two agents in one endpoint.$(spawn_relaunch_live_note)" >&2
+    echo "error: backend '$BACKEND' has no recovery-grade agent-state classifier, so a relaunch cannot prove the previous agent exited; refusing rather than risking two agents in one endpoint" >&2
     exit 1
   }
   # The same table refuses a backend that cannot host a REPLACEMENT at all:
   # a T3 thread keeps its conversation, so a turn or a provider change on it
   # continues the same agent instead of launching a new one.
   fm_control_backend_relaunch_supported "$BACKEND" || {
-    echo "error: backend '$BACKEND' cannot launch a replacement agent into an existing endpoint (a T3 thread keeps its conversation, so a turn or a provider change on it continues the same agent); refusing to relaunch $ID.$(spawn_relaunch_live_note)" >&2
+    echo "error: backend '$BACKEND' cannot launch a replacement agent into an existing endpoint (a T3 thread keeps its conversation, so a turn or a provider change on it continues the same agent); refusing to relaunch $ID" >&2
     exit 1
   }
   # Two states are agent-free, and both license a relaunch:
@@ -2636,7 +2638,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
       dead) RELAUNCH_STATE=dead ;;
       alive) RELAUNCH_STATE=alive ;;
       *)
-        echo "error: task $ID's recorded endpoint $RELAUNCH_TARGET reads '$RELAUNCH_STATE', but ${RELAUNCH_ABSENCE#*$'\t'}. An endpoint that cannot be proven absent may still hold a live agent on this task's worktree; refusing rather than launching a second agent into it.$(spawn_relaunch_live_note)" >&2
+        echo "error: task $ID's recorded endpoint $RELAUNCH_TARGET reads '$RELAUNCH_STATE', but ${RELAUNCH_ABSENCE#*$'\t'}. An endpoint that cannot be proven absent may still hold a live agent on this task's worktree; refusing rather than launching a second agent into it" >&2
         exit 1
         ;;
     esac
@@ -2645,7 +2647,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     dead) ;;
     missing) RELAUNCH_REBIND=1 ;;
     *)
-      echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit).$(spawn_relaunch_live_note)" >&2
+      echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
       exit 1
       ;;
   esac
@@ -2659,7 +2661,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # here as well would be a second path to the same outcome, so this refuses
   # and names the one that owns it.
   if [ "$RELAUNCH_REBIND" -eq 1 ] && [ "$KIND" = secondmate ]; then
-    echo "error: secondmate $ID's recorded endpoint is gone; its recovery is owned by the secondmate respawn path, not by relaunch (run bin/fm-spawn.sh $ID --secondmate, or let the session-start liveness sweep do it).$(spawn_relaunch_live_note)" >&2
+    echo "error: secondmate $ID's recorded endpoint is gone; its recovery is owned by the secondmate respawn path, not by relaunch (run bin/fm-spawn.sh $ID --secondmate, or let the session-start liveness sweep do it)" >&2
     exit 1
   fi
   spawn_refuse_if_away_spend_cap
@@ -2670,7 +2672,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     BRANCH=$(fm_meta_get "$RELAUNCH_META" branch)
     [ -n "$BRANCH" ] || BRANCH="fm/$ID"
     if ! git check-ref-format --branch "$BRANCH" >/dev/null 2>&1; then
-      echo "error: task $ID has an invalid recorded ship branch '$BRANCH'.$(spawn_relaunch_live_note)" >&2
+      echo "error: task $ID has an invalid recorded ship branch '$BRANCH'" >&2
       exit 1
     fi
   fi

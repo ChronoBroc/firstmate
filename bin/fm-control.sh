@@ -259,10 +259,21 @@ release_task_set_lock() {
 }
 
 control_cleanup() {
-  local status=$?
+  local status=$? phase=$RELAUNCH_PHASE note
   if [ "$RELAUNCH_ACTIVE" = 1 ] \
      && declare -F relaunch_rollback >/dev/null 2>&1; then
     relaunch_rollback || true
+  fi
+  # Every relaunch that ends before it touches the agent - refused, deferred,
+  # or failed on its own preconditions - names any agent still working in the
+  # recorded worktree, keeping its own reason and status.
+  if [ "$status" -ne 0 ] && [ "$VERB" = relaunch ] && [ -n "${ID:-}" ]; then
+    case "$phase" in
+      start|checkpoint|noted)
+        note=$(fm_agent_process_record_note "$STATE/$ID.meta" 2>/dev/null) || note=
+        [ -z "$note" ] || printf '%s\n' "${note# }" >&2
+        ;;
+    esac
   fi
   # Remove the dialog file while the lock is still held: once it is released,
   # the next lifecycle command for this task writes the same path.
@@ -392,7 +403,7 @@ trap control_cleanup EXIT
 if [ "$VERB" = relaunch ] && [ -f "$STATE/.afk-contract" ]; then
   TASK_SET_LOCK=$(fm_task_set_lock_path "$STATE") || die "could not resolve the task-set lock for $STATE"
   if ! fm_lock_try_acquire "$TASK_SET_LOCK"; then
-    echo "deferred: relaunch of $ID waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh).$(fm_agent_process_record_note "$STATE/$ID.meta")" >&2
+    echo "deferred: relaunch of $ID waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh)" >&2
     exit 75
   fi
   TASK_SET_LOCK_HELD=1
@@ -444,9 +455,9 @@ WT=$(fm_meta_get "$META" worktree)
 OPENCODE_MAJOR=$(fm_meta_get "$META" opencode_version); OPENCODE_MAJOR=${OPENCODE_MAJOR%%.*}
 
 HARNESS=$(fm_control_harness_family "$RECORDED_HARNESS") \
-  || die "task $ID records harness '${RECORDED_HARNESS:-none}', which has no verified control mechanics; fm-control refuses to guess an interrupt key or exit command.$( [ "$VERB" != relaunch ] || fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
+  || die "task $ID records harness '${RECORDED_HARNESS:-none}', which has no verified control mechanics; fm-control refuses to guess an interrupt key or exit command"
 fm_control_harness_supported "$HARNESS" \
-  || die "task $ID records harness '${RECORDED_HARNESS:-none}', which has no verified control mechanics; fm-control refuses to guess an interrupt key or exit command.$( [ "$VERB" != relaunch ] || fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
+  || die "task $ID records harness '${RECORDED_HARNESS:-none}', which has no verified control mechanics; fm-control refuses to guess an interrupt key or exit command"
 # The recorded harness scopes the kiro-only composer rules for every composer
 # read this control action makes (fm_composer_kiro_scope in bin/fm-composer-lib.sh).
 # shellcheck disable=SC2034
@@ -552,7 +563,7 @@ wait_pids_gone() {  # <timeout> <pid>...
 
 require_state_verified_backend() {  # <verb>
   fm_control_backend_state_verified "$BACKEND" && return 0
-  die "task $ID runs on the $BACKEND backend, which has no recovery-grade agent-state classifier, so '$1' cannot prove the agent actually stopped; refusing rather than reporting an unproven transition as done.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
+  die "task $ID runs on the $BACKEND backend, which has no recovery-grade agent-state classifier, so '$1' cannot prove the agent actually stopped; refusing rather than reporting an unproven transition as done.$( [ "$VERB" = relaunch ] || fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
 }
 
 # refuse_blocking_prompt: the screen is a dialog a confirming Enter would
@@ -1163,7 +1174,7 @@ resolve_relaunch_profile() {
   [ -n "$PRIOR_EFFORT" ] || PRIOR_EFFORT=default
   if [ "$HARNESS_SET" = 0 ] \
      && [ "$PRIOR_RECORDED_HARNESS" != "$PRIOR_HARNESS" ]; then
-    die "task $ID records harness '$PRIOR_RECORDED_HARNESS', whose original launch command cannot be reconstructed from its recorded basename; relaunching without --harness would substitute the canonical adapter '$PRIOR_HARNESS' for the command actually running. Pass an explicit --harness to choose the replacement runtime deliberately.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
+    die "task $ID records harness '$PRIOR_RECORDED_HARNESS', whose original launch command cannot be reconstructed from its recorded basename; relaunching without --harness would substitute the canonical adapter '$PRIOR_HARNESS' for the command actually running. Pass an explicit --harness to choose the replacement runtime deliberately"
   fi
   CONFIG_HARNESS=
   CONFIG_MODEL=
@@ -1392,16 +1403,12 @@ record_note() {
 }
 
 do_relaunch() {
-  local exit_result state note_line view_gap cap_note
+  local exit_result state note_line view_gap
   local -a spawn_args
 
   require_state_verified_backend relaunch
   fm_control_backend_relaunch_supported "$BACKEND" \
-    || die "task $ID runs on the $BACKEND backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
-  if view_gap=$(fm_agent_process_view_incomplete) || view_gap=$(fm_agent_process_providers_unusable) \
-     || { view_gap=$(fm_agent_process_live_in_dir "$WT" "$RECORDED_HARNESS" strict); [ "$?" -eq 2 ]; }; then
-    die "relaunch of $ID refused before its agent was touched: ${view_gap}, and the replacement's launch would refuse on that after the stop.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
-  fi
+    || die "task $ID runs on the $BACKEND backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch"
   resolve_relaunch_profile
 
   # The away spend cap is decided here, while the old agent still runs: once it
@@ -1411,13 +1418,13 @@ do_relaunch() {
   # from this decision through the replacement's publication.
   case "$KIND" in
     ship|scout)
-      FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || {
-        cap_note=$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")
-        [ -z "$cap_note" ] || printf '%s\n' "${cap_note# }" >&2
-        exit 75
-      }
+      FM_STATE_OVERRIDE="$STATE" "$SCRIPT_DIR/fm-afk-contract.sh" spend-cap-admits "$ID" --relaunch || exit 75
       ;;
   esac
+  if view_gap=$(fm_agent_process_argv_reader_unusable) \
+     || { view_gap=$(fm_agent_process_live_in_dir "$WT" "$RECORDED_HARNESS" strict); [ "$?" -eq 2 ]; }; then
+    die "relaunch of $ID refused before its agent was touched: ${view_gap}, and the replacement's launch would refuse on that after the stop"
+  fi
 
   case "$KIND" in
     ship|scout)

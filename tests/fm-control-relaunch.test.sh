@@ -2117,9 +2117,13 @@ SH
 }
 
 test_concurrent_relaunch_is_refused() {
-  local dir out rc lock holder i
+  local dir out rc lock holder i agent agent_pid=
   dir=$(new_case lock rl19)
   add_ship_task "$dir" rl19 claude
+  if agent=$(agent_standin_named "$dir" claude); then
+    start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+    wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  fi
   lock="$dir/home/state/.control-rl19.lock"
   # A live holder of this task's control lock, taken through the same lock
   # library fm-control uses.
@@ -2147,15 +2151,23 @@ test_concurrent_relaunch_is_refused() {
     || fail "a refused concurrent relaunch must not stop the agent"
   [ "$(cat "$dir/home/state/rl19.composer-dialog" 2>/dev/null)" = held ] \
     || fail "a refused concurrent relaunch must not remove the lock holder's dialog file"
+  if [ -n "$agent_pid" ]; then
+    assert_contains "$out" "pid $agent_pid (claude)" "the contention refusal must also name the agent still in the worktree"
+    stop_dir_process "$agent_pid"
+  fi
   pass "fm-control relaunch: two control actions on one task serialize instead of interleaving"
 }
 
 # shellcheck disable=SC2031
 test_direct_spawn_relaunch_participates_in_the_lifecycle_lock() {
-  local dir out rc lock holder i=0
+  local dir out rc lock holder i=0 agent agent_pid=
   dir=$(new_case spawnlock rl26)
   add_ship_task "$dir" rl26 claude
   printf 'zsh' > "$dir/fake/command"
+  if agent=$(agent_standin_named "$dir" claude); then
+    start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+    wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  fi
   lock="$dir/home/state/.control-rl26.lock"
   (
     . "$ROOT/bin/fm-wake-lib.sh"
@@ -2175,6 +2187,10 @@ test_direct_spawn_relaunch_participates_in_the_lifecycle_lock() {
   assert_contains "$out" "another lifecycle action is already running" \
     "direct relaunch spawn should name lifecycle contention"
   [ -z "$(cat "$dir/fake/literal")" ] || fail "contended direct relaunch spawn must deliver no launch bytes"
+  if [ -n "$agent_pid" ]; then
+    assert_contains "$out" "pid $agent_pid (claude)" "the contention refusal must also name the agent still in the worktree"
+    stop_dir_process "$agent_pid"
+  fi
   pass "fm-spawn relaunch: direct entry participates in lifecycle serialization"
 }
 
@@ -3283,6 +3299,51 @@ test_away_cap_deferral_names_an_agent_still_in_the_worktree() {
   pass "away cap: a relaunch deferral keeps exit 75 and names the agent still working in the worktree"
 }
 
+test_away_cap_deferral_precedes_the_pre_stop_scan() {
+  local dir out rc other_pid real_python
+  local -x FM_AFK_CONTRACT_CREW_STATE_BIN
+  if [ -e /proc/self/cwd ] || ! real_python=$(command -v python3); then
+    pass "away cap before the pre-stop scan: skipped - this host does not read argv through bin/fm-procinfo.py"
+    return 0
+  fi
+  dir=$(away_cap_case away-cap-scan rl-cap-scan 1 1 dead)
+  FM_AFK_CONTRACT_CREW_STATE_BIN=$(away_crew_state_stub "$dir")
+  # A process in the worktree the pre-stop scan cannot identify: a full cap
+  # must still answer as the wait (75) supervision retries, never a failure.
+  start_dir_process "$dir/wt" /bin/sleep 600; other_pid=$STARTED_PID
+  printf '#!/bin/sh\n[ "$3" = "%s" ] && exit 1\nexec "%s" "$@"\n' "$other_pid" "$real_python" > "$dir/fakebin/python3"
+  chmod +x "$dir/fakebin/python3"
+  out=$(run_control "$dir" rl-cap-scan relaunch --note "continue after the crash"); rc=$?
+  expect_code 75 "$rc" "a full away cap must defer before the pre-stop scan can refuse"$'\n'"$out"
+  assert_contains "$out" "deferred: relaunch of rl-cap-scan refused" "the cap deferral should be the reported outcome"
+  stop_dir_process "$other_pid"
+  pass "fm-control relaunch: a full away cap defers with 75 before the pre-stop worktree scan"
+}
+
+test_away_lock_deferral_never_attributes_a_remote_task_a_local_pid() {
+  local dir out rc agent agent_pid holder
+  local -x FM_AFK_CONTRACT_CREW_STATE_BIN
+  dir=$(away_cap_case away-remote rl-cap-remote 2 1 dead)
+  FM_AFK_CONTRACT_CREW_STATE_BIN=$(away_crew_state_stub "$dir")
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "remote task lock deferral: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  # The record names a remote host; a local agent that happens to work in a
+  # local directory of the same path is no evidence about that task.
+  printf 'remote_host=build-box\n' >> "$dir/home/state/rl-cap-remote.meta"
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  holder=$(hold_home_task_set_lock "$dir")
+  out=$(run_control "$dir" rl-cap-remote relaunch --note "remote"); rc=$?
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  expect_code 75 "$rc" "the lock deferral keeps its exit status"$'\n'"$out"
+  assert_not_contains "$out" "pid $agent_pid" "a remote task's deferral must not name a local process"
+  stop_dir_process "$agent_pid"
+  pass "away lock: a remote task's deferral never names a local pid as its survivor"
+}
+
 # Another launch in flight holds this home's task-set lock through its record's
 # publication (bin/fm-spawn.sh). The holder must stay alive, because
 # fm_lock_try_acquire reclaims a lock whose owning pid is gone.
@@ -3508,5 +3569,7 @@ test_away_relaunch_of_a_counted_worker_at_a_full_cap_proceeds
 test_away_relaunch_of_a_dead_worker_below_the_cap_proceeds
 test_away_direct_spawn_relaunch_of_a_dead_worker_at_a_full_cap_defers
 test_away_cap_deferral_names_an_agent_still_in_the_worktree
+test_away_cap_deferral_precedes_the_pre_stop_scan
+test_away_lock_deferral_never_attributes_a_remote_task_a_local_pid
 test_away_relaunch_defers_while_another_launch_takes_the_last_slot
 test_away_direct_spawn_relaunch_defers_while_another_launch_takes_the_last_slot
