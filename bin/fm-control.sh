@@ -209,6 +209,10 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
   echo "error: state dir '$STATE' is missing; fm-control cannot resolve tasks for FM_HOME '$FM_HOME'" >&2
   exit 1
 }
+[ ! -L "${STATE%/}" ] || {
+  echo "error: state dir '$STATE' is a symlink, not a real directory; fm-control reads task records only from this home's own state" >&2
+  exit 1
+}
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
@@ -258,30 +262,19 @@ release_task_set_lock() {
   fm_lock_release "$TASK_SET_LOCK" || true
 }
 
-control_note_release() {
-  [ -n "$CONTROL_NOTE_BUFFER" ] || return 0
-  exec 2>&5 5>&-
-  cat "$CONTROL_NOTE_BUFFER" >&2 2>/dev/null
-  rm -f "$CONTROL_NOTE_BUFFER"
-  CONTROL_NOTE_BUFFER=
-}
-
 control_cleanup() {
-  local status=$? note=
+  local status=$? note
   if [ "$RELAUNCH_ACTIVE" = 1 ] \
      && declare -F relaunch_rollback >/dev/null 2>&1; then
     relaunch_rollback || true
   fi
-  # Every relaunch that ends before it touches the agent - refused, deferred,
-  # or failed on its own preconditions - names any agent still working in the
-  # recorded worktree on the first line of its own refusal, keeping its reason
-  # and status.
-  if [ -n "${CONTROL_NOTE_BUFFER:-}" ]; then
-    exec 2>&5 5>&-
-    [ "$status" -eq 0 ] || note=$(fm_agent_process_record_note "$STATE" "$ID" 2>/dev/null) || note=
-    fm_agent_process_emit_refusal "$CONTROL_NOTE_BUFFER" "$note"
-    rm -f "$CONTROL_NOTE_BUFFER"
-    CONTROL_NOTE_BUFFER=
+  # Every relaunch that fails - refused, deferred, or failed on any of its own
+  # preconditions or steps - names any agent still working in the recorded
+  # worktree on a line of its own after its reason, keeping its status
+  # (fm_agent_process_fold_survivor lets a first-line summary carry it).
+  if [ "$status" -ne 0 ] && [ "$VERB" = relaunch ] && [ -n "${ID:-}" ]; then
+    note=$(fm_agent_process_record_note "$STATE" "$ID" 2>/dev/null) || note=
+    [ -z "$note" ] || printf '%s\n' "${note# }" >&2
   fi
   # Remove the dialog file while the lock is still held: once it is released,
   # the next lifecycle command for this task writes the same path.
@@ -329,15 +322,6 @@ if ! fm_task_id_creation_valid "$RAW_ID"; then
 fi
 ID=$RAW_ID
 CONTROL_LOCK="$STATE/.control-$ID.lock"
-# A relaunch holds its stderr until it is about to stop the agent
-# (control_note_release), so a refusal before then can carry any agent still
-# working in the worktree on its first reported line (control_cleanup).
-CONTROL_NOTE_BUFFER=
-if [ "$VERB" = relaunch ] && CONTROL_NOTE_BUFFER=$(mktemp "${TMPDIR:-/tmp}/fm-control-refusal.XXXXXX" 2>/dev/null); then
-  exec 5>&2 2>"$CONTROL_NOTE_BUFFER"
-else
-  CONTROL_NOTE_BUFFER=
-fi
 trap control_cleanup EXIT
 
 NEW_HARNESS=
@@ -862,7 +846,7 @@ do_exit() {
     alive) ;;
     *)
       fm_control_absence_recheck_applies "$BACKEND" "$state" \
-        || die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
+        || die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint.$( [ "$VERB" = relaunch ] || fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
       # `missing` on its own is not a finding about the endpoint: it conflates
       # "destroyed" with "unreachable from this seat". Route it through the
       # control plane's one absence proof - the same one the relaunch gate uses
@@ -892,7 +876,7 @@ do_exit() {
           # alive path: interrupt if busy, then the harness's exit command.
           ;;
         *)
-          die "task $ID's endpoint $T reads '$state', but ${absence#*$'\t'}; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
+          die "task $ID's endpoint $T reads '$state', but ${absence#*$'\t'}; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one.$( [ "$VERB" = relaunch ] || fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
           ;;
       esac
       ;;
@@ -1142,7 +1126,7 @@ relaunch_rollback() {
         alive)
           relaunch_restore_brief
           journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-alive" || true
-          echo "error: relaunch of $ID failed while stopping the old agent, which is still running; $(relaunch_restore_text).$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")" >&2
+          echo "error: relaunch of $ID failed while stopping the old agent, which is still running; $(relaunch_restore_text)" >&2
           ;;
         dead)
           relaunch_rollback_endpoint_agent_free prior-record-kept-agent-dead \
@@ -1156,7 +1140,7 @@ relaunch_rollback() {
           # running task. Restore byte-exact, exactly as the alive case does.
           relaunch_restore_brief
           journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-state-$state" || true
-          echo "error: relaunch of $ID failed while stopping the old agent and its state is '$state', so it was not proven stopped; $(relaunch_restore_text) and the durable record was retained for recovery.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")" >&2
+          echo "error: relaunch of $ID failed while stopping the old agent and its state is '$state', so it was not proven stopped; $(relaunch_restore_text) and the durable record was retained for recovery" >&2
           ;;
       esac
       ;;
@@ -1477,7 +1461,6 @@ do_relaunch() {
   record_note
   journal_write noted "${CHECKPOINT_LINES[@]}" "$note_line"
 
-  control_note_release
   journal_write stopping "${CHECKPOINT_LINES[@]}" "$note_line"
   exit_result=$(do_exit)
   journal_write exited "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"

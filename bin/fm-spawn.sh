@@ -833,16 +833,20 @@ resolve_directory_input() {
 
 FM_HOME=$(resolve_directory_input FM_HOME "$FM_HOME") || exit 1
 if [ -n "${FM_STATE_OVERRIDE:-}" ]; then
+  [ ! -L "${FM_STATE_OVERRIDE%/}" ] || {
+    echo "error: spawn refused: state directory is not a real directory at $FM_STATE_OVERRIDE" >&2
+    exit 1
+  }
   FM_STATE_OVERRIDE=$(resolve_directory_input FM_STATE_OVERRIDE "$FM_STATE_OVERRIDE") || exit 1
 fi
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 # spawn_refusal_note <status>: a relaunch, or a --secondmate respawn of an
 # existing local task, that exits nonzero without an fm-control transaction
 # owning its report names any agent still working in the recorded worktree
-# (fm_agent_process_record_note) on the first line of its own refusal, keeping
-# its reason and status. Armed here, before any later precondition can fail:
-# stderr is held until the worktree probe passes (spawn_note_release), so the
-# refusal's first line can carry the pid, and kept by spawn_abort_cleanup.
+# (fm_agent_process_record_note) on a line of its own after its reason,
+# keeping its status (fm_agent_process_fold_survivor lets a first-line summary
+# carry it). Armed here, before any later precondition can fail, and kept by
+# spawn_abort_cleanup.
 SPAWN_NOTE_ID=
 case "${1:-}" in -*|'') ;; *) SPAWN_NOTE_ID=$1 ;; esac
 SPAWN_NOTE_MODE=
@@ -851,43 +855,18 @@ for spawn_note_arg in "$@"; do
 done
 unset spawn_note_arg
 SPAWN_LIVE_NOTE_SHOWN=0
-SPAWN_NOTE_BUFFER=
-if [ -n "$SPAWN_NOTE_MODE" ] && [ -n "$SPAWN_NOTE_ID" ] && [ -z "${FM_CONTROL_RELAUNCH_TX:-}" ] \
-   && SPAWN_NOTE_BUFFER=$(mktemp "${TMPDIR:-/tmp}/fm-spawn-refusal.XXXXXX" 2>/dev/null); then
-  exec 5>&2 2>"$SPAWN_NOTE_BUFFER"
-else
-  SPAWN_NOTE_BUFFER=
-fi
-spawn_note_release() {
-  [ -n "$SPAWN_NOTE_BUFFER" ] || return 0
-  exec 2>&5 5>&-
-  cat "$SPAWN_NOTE_BUFFER" >&2 2>/dev/null
-  rm -f "$SPAWN_NOTE_BUFFER"
-  SPAWN_NOTE_BUFFER=
-}
 spawn_refusal_note() {  # <status>
-  [ -n "$SPAWN_NOTE_BUFFER" ] || return 0
-  exec 2>&5 5>&-
+  [ "$1" -ne 0 ] && [ -n "$SPAWN_NOTE_MODE" ] && [ -n "$SPAWN_NOTE_ID" ] || return 0
+  [ "$SPAWN_LIVE_NOTE_SHOWN" != 1 ] && [ -z "${FM_CONTROL_RELAUNCH_TX:-}" ] || return 0
   (
-    note=
-    if [ "$1" -ne 0 ] && [ "$SPAWN_LIVE_NOTE_SHOWN" != 1 ]; then
-      if ! declare -F fm_agent_process_record_note >/dev/null 2>&1; then
-        { . "$SCRIPT_DIR/fm-backend.sh" && . "$SCRIPT_DIR/fm-agent-process-lib.sh"; } >/dev/null 2>&1
-      fi
-      declare -F fm_task_id_creation_valid >/dev/null 2>&1 || . "$SCRIPT_DIR/fm-pr-lib.sh" >/dev/null 2>&1
-      if declare -F fm_task_id_creation_valid >/dev/null 2>&1 && fm_task_id_creation_valid "$SPAWN_NOTE_ID" \
-         && declare -F fm_agent_process_record_note >/dev/null 2>&1; then
-        note=$(fm_agent_process_record_note "$STATE" "$SPAWN_NOTE_ID" 2>/dev/null) || note=
-      fi
+    if ! declare -F fm_agent_process_record_note >/dev/null 2>&1; then
+      { . "$SCRIPT_DIR/fm-backend.sh" && . "$SCRIPT_DIR/fm-agent-process-lib.sh"; } >/dev/null 2>&1 || exit 0
     fi
-    if declare -F fm_agent_process_emit_refusal >/dev/null 2>&1; then
-      fm_agent_process_emit_refusal "$SPAWN_NOTE_BUFFER" "$note"
-    else
-      cat "$SPAWN_NOTE_BUFFER" >&2 2>/dev/null
-    fi
+    declare -F fm_task_id_creation_valid >/dev/null 2>&1 || . "$SCRIPT_DIR/fm-pr-lib.sh" >/dev/null 2>&1 || exit 0
+    fm_task_id_creation_valid "$SPAWN_NOTE_ID" || exit 0
+    note=$(fm_agent_process_record_note "$STATE" "$SPAWN_NOTE_ID" 2>/dev/null) || note=
+    [ -z "$note" ] || printf '%s\n' "${note# }" >&2
   )
-  rm -f "$SPAWN_NOTE_BUFFER"
-  SPAWN_NOTE_BUFFER=
   return 0
 }
 trap 'spawn_refusal_note "$?"' EXIT
@@ -2728,7 +2707,6 @@ if [ "$RELAUNCH" -eq 1 ]; then
     exit 1
   }
   spawn_refuse_if_live_agent_in "$RELAUNCH_WT" "the recorded worktree" "$RELAUNCH_PRIOR_HARNESS"
-  spawn_note_release
   if [ "$KIND" = secondmate ]; then
     FIRSTMATE_HOME=$(fm_meta_get "$RELAUNCH_META" home)
     [ -n "$FIRSTMATE_HOME" ] || FIRSTMATE_HOME=$RELAUNCH_WT
@@ -4326,7 +4304,6 @@ if [ "$KIND" = secondmate ]; then
     spawn_refuse_if_live_agent_in "$PROJ_ABS" "the secondmate home" \
       "$( { [ -n "$SECONDMATE_RECORD" ] && fm_meta_get "$SECONDMATE_RECORD" harness; } || true)"
   fi
-  spawn_note_release
   if [ -e "$DATA/secondmates.md" ] || [ -L "$DATA/secondmates.md" ]; then
     if ! secondmate_registry_validate_bindings "$DATA/secondmates.md" resolve_path "$ID" "$FIRSTMATE_HOME"; then
       echo "error: $SECONDMATE_REGISTRY_ERROR" >&2

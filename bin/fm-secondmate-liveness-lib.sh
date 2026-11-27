@@ -378,6 +378,17 @@ fm_secondmate_liveness_relaunch() {  # <meta> <id> [timeout-secs]
     FM_SM_LIVE_OUT=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "${respawn_args[@]}" 2>&1) || rc=$?
   fi
   FM_SM_LIVE_RC=$rc
+  # A refused respawn names any agent still working in the home on a line of
+  # its own; the sweeps report only the first line, so it is folded onto it.
+  [ "$rc" -eq 0 ] || FM_SM_LIVE_OUT=$(
+    declare -F fm_agent_process_fold_survivor >/dev/null 2>&1 \
+      || . "$FM_SM_LIVE_LIB_DIR/fm-agent-process-lib.sh" >/dev/null 2>&1
+    if declare -F fm_agent_process_fold_survivor >/dev/null 2>&1; then
+      fm_agent_process_fold_survivor "$FM_SM_LIVE_OUT"
+    else
+      printf '%s' "$FM_SM_LIVE_OUT"
+    fi
+  )
   if [ "$rc" -eq 0 ]; then
     fm_secondmate_liveness_ledger_add "$id" relaunched || true
   else

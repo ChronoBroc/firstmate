@@ -186,6 +186,17 @@ restart_mate() {  # <array-index>
     return
   fi
 
+  # A refused relaunch names any agent still working in the home on a line of
+  # its own; fold it onto the first line this report keeps.
+  restart_out=$(
+    declare -F fm_agent_process_fold_survivor >/dev/null 2>&1 \
+      || . "$SCRIPT_DIR/fm-agent-process-lib.sh" >/dev/null 2>&1
+    if declare -F fm_agent_process_fold_survivor >/dev/null 2>&1; then
+      fm_agent_process_fold_survivor "$restart_out"
+    else
+      printf '%s' "$restart_out"
+    fi
+  )
   restart_reason=$(first_reported_line "$restart_out")
   [ -n "$restart_reason" ] || restart_reason="the restart failed without a reported reason"
   report_unreached "$id" "the restart outcome is unknown: $restart_reason"

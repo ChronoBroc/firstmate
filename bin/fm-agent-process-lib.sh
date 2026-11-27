@@ -393,44 +393,50 @@ fm_agent_process_format_live() {  # <probe-output>
 # fm_agent_process_record_note <state-dir> <id>: fm_agent_process_live_note for
 # the worktree and launch executable task <id>'s record names, only when the
 # state directory is a real directory, the record passes this home's
-# record-ownership check (bin/fm-backlog-transition-lib.sh), and the task runs
-# on this host (no remote_host); nothing otherwise.
+# record-ownership check (bin/fm-backlog-transition-lib.sh), and it names its
+# task unambiguously (bin/fm-backend.sh's fm_backend_meta_exact_value): one
+# worktree, at most one harness, an endpoint_task_id equal to <id> when it
+# carries one, and no remote_host (a task on another host); nothing otherwise.
 fm_agent_process_record_note() {  # <state-dir> <id>
-  local state=${1:-} meta="${1:-}/${2:-}.meta" lib_dir=${_FM_AGENT_PROCESS_PROCINFO%/*}
-  [ -n "$state" ] && [ -n "${2:-}" ] || return 0
+  local state=${1:-} id=${2:-} meta="${1:-}/${2:-}.meta" lib_dir=${_FM_AGENT_PROCESS_PROCINFO%/*}
+  local worktree harness='' endpoint_id
+  [ -n "$state" ] && [ -n "$id" ] || return 0
   if ! declare -F fm_backlog_record_present >/dev/null 2>&1; then
     . "$lib_dir/fm-tasks-axi-lib.sh" >/dev/null 2>&1 \
       && . "$lib_dir/fm-backlog-transition-lib.sh" >/dev/null 2>&1 || return 0
   fi
+  declare -F fm_backend_meta_exact_value >/dev/null 2>&1 || return 0
   fm_backlog_directory_present "$state" "state directory" || return 0
   fm_backlog_record_present "$meta" "task record" "$state" || return 0
   [ ! -L "$meta" ] || return 0
-  [ -z "$(fm_meta_get "$meta" remote_host)" ] || return 0
-  fm_agent_process_live_note "$(fm_meta_get "$meta" worktree)" "$(fm_meta_get "$meta" harness)"
+  worktree=$(fm_backend_meta_exact_value "$meta" worktree) || return 0
+  ! grep -q '^remote_host=' "$meta" 2>/dev/null || return 0
+  if grep -q '^harness=' "$meta" 2>/dev/null; then
+    harness=$(fm_backend_meta_exact_value "$meta" harness) || return 0
+  fi
+  if grep -q '^endpoint_task_id=' "$meta" 2>/dev/null; then
+    endpoint_id=$(fm_backend_meta_exact_value "$meta" endpoint_task_id) || return 0
+    [ "$endpoint_id" = "$id" ] || return 0
+  fi
+  fm_agent_process_live_note "$worktree" "$harness"
 }
 
-# fm_agent_process_emit_refusal <buffered-stderr-file> <note>: write a
-# refusal's buffered stderr to stderr with <note> (fm_agent_process_live_note)
-# appended to its first line, so a caller that keeps only the first reported
-# line still carries the surviving agent's pid.
-fm_agent_process_emit_refusal() {  # <file> <note>
-  local file=$1 note=${2# } first=1 line
-  if [ -z "$note" ]; then
-    cat "$file" >&2 2>/dev/null
+# fm_agent_process_fold_survivor <text>: <text> - a command's combined output -
+# with the survivor line fm_agent_process_live_note writes (a line of its own
+# that a refusal reports after its reason) moved onto the end of the first
+# line, so a caller that keeps only the first reported line still carries the
+# pid; unchanged when no survivor line is there.
+fm_agent_process_fold_survivor() {  # <text>
+  local text=${1-} survivor
+  survivor=$(printf '%s\n' "$text" | grep -m1 '^An agent process is still working in its worktree ') || survivor=
+  if [ -z "$survivor" ] || [ "$(printf '%s\n' "$text" | sed -n '/./{p;q;}')" = "$survivor" ]; then
+    printf '%s' "$text"
     return 0
   fi
-  if [ ! -s "$file" ]; then
-    printf '%s\n' "$note" >&2
-    return 0
-  fi
-  while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$first" = 1 ]; then
-      first=0
-      printf '%s; %s\n' "$line" "$note" >&2
-    else
-      printf '%s\n' "$line" >&2
-    fi
-  done < "$file"
+  printf '%s\n' "$text" | FM_AGENT_PROCESS_SURVIVOR=$survivor awk 'BEGIN { s = ENVIRON["FM_AGENT_PROCESS_SURVIVOR"] }
+    $0 == s && !dropped { dropped = 1; next }
+    !done && NF { print $0 "; " s; done = 1; next }
+    { print }'
 }
 
 # fm_agent_process_live_note <dir> [launch-exe]: a sentence naming the agent
