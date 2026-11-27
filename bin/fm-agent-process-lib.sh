@@ -400,7 +400,7 @@ fm_agent_process_format_live() {  # <probe-output>
 # carries one, and no remote_host (a task on another host); nothing otherwise.
 fm_agent_process_record_note() {  # <state-dir> <id>
   local state=${1:-} id=${2:-} meta="${1:-}/${2:-}.meta" lib_dir=${_FM_AGENT_PROCESS_PROCINFO%/*}
-  local worktree harness='' endpoint_id home
+  local worktree harness='' endpoint_id
   [ -n "$state" ] && [ -n "$id" ] || return 0
   if ! declare -F fm_backlog_record_present >/dev/null 2>&1; then
     . "$lib_dir/fm-tasks-axi-lib.sh" >/dev/null 2>&1 \
@@ -410,11 +410,7 @@ fm_agent_process_record_note() {  # <state-dir> <id>
   fm_backlog_directory_present "$state" "state directory" || return 0
   fm_backlog_record_present "$meta" "task record" "$state" || return 0
   [ ! -L "$meta" ] || return 0
-  worktree=$(fm_backend_meta_exact_value "$meta" worktree) || return 0
-  if [ "$(fm_meta_get "$meta" kind)" = secondmate ] && grep -q '^home=' "$meta" 2>/dev/null; then
-    home=$(fm_backend_meta_exact_value "$meta" home) || return 0
-    worktree=$home
-  fi
+  worktree=$(fm_agent_process_task_dir "$meta" "$id") || return 0
   ! grep -q '^remote_host=' "$meta" 2>/dev/null || return 0
   if grep -q '^harness=' "$meta" 2>/dev/null; then
     harness=$(fm_backend_meta_exact_value "$meta" harness) || return 0
@@ -424,6 +420,22 @@ fm_agent_process_record_note() {  # <state-dir> <id>
     [ "$endpoint_id" = "$id" ] || return 0
   fi
   fm_agent_process_live_note "$worktree" "$harness"
+}
+
+# fm_agent_process_task_dir <meta> <id>: the directory task <id>'s agent runs
+# in - its one recorded worktree, or for a secondmate that records a home, that
+# home, only while the home's .fm-secondmate-home marker is a regular file
+# naming <id> - or fail when the record cannot name it unambiguously.
+fm_agent_process_task_dir() {  # <meta> <id>
+  local meta=$1 id=$2 dir marker
+  dir=$(fm_backend_meta_exact_value "$meta" worktree) || return 1
+  if [ "$(fm_meta_get "$meta" kind)" = secondmate ] && grep -q '^home=' "$meta" 2>/dev/null; then
+    dir=$(fm_backend_meta_exact_value "$meta" home) || return 1
+    [ -f "$dir/.fm-secondmate-home" ] && [ ! -L "$dir/.fm-secondmate-home" ] || return 1
+    marker=$(cat "$dir/.fm-secondmate-home" 2>/dev/null) || return 1
+    [ "$marker" = "$id" ] || return 1
+  fi
+  printf '%s\n' "$dir"
 }
 
 # fm_agent_process_fold_survivor <text>: <text> - a command's combined output -

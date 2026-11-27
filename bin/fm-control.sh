@@ -209,11 +209,11 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
   echo "error: state dir '$STATE' is missing; fm-control cannot resolve tasks for FM_HOME '$FM_HOME'" >&2
   exit 1
 }
-control_state_check=$STATE
-while [ "$control_state_check" != / ] && [ "${control_state_check%/}" != "$control_state_check" ]; do
-  control_state_check=${control_state_check%/}
-done
-[ ! -L "$control_state_check" ] || {
+# shellcheck source=bin/fm-tasks-axi-lib.sh
+. "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+# shellcheck source=bin/fm-backlog-transition-lib.sh
+. "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
+! fm_backlog_path_final_symlink "$STATE" || {
   echo "error: state dir '$STATE' is a symlink, not a real directory; fm-control reads task records only from this home's own state" >&2
   exit 1
 }
@@ -454,6 +454,10 @@ LABEL="fm-$ID"
 RECORDED_HARNESS=$(fm_meta_get "$META" harness)
 KIND=$(fm_meta_get "$META" kind)
 WT=$(fm_meta_get "$META" worktree)
+# The directory this task's agent works in - its worktree, or a secondmate's
+# marked home - for every live-agent check below; empty when the record
+# cannot name it, which leaves those checks undecided.
+LIVE_DIR=$(fm_agent_process_task_dir "$META" "$ID" 2>/dev/null) || LIVE_DIR=
 [ -n "$KIND" ] || KIND=ship
 # OpenCode's composer exit key changed between its 1.x and 2.x lines; the major
 # spawn detected is recorded here so the exit command below matches the running
@@ -529,7 +533,7 @@ endpoint_agent_pids() {
       "$(fm_polytoken_sessions_root "$polytoken_state" "$ID")" "$WT" | cut -f4 | tr '\n' ' ')"
   fi
   [ -n "$root" ] || [ "$exact" != ' ' ] || return 0
-  out=$(fm_agent_process_live_in_dir "$WT" "$RECORDED_HARNESS") || return 0
+  out=$(fm_agent_process_live_in_dir "$LIVE_DIR" "$RECORDED_HARNESS") || return 0
   for pid in $(printf '%s\n' "$out" | cut -f1); do
     case "$exact" in *" $pid "*) printf '%s\n' "$pid"; continue ;; esac
     [ -n "$root" ] || continue
@@ -569,7 +573,7 @@ wait_pids_gone() {  # <timeout> <pid>...
 
 require_state_verified_backend() {  # <verb>
   fm_control_backend_state_verified "$BACKEND" && return 0
-  die "task $ID runs on the $BACKEND backend, which has no recovery-grade agent-state classifier, so '$1' cannot prove the agent actually stopped; refusing rather than reporting an unproven transition as done.$( [ "$VERB" = relaunch ] || fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
+  die "task $ID runs on the $BACKEND backend, which has no recovery-grade agent-state classifier, so '$1' cannot prove the agent actually stopped; refusing rather than reporting an unproven transition as done.$( [ "$VERB" = relaunch ] || fm_agent_process_live_note "$LIVE_DIR" "$RECORDED_HARNESS")"
 }
 
 # refuse_blocking_prompt: the screen is a dialog a confirming Enter would
@@ -782,12 +786,6 @@ clear_retired_meta_busy_gen() {  # <gen>
   local gen=$1 meta="$STATE/$ID.meta" lock tmp current line
   [ -n "$gen" ] || return 0
   [ -f "$meta" ] && [ ! -L "$meta" ] || return 0
-  if ! declare -F fm_backlog_atomic_transition >/dev/null 2>&1; then
-    # shellcheck source=bin/fm-tasks-axi-lib.sh
-    . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
-    # shellcheck source=bin/fm-backlog-transition-lib.sh
-    . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
-  fi
   lock=$(fm_meta_lock_path "$meta") || return 1
   fm_lock_acquire_wait "$lock"
   current=$(fm_meta_get "$meta" busy_gen)
@@ -850,7 +848,7 @@ do_exit() {
     alive) ;;
     *)
       fm_control_absence_recheck_applies "$BACKEND" "$state" \
-        || die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint.$( [ "$VERB" = relaunch ] || fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
+        || die "task $ID's endpoint reads '$state' rather than a positively classified state; refusing to send a lifecycle command into an unattributed endpoint.$( [ "$VERB" = relaunch ] || fm_agent_process_live_note "$LIVE_DIR" "$RECORDED_HARNESS")"
       # `missing` on its own is not a finding about the endpoint: it conflates
       # "destroyed" with "unreachable from this seat". Route it through the
       # control plane's one absence proof - the same one the relaunch gate uses
@@ -880,7 +878,7 @@ do_exit() {
           # alive path: interrupt if busy, then the harness's exit command.
           ;;
         *)
-          die "task $ID's endpoint $T reads '$state', but ${absence#*$'\t'}; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one.$( [ "$VERB" = relaunch ] || fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
+          die "task $ID's endpoint $T reads '$state', but ${absence#*$'\t'}; exit will not claim an agent stopped at an address it cannot trust, nor send lifecycle input to one.$( [ "$VERB" = relaunch ] || fm_agent_process_live_note "$LIVE_DIR" "$RECORDED_HARNESS")"
           ;;
       esac
       ;;
@@ -1091,7 +1089,7 @@ relaunch_restore_text() {
 # restored and is reported.
 relaunch_rollback_endpoint_agent_free() {  # <tag> <message>
   local live_rc=0 live_out
-  live_out=$(fm_agent_process_live_in_dir "$WT" "$RECORDED_HARNESS") || live_rc=$?
+  live_out=$(fm_agent_process_live_in_dir "$LIVE_DIR" "$RECORDED_HARNESS") || live_rc=$?
   if [ "$live_rc" -eq 1 ]; then
     journal_write "failed:$RELAUNCH_PHASE" "rollback=$1" || true
     echo "$2" >&2
@@ -1100,10 +1098,10 @@ relaunch_rollback_endpoint_agent_free() {  # <tag> <message>
   relaunch_restore_brief
   if [ "$live_rc" -eq 0 ]; then
     journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-in-worktree" || true
-    echo "error: $ID's recorded endpoint holds no agent now, but no replacement was launched because an agent is still working in its local copy $WT (pid $(fm_agent_process_format_live "$live_out")); $(relaunch_restore_text) and the durable record was retained" >&2
+    echo "error: $ID's recorded endpoint holds no agent now, but no replacement was launched because an agent is still working in $LIVE_DIR (pid $(fm_agent_process_format_live "$live_out")); $(relaunch_restore_text) and the durable record was retained" >&2
   else
     journal_write "failed:$RELAUNCH_PHASE" "rollback=instructions-$RELAUNCH_RESTORE-agent-in-worktree-unproven" || true
-    echo "error: $ID's recorded endpoint holds no agent now, but the replacement did not launch and whether an agent still works in its local copy $WT could not be established ($live_out); $(relaunch_restore_text) and the durable record was retained" >&2
+    echo "error: $ID's recorded endpoint holds no agent now, but the replacement did not launch and whether an agent still works in ${LIVE_DIR:-its local copy} could not be established ($live_out); $(relaunch_restore_text) and the durable record was retained" >&2
   fi
 }
 
@@ -1428,7 +1426,7 @@ do_relaunch() {
       ;;
   esac
   if view_gap=$(fm_agent_process_argv_reader_unusable) \
-     || { view_gap=$(fm_agent_process_live_in_dir "$WT" "$RECORDED_HARNESS" strict); [ "$?" -eq 2 ]; }; then
+     || { view_gap=$(fm_agent_process_live_in_dir "$LIVE_DIR" "$RECORDED_HARNESS" strict); [ "$?" -eq 2 ]; }; then
     die "relaunch of $ID refused before its agent was touched: ${view_gap}, and the replacement's launch would refuse on that after the stop"
   fi
 

@@ -568,3 +568,16 @@ hold_home_task_set_lock() {  # <case-dir> -> echoes the holder pid
   [ -s "$lock/pid" ] || fail "the stand-in launch could not take the task-set lock"
   printf '%s\n' "$holder"
 }
+
+# wait_dir_process_alive <pid>: confirm a started stand-in keeps running for a
+# couple of seconds (one only ever classified `other` never makes the probe
+# answer 0, so its presence is read from the process itself).
+wait_dir_process_alive() {
+  local i=0
+  while [ "$i" -lt 20 ]; do
+    kill -0 "$1" 2>/dev/null || return 1
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill -0 "$1" 2>/dev/null
+}

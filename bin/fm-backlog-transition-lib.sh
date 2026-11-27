@@ -111,12 +111,30 @@ fm_backlog_control_bytes_valid() {  # <allow-newline: 0|1> <od-bytes>
   '
 }
 
+# fm_backlog_path_final_symlink <path>: true when <path>'s final component -
+# after any trailing `/` and `/.` spellings - is a symbolic link, whether or
+# not the path exists yet; read before any resolution erases the link.
+fm_backlog_path_final_symlink() {  # <path>
+  local check=$1
+  while :; do
+    case "$check" in
+      /) break ;;
+      */) check=${check%/} ;;
+      */.) check=${check%/.} ;;
+      .) break ;;
+      *) break ;;
+    esac
+    [ -n "$check" ] || { check=/; break; }
+  done
+  [ -L "$check" ]
+}
+
 fm_backlog_directory_present() {
   local path=$1 label=$2 check=$1
   while [ "$check" != / ] && [ "${check%/}" != "$check" ]; do
     check=${check%/}
   done
-  if [ ! -d "$check" ] || [ -L "$check" ]; then
+  if [ ! -d "$check" ] || fm_backlog_path_final_symlink "$path"; then
     FM_BACKLOG_TRANSITION_ERROR="$label is not a real directory at $path"
     return 1
   fi
