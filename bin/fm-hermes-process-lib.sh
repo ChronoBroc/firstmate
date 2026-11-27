@@ -15,9 +15,11 @@ fm_hermes_process_matches() {  # <args> [pid]
 }
 
 # fm_hermes_argv_matches <argv...>: the Hermes rule over an argument vector
-# whose boundaries are intact.
+# whose boundaries are intact. A script operand under a checkout boundary in
+# FM_PROCESS_PATH_BOUNDARIES (bin/fm-agent-process-lib.sh) is judged by its
+# path below it only.
 fm_hermes_argv_matches() {  # <argv...>
-  local word first=1 interpreter='' module=0
+  local word first=1 interpreter='' module=0 boundary
   for word in "$@"; do
     if [ "$first" = 1 ]; then
       first=0
@@ -38,6 +40,9 @@ fm_hermes_argv_matches() {  # <argv...>
       -c|-e|--eval|--print) return 1 ;;
       -*) continue ;;
     esac
+    for boundary in ${FM_PROCESS_PATH_BOUNDARIES[@]+"${FM_PROCESS_PATH_BOUNDARIES[@]}"}; do
+      case "$word" in "$boundary"/*) word=${word#"$boundary"} ;; esac
+    done
     case "$interpreter:$word" in
       node:*/ui-tui/dist/entry.js|node:*/hermes_cli/tui_dist/entry.js) return 0 ;;
       python:*/hermes|python:*/hermes_cli/main.py) return 0 ;;

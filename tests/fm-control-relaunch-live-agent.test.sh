@@ -26,7 +26,7 @@ set -u
 RL_RUN=rlt$$
 
 test_worktree_agent_probe_finds_only_agents_working_there() {
-  local dir agent out rc agent_pid other_pid sub_pid shell_pid server_pid
+  local dir agent out rc agent_pid other_pid sub_pid shell_pid server_pid cursor_pid ui_pid
   dir="$TMP_ROOT/probe-$RANDOM"
   mkdir -p "$dir/wt/sub"
   agent=$(agent_standin_named "$dir" claude) || {
@@ -73,6 +73,31 @@ test_worktree_agent_probe_finds_only_agents_working_there() {
   rc=0; out=$(fm_agent_process_live_in_dir "$dir/pi") || rc=$?
   expect_code 1 "$rc" "a project process inside a worktree named pi is not a Pi agent"$'\n'"$out"
   stop_dir_process "$server_pid"
+  # Cursor's legacy alias inside the worktree ($WT/bin/agent) resolves into its
+  # versioned install (tests/fm-cursor-harness.test.sh make_cursor_tree): the
+  # alias's real path, not one cut below the worktree, decides its identity.
+  mkdir -p "$dir/share/cursor-agent/versions/2026.08.11-e8db854" "$dir/wt/bin"
+  cp -L "$dir/standin/standin" "$dir/share/cursor-agent/versions/2026.08.11-e8db854/cursor-agent"
+  ln -sf "$dir/share/cursor-agent/versions/2026.08.11-e8db854/cursor-agent" "$dir/wt/bin/agent"
+  start_dir_process "$dir/wt" "$dir/wt/bin/agent" 600; cursor_pid=$STARTED_PID
+  wait_dir_process_alive "$cursor_pid" || fail "the Cursor alias stand-in must keep running"
+  rc=0; out=$(fm_agent_process_live_in_dir "$dir/wt" cursor) || rc=$?
+  expect_code 0 "$rc" "a live Cursor worker run through its worktree-local alias must be found"$'\n'"$out"
+  printf '%s\n' "$out" | cut -f1 | grep -Fqx "$cursor_pid" \
+    || fail "the probe must name the Cursor worker ($cursor_pid), got: $out"
+  stop_dir_process "$cursor_pid"
+  # A script operand is judged below the worktree too: a UI server at
+  # <checkout named ui-tui>/dist/entry.js is not Hermes's TUI.
+  mkdir -p "$dir/ui-tui/dist" "$dir/Node Dir"
+  : > "$dir/ui-tui/dist/entry.js"
+  ln -sf "$dir/standin/standin" "$dir/Node Dir/node"
+  if [ ! -L "$dir/standin/standin" ]; then
+    start_dir_process "$dir/ui-tui" "$dir/Node Dir/node" "$dir/ui-tui/dist/entry.js"; ui_pid=$STARTED_PID
+    wait_dir_process_alive "$ui_pid" || fail "the UI server stand-in must keep running"
+    rc=0; out=$(fm_agent_process_live_in_dir "$dir/ui-tui") || rc=$?
+    expect_code 1 "$rc" "a UI server in a checkout named ui-tui is not Hermes"$'\n'"$out"
+    stop_dir_process "$ui_pid"
+  fi
   # The checking process itself is never a finding, but an agent that is its
   # ancestor and works in the worktree is one.
   ln -s "$(command -v bash)" "$dir/agentbin/claude-checker" || fail "could not name a checker shell like an agent"

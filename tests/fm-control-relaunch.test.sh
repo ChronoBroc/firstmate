@@ -2798,8 +2798,12 @@ EOF
   printf '%s' "$survivor" > "$dir/fake/herdr-pane"
   : > "$dir/fake/herdr-log"
   : > "$dir/fake/herdr-stopped"
-  TASK_TMPS+=("/tmp/fm-$id")
+  register_task_tmp "$id" "$home"
 }
+
+# Herdr reclaim cases spawn for real, so their task ids carry this run's own
+# token and their /tmp/fm-<id> scratch can never be a live task's.
+HERDR_RUN=hdr$$
 
 # Sets HERDR_CASE_DIR rather than echoing it, so callers invoke it as a plain
 # statement. A `dir=$(herdr_case_or_skip ...)` would run add_herdr_ship_task in
@@ -2819,18 +2823,18 @@ herdr_case_or_skip() {  # <name> <id> [session] [surviving-pane]
 test_herdr_relaunch_resumes_only_the_registered_pi_session() {
   local dir out rc=0 command registered
   for registered in pi claude; do
-    herdr_case_or_skip "resume-$registered" "resume-$registered" || {
+    herdr_case_or_skip "resume-$registered-${HERDR_RUN}" "resume-$registered-${HERDR_RUN}" || {
       echo "skip - herdr relaunch needs jq (the herdr adapter parses JSON with it)"
       return 0
     }
     dir=$HERDR_CASE_DIR
     rm -f "$dir/fake/herdr-stopped"
-    sed -i 's/^harness=claude$/harness=pi/' "$dir/home/state/resume-$registered.meta"
+    sed -i 's/^harness=claude$/harness=pi/' "$dir/home/state/resume-$registered-${HERDR_RUN}.meta"
     # Keep the pane's status authority registered to an existing Pi session,
     # while process-info proves that its previous agent has exited.
     printf '{"result":{"agent":{"agent":"%s","agent_status":"idle","agent_session":{"kind":"path","value":"/tmp/pi-bound-session.jsonl"}}}}\n' \
       "$registered" > "$dir/fake/herdr-agent-registration"
-    out=$(run_spawn "$dir" "resume-$registered" --relaunch --harness pi) || rc=$?
+    out=$(run_spawn "$dir" "resume-$registered-${HERDR_RUN}" --relaunch --harness pi) || rc=$?
     expect_code 0 "$rc" "Herdr Pi relaunch should complete ($registered registration)"$'\n'"$out"
     command=$(cat "$dir/fake/launched-command")
     if [ "$registered" = pi ]; then
@@ -2847,13 +2851,13 @@ test_herdr_relaunch_resumes_only_the_registered_pi_session() {
 
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server() {
   local dir out rc=0 log stray
-  herdr_case_or_skip gone-herdr rl68 || {
+  herdr_case_or_skip gone-herdr rl68-${HERDR_RUN} || {
     echo "skip - herdr reclaim needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
   dir=$HERDR_CASE_DIR
 
-  out=$(run_spawn "$dir" rl68 --relaunch --harness claude) || rc=$?
+  out=$(run_spawn "$dir" rl68-${HERDR_RUN} --relaunch --harness claude) || rc=$?
   log=$(cat "$dir/fake/herdr-log")
   expect_code 0 "$rc" "a pane that outlived its stopped server is adoptable"$'\n'"$out"$'\n'"$log"
 
@@ -2871,12 +2875,12 @@ test_herdr_reclaim_adopts_a_pane_that_outlived_its_server() {
   stray=$(printf '%s\n' "$log" | grep -v -- '--session fmlab$' | grep -v '^status --json$' || true)
   [ -z "$stray" ] || fail "a herdr reclaim touched a session the record does not name: $stray"
   assert_contains "$out" "window=fmlab:%7" "the reclaim should report the adopted endpoint"
-  [ "$(meta_field "$dir" rl68 herdr_pane_id)" = '%7' ] \
-    || fail "the adopted record's pane id changed, got $(meta_field "$dir" rl68 herdr_pane_id)"
-  [ "$(meta_field "$dir" rl68 herdr_tab_id)" = tab1 ] \
-    || fail "the adopted record's tab id changed, got $(meta_field "$dir" rl68 herdr_tab_id)"
-  [ "$(meta_field "$dir" rl68 window)" = 'fmlab:%7' ] \
-    || fail "the adopted record's endpoint moved, got $(meta_field "$dir" rl68 window)"
+  [ "$(meta_field "$dir" rl68-${HERDR_RUN} herdr_pane_id)" = '%7' ] \
+    || fail "the adopted record's pane id changed, got $(meta_field "$dir" rl68-${HERDR_RUN} herdr_pane_id)"
+  [ "$(meta_field "$dir" rl68-${HERDR_RUN} herdr_tab_id)" = tab1 ] \
+    || fail "the adopted record's tab id changed, got $(meta_field "$dir" rl68-${HERDR_RUN} herdr_tab_id)"
+  [ "$(meta_field "$dir" rl68-${HERDR_RUN} window)" = 'fmlab:%7' ] \
+    || fail "the adopted record's endpoint moved, got $(meta_field "$dir" rl68-${HERDR_RUN} window)"
   assert_contains "$log" "pane send-text %7 " \
     "the replacement's launch brief must be delivered into the adopted pane"
   pass "reclaim: a herdr pane that outlived its stopped server is adopted, never orphaned beside a new tab"
@@ -2884,19 +2888,19 @@ test_herdr_reclaim_adopts_a_pane_that_outlived_its_server() {
 
 test_herdr_exit_reports_already_stopped_when_the_pane_outlived_its_server() {
   local dir out rc=0
-  herdr_case_or_skip gone-herdr-exit rl72 || {
+  herdr_case_or_skip gone-herdr-exit rl72-${HERDR_RUN} || {
     echo "skip - herdr exit needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
   dir=$HERDR_CASE_DIR
 
-  out=$(run_control "$dir" rl72 exit) || rc=$?
+  out=$(run_control "$dir" rl72-${HERDR_RUN} exit) || rc=$?
   expect_code 0 "$rc" "a pane that outlived its stopped server holds no agent, which is success"$'\n'"$out"
   assert_contains "$out" "already-stopped" \
     "the endpoint is there and idle, which is the ordinary already-stopped outcome"
   assert_not_contains "$out" "endpoint-gone" \
     "a pane that survived its server's restart was never gone"
-  [ "$(meta_field "$dir" rl72 window)" = 'fmlab:%7' ] \
+  [ "$(meta_field "$dir" rl72-${HERDR_RUN} window)" = 'fmlab:%7' ] \
     || fail "exit must leave the recorded endpoint exactly as it found it"
   pass "fm-control exit: a herdr pane that outlived its stopped server is already-stopped, not gone"
 }
@@ -2907,31 +2911,31 @@ test_herdr_rebind_stays_in_the_recorded_session() {
   # the adapter's own default is `default`. The recorded pane does NOT come back
   # with the server, so this reclaim really does rebind - and the rebind must
   # land in `fmlab`, never in `default`.
-  herdr_case_or_skip gone-herdr-pin rl73 fmlab '%none' || {
+  herdr_case_or_skip gone-herdr-pin rl73-${HERDR_RUN} fmlab '%none' || {
     echo "skip - herdr rebind needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
   dir=$HERDR_CASE_DIR
 
-  out=$(run_spawn "$dir" rl73 --relaunch --harness claude) || rc=$?
+  out=$(run_spawn "$dir" rl73-${HERDR_RUN} --relaunch --harness claude) || rc=$?
   log=$(cat "$dir/fake/herdr-log")
   expect_code 0 "$rc" "a herdr pane that did not survive its server should be rebound"$'\n'"$out"$'\n'"$log"
 
   assert_contains "$log" "tab create" "a destroyed pane must be replaced by a fresh tab"
   [ -z "$(grep -v -- '--session fmlab$' <<<"$log" | grep -v '^status --json$' || true)" ] \
     || fail "the rebind used a herdr session the record does not name: $log"
-  [ "$(meta_field "$dir" rl73 herdr_session)" = fmlab ] \
-    || fail "the rebound record left its recorded herdr session, got $(meta_field "$dir" rl73 herdr_session)"
-  [ "$(meta_field "$dir" rl73 window)" = 'fmlab:%9' ] \
-    || fail "the rebound endpoint should be the new pane in the recorded session, got $(meta_field "$dir" rl73 window)"
-  [ "$(meta_field "$dir" rl73 herdr_pane_id)" = '%9' ] \
-    || fail "the rebound record should name the pane the reclaim minted, got $(meta_field "$dir" rl73 herdr_pane_id)"
+  [ "$(meta_field "$dir" rl73-${HERDR_RUN} herdr_session)" = fmlab ] \
+    || fail "the rebound record left its recorded herdr session, got $(meta_field "$dir" rl73-${HERDR_RUN} herdr_session)"
+  [ "$(meta_field "$dir" rl73-${HERDR_RUN} window)" = 'fmlab:%9' ] \
+    || fail "the rebound endpoint should be the new pane in the recorded session, got $(meta_field "$dir" rl73-${HERDR_RUN} window)"
+  [ "$(meta_field "$dir" rl73-${HERDR_RUN} herdr_pane_id)" = '%9' ] \
+    || fail "the rebound record should name the pane the reclaim minted, got $(meta_field "$dir" rl73-${HERDR_RUN} herdr_pane_id)"
   pass "reclaim: a herdr rebind is created in the session the record names, never the ambient one"
 }
 
 test_herdr_reclaim_refuses_an_agent_that_came_back() {
   local dir out rc log
-  herdr_case_or_skip gone-herdr-alive rl74 || {
+  herdr_case_or_skip gone-herdr-alive rl74-${HERDR_RUN} || {
     echo "skip - herdr reclaim needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
@@ -2941,20 +2945,20 @@ test_herdr_reclaim_refuses_an_agent_that_came_back() {
   # in this task's worktree, which is the whole reason absence is re-proven.
   : > "$dir/fake/herdr-agent-live"
 
-  out=$(run_spawn "$dir" rl74 --relaunch --harness claude); rc=$?
+  out=$(run_spawn "$dir" rl74-${HERDR_RUN} --relaunch --harness claude); rc=$?
   log=$(cat "$dir/fake/herdr-log")
   expect_code 1 "$rc" "a returning agent must refuse, never be duplicated"$'\n'"$out"$'\n'"$log"
   assert_contains "$out" "alive" "the refusal should name the state it actually read"
   assert_not_contains "$log" "tab create" "a refused reclaim must not mint a second tab"
   assert_not_contains "$log" "workspace create" "a refused reclaim must not create a workspace"
-  [ "$(meta_field "$dir" rl74 herdr_pane_id)" = '%7' ] \
+  [ "$(meta_field "$dir" rl74-${HERDR_RUN} herdr_pane_id)" = '%7' ] \
     || fail "a refused reclaim rewrote the record's pane id"
   pass "reclaim: a herdr agent that came back with its server refuses, so one worktree keeps one agent"
 }
 
 test_herdr_reclaim_keeps_the_task_whole() {
   local dir out rc=0 head_before
-  herdr_case_or_skip gone-herdr-work rl75 fmlab '%none' || {
+  herdr_case_or_skip gone-herdr-work rl75-${HERDR_RUN} fmlab '%none' || {
     echo "skip - herdr reclaim needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
@@ -2969,35 +2973,35 @@ test_herdr_reclaim_keeps_the_task_whole() {
   # the task must come through untouched: a record row the reclaim does not
   # own, the armed watcher check and the private binding that authorizes it,
   # and the status log the supervisor reads.
-  printf '%s\n' "pr=https://example.invalid/pr/7" >> "$dir/home/state/rl75.meta"
-  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$dir/home/state/rl75.check.sh"
-  chmod 0700 "$dir/home/state/rl75.check.sh"
-  FM_HOME="$dir/home" "$ROOT/bin/fm-check-register.sh" rl75 >/dev/null \
+  printf '%s\n' "pr=https://example.invalid/pr/7" >> "$dir/home/state/rl75-${HERDR_RUN}.meta"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$dir/home/state/rl75-${HERDR_RUN}.check.sh"
+  chmod 0700 "$dir/home/state/rl75-${HERDR_RUN}.check.sh"
+  FM_HOME="$dir/home" "$ROOT/bin/fm-check-register.sh" rl75-${HERDR_RUN} >/dev/null \
     || fail "could not arm a custom check for the reclaim fixture"
-  printf 'working: parked on an approval nobody can answer\n' >> "$dir/home/state/rl75.status"
+  printf 'working: parked on an approval nobody can answer\n' >> "$dir/home/state/rl75-${HERDR_RUN}.status"
 
-  out=$(run_control "$dir" rl75 relaunch --note "the pane was destroyed; pick the work back up") || rc=$?
+  out=$(run_control "$dir" rl75-${HERDR_RUN} relaunch --note "the pane was destroyed; pick the work back up") || rc=$?
   expect_code 0 "$rc" "the owning seat should be able to reclaim a task whose pane is gone"$'\n'"$out"
 
   [ "$(git -C "$dir/wt" rev-parse HEAD)" = "$head_before" ] \
     || fail "a reclaim moved the worktree's HEAD"
-  [ "$(git -C "$dir/wt" rev-parse --abbrev-ref HEAD)" = "task-rl75" ] \
+  [ "$(git -C "$dir/wt" rev-parse --abbrev-ref HEAD)" = "task-rl75-${HERDR_RUN}" ] \
     || fail "a reclaim changed the worktree's branch"
   assert_contains "$(cat "$dir/wt/dirty.txt")" "never committed" \
     "a reclaim destroyed or rewrote an uncommitted change"
   assert_present "$dir/wt/committed.txt" "a reclaim destroyed committed work"
 
-  [ "$(meta_field "$dir" rl75 worktree)" = "$dir/wt" ] \
+  [ "$(meta_field "$dir" rl75-${HERDR_RUN} worktree)" = "$dir/wt" ] \
     || fail "a reclaim must keep the recorded worktree"
-  [ "$(meta_field "$dir" rl75 pr)" = "https://example.invalid/pr/7" ] \
+  [ "$(meta_field "$dir" rl75-${HERDR_RUN} pr)" = "https://example.invalid/pr/7" ] \
     || fail "a reclaim dropped a record row it does not own"
-  assert_present "$dir/home/state/rl75.check.sh" "a reclaim retired the task's armed check"
-  assert_present "$dir/home/state/rl75.check-trust" "a reclaim broke the armed check's registration"
-  assert_contains "$(cat "$dir/home/state/rl75.status")" "parked on an approval nobody can answer" \
+  assert_present "$dir/home/state/rl75-${HERDR_RUN}.check.sh" "a reclaim retired the task's armed check"
+  assert_present "$dir/home/state/rl75-${HERDR_RUN}.check-trust" "a reclaim broke the armed check's registration"
+  assert_contains "$(cat "$dir/home/state/rl75-${HERDR_RUN}.status")" "parked on an approval nobody can answer" \
     "a reclaim truncated the status log"
-  assert_contains "$(cat "$dir/home/data/rl75/brief.md")" "the pane was destroyed" \
+  assert_contains "$(cat "$dir/home/data/rl75-${HERDR_RUN}/brief.md")" "the pane was destroyed" \
     "the replacement must inherit the progress note"
-  [ "$(journal_field "$dir" rl75 exit_result)" = endpoint-gone ] \
+  [ "$(journal_field "$dir" rl75-${HERDR_RUN} exit_result)" = endpoint-gone ] \
     || fail "the transaction should record that the endpoint was already gone"
   pass "reclaim: a herdr reclaim rebinds the endpoint and leaves the whole rest of the task alone"
 }
@@ -3009,14 +3013,14 @@ test_herdr_rebind_failure_from_a_plain_shell_names_the_real_cause() {
   # `fmlab`, but the cross-session launcher guard was never consulted - this
   # seat claims no launcher pane, so placement fell back to the recorded
   # session's labeled container and the container failed for its own reason.
-  herdr_case_or_skip gone-herdr-plain rl77 fmlab '%none' || {
+  herdr_case_or_skip gone-herdr-plain rl77-${HERDR_RUN} fmlab '%none' || {
     echo "skip - herdr reclaim needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
   dir=$HERDR_CASE_DIR
   : > "$dir/fake/herdr-workspace-create-fails"
 
-  out=$(run_spawn "$dir" rl77 --relaunch --harness claude); rc=$?
+  out=$(run_spawn "$dir" rl77-${HERDR_RUN} --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "a container that cannot be ensured must refuse"$'\n'"$out"
   assert_contains "$out" "fmlab" "the refusal should name the session the reclaim was targeting"
   assert_not_contains "$out" "this seat is running in herdr session" \
@@ -3028,18 +3032,18 @@ test_herdr_rebind_failure_from_a_plain_shell_names_the_real_cause() {
 
 test_herdr_reclaim_of_a_secondmate_names_its_own_owner() {
   local dir out rc agent agent_pid=
-  herdr_case_or_skip gone-herdr-secondmate rl76 fmlab '%none' || {
+  herdr_case_or_skip gone-herdr-secondmate rl76-${HERDR_RUN} fmlab '%none' || {
     echo "skip - herdr reclaim needs jq (the herdr adapter parses JSON with it)"
     return 0
   }
   dir=$HERDR_CASE_DIR
-  printf '%s\n' "kind=secondmate" "home=$dir/wt" >> "$dir/home/state/rl76.meta"
+  printf '%s\n' "kind=secondmate" "home=$dir/wt" >> "$dir/home/state/rl76-${HERDR_RUN}.meta"
   if agent=$(agent_standin_named "$dir" claude); then
     start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
     wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the secondmate home"
   fi
 
-  out=$(run_spawn "$dir" rl76 --relaunch --harness claude); rc=$?
+  out=$(run_spawn "$dir" rl76-${HERDR_RUN} --relaunch --harness claude); rc=$?
   expect_code 1 "$rc" "a secondmate reclaim belongs to the secondmate respawn path"
   assert_contains "$out" "--secondmate" "the refusal should name the path that owns this recovery"
   if [ -n "$agent_pid" ]; then

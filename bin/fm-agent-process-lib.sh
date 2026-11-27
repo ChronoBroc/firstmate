@@ -24,6 +24,18 @@ _FM_AGENT_PROCESS_PROCINFO=$(cd "${_FM_AGENT_PROCESS_LIB_DIR:-/}" 2>/dev/null &&
 . "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-hermes-process-lib.sh"
 unset _FM_AGENT_PROCESS_LIB_DIR
 
+# fm_process_path_below_boundary <path>: <path> with any leading checkout
+# boundary in FM_PROCESS_PATH_BOUNDARIES (set while the worktree probe
+# classifies a process) cut down to the `/rest` below it, for lexical
+# installation-path checks; unchanged everywhere else.
+fm_process_path_below_boundary() {  # <path>
+  local path=${1:-} boundary
+  for boundary in ${FM_PROCESS_PATH_BOUNDARIES[@]+"${FM_PROCESS_PATH_BOUNDARIES[@]}"}; do
+    case "$path" in "$boundary"/*) path=${path#"$boundary"} ;; esac
+  done
+  printf '%s' "$path"
+}
+
 # fm_agent_process_classify_name: the single owner of the process-name
 # vocabulary shared by every liveness signal - `agent` for a verified harness,
 # `shell` for an idle login/interactive shell, `other` for anything else.
@@ -71,7 +83,8 @@ fm_agent_process_classify_name() {  # <path> [argv0] -> agent|shell|other
     kiro-cli) printf 'agent' ;;
     zsh|bash|sh|dash|ash|ksh|mksh|tcsh|csh|fish) printf 'shell' ;;
     *)
-      if fm_harness_path_name "$path" >/dev/null || fm_harness_path_name "$argv0" >/dev/null; then
+      if fm_harness_path_name "$(fm_process_path_below_boundary "$path")" >/dev/null \
+         || fm_harness_path_name "$(fm_process_path_below_boundary "$argv0")" >/dev/null; then
         printf 'agent'
       # cursor-agent runs as a bundled node script, so tmux reports the pane
       # command as a bare `node` that no name pattern above can own, and its
@@ -200,10 +213,11 @@ fm_agent_process_live_in_dir() {  # <dir> [launch-exe]
     for p in /proc/[0-9]*; do
       [ -O "$p" ] || continue
       pid=${p#/proc/}
-      if readlink "$p/cwd" >/dev/null 2>&1; then
+      if [ -d "$p/cwd" ]; then
         [ "$p/cwd" -ef "$dir_real" ] && candidates="$candidates $pid"
         continue
       fi
+      ! readlink "$p/cwd" >/dev/null 2>&1 || continue
       [ -d "$p" ] || continue
       case "$(awk '{ s = $0; sub(/^.*\) /, "", s); print substr(s, 1, 1) }' "$p/stat" 2>/dev/null)" in
         Z|X|'') continue ;;
@@ -264,14 +278,15 @@ fm_agent_process_live_in_dir() {  # <dir> [launch-exe]
 # _fm_agent_process_identify <pid> [dir...]: classify a live process from its
 # kernel name and its argument vector into FM_AGENT_PROCESS_KIND
 # (agent|shell|other), FM_AGENT_PROCESS_NAME, and FM_AGENT_PROCESS_ARGV0;
-# returns 1 when they could not be read. A name or argv[0] under a [dir] (the
-# worktree, by any of its spellings) is judged by its path below it only, so
-# the worktree's own path (a checkout at /work/pi) is never taken for a
-# harness installation. On Linux both come from /proc (comm and cmdline); elsewhere
+# returns 1 when they could not be read. Each [dir] (the worktree, by any of
+# its spellings) is a checkout boundary: FM_PROCESS_PATH_BOUNDARIES hands it to
+# the lexical installation-path checks, which judge a path under it by its part
+# below it only, so the worktree's own path (a checkout at /work/pi) is never
+# taken for a harness installation; symlink resolution keeps the real path. On Linux both come from /proc (comm and cmdline); elsewhere
 # from the kernel argv through bin/fm-procinfo.py, whose argv[0] is the name
 # ps itself reports there, so a host that denies ps still identifies it.
 _fm_agent_process_identify() {  # <pid> [dir...]
-  local pid=$1 name word judged_name judged_argv0 under
+  local pid=$1 name word boundary
   local argv=()
   FM_AGENT_PROCESS_KIND=
   FM_AGENT_PROCESS_NAME=
@@ -295,16 +310,12 @@ _fm_agent_process_identify() {  # <pid> [dir...]
   FM_AGENT_PROCESS_NAME=$name
   FM_AGENT_PROCESS_ARGV0=${argv[0]}
   FM_AGENT_PROCESS_SCRIPT=$(_fm_agent_process_script_operand "${argv[@]}")
-  judged_name=$name
-  judged_argv0=${argv[0]}
   shift
-  for under in "$@"; do
-    [ -n "$under" ] || continue
-    judged_name=${judged_name#"$under"/}
-    judged_argv0=${judged_argv0#"$under"/}
+  local -a FM_PROCESS_PATH_BOUNDARIES=()
+  for boundary in "$@"; do
+    [ -z "$boundary" ] || FM_PROCESS_PATH_BOUNDARIES+=("$boundary")
   done
-  argv[0]=$judged_argv0
-  FM_AGENT_PROCESS_KIND=$(_fm_agent_process_verdict "$judged_name" "$judged_argv0" "${argv[@]}")
+  FM_AGENT_PROCESS_KIND=$(_fm_agent_process_verdict "$name" "${argv[0]}" "${argv[@]}")
 }
 
 # _fm_agent_process_counts [launch-exe]: after _fm_agent_process_identify,

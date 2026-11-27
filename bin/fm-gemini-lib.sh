@@ -27,10 +27,15 @@
 # True when path $1 carries Gemini's own structural evidence: the file is named
 # gemini, or it sits inside the published @google/gemini-cli package tree. A
 # directory component merely named `gemini` is never enough on its own, and a
-# bare interpreter is always rejected.
+# bare interpreter is always rejected. A path under a checkout boundary in
+# FM_PROCESS_PATH_BOUNDARIES (bin/fm-agent-process-lib.sh) is judged by its
+# part below it only.
 fm_gemini_path_is_gemini() {  # <path>
-  local path=$1
+  local path=$1 boundary
   [ -n "$path" ] || return 1
+  for boundary in ${FM_PROCESS_PATH_BOUNDARIES[@]+"${FM_PROCESS_PATH_BOUNDARIES[@]}"}; do
+    case "$path" in "$boundary"/*) path=${path#"$boundary"} ;; esac
+  done
   case "$path" in
     -*) return 1 ;;
   esac
