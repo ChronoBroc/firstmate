@@ -24,18 +24,22 @@
 # ancestry fallback. The GEMINI_CLI=1 environment marker in bin/fm-harness.sh
 # remains the load-bearing path for the installed bundle shape on modern Node.
 
+# shellcheck source=bin/fm-hermes-process-lib.sh
+_FM_GEMINI_LIB_DIR=${BASH_SOURCE[0]%/*}
+[ "$_FM_GEMINI_LIB_DIR" != "${BASH_SOURCE[0]}" ] || _FM_GEMINI_LIB_DIR=.
+. "$_FM_GEMINI_LIB_DIR/fm-hermes-process-lib.sh"
+unset _FM_GEMINI_LIB_DIR
+
 # True when path $1 carries Gemini's own structural evidence: the file is named
 # gemini, or it sits inside the published @google/gemini-cli package tree. A
 # directory component merely named `gemini` is never enough on its own, and a
-# bare interpreter is always rejected. A path under a checkout boundary in
-# FM_PROCESS_PATH_BOUNDARIES (bin/fm-agent-process-lib.sh) is judged by its
-# part below it only.
+# bare interpreter is always rejected. A path under a checkout boundary is
+# judged by its part below it only (fm_process_path_below_boundary in
+# bin/fm-hermes-process-lib.sh).
 fm_gemini_path_is_gemini() {  # <path>
-  local path=$1 boundary
+  local path=$1
   [ -n "$path" ] || return 1
-  for boundary in ${FM_PROCESS_PATH_BOUNDARIES[@]+"${FM_PROCESS_PATH_BOUNDARIES[@]}"}; do
-    case "$path" in "$boundary"/*) path=${path#"$boundary"} ;; esac
-  done
+  path=$(fm_process_path_below_boundary "$path")
   case "$path" in
     -*) return 1 ;;
   esac

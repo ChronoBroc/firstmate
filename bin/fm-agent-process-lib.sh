@@ -24,18 +24,6 @@ _FM_AGENT_PROCESS_PROCINFO=$(cd "${_FM_AGENT_PROCESS_LIB_DIR:-/}" 2>/dev/null &&
 . "${_FM_AGENT_PROCESS_LIB_DIR:-/}/fm-hermes-process-lib.sh"
 unset _FM_AGENT_PROCESS_LIB_DIR
 
-# fm_process_path_below_boundary <path>: <path> with any leading checkout
-# boundary in FM_PROCESS_PATH_BOUNDARIES (set while the worktree probe
-# classifies a process) cut down to the `/rest` below it, for lexical
-# installation-path checks; unchanged everywhere else.
-fm_process_path_below_boundary() {  # <path>
-  local path=${1:-} boundary
-  for boundary in ${FM_PROCESS_PATH_BOUNDARIES[@]+"${FM_PROCESS_PATH_BOUNDARIES[@]}"}; do
-    case "$path" in "$boundary"/*) path=${path#"$boundary"} ;; esac
-  done
-  printf '%s' "$path"
-}
-
 # fm_agent_process_classify_name: the single owner of the process-name
 # vocabulary shared by every liveness signal - `agent` for a verified harness,
 # `shell` for an idle login/interactive shell, `other` for anything else.
@@ -282,12 +270,16 @@ fm_agent_process_live_in_dir() {  # <dir> [launch-exe]
 # its spellings) is a checkout boundary: FM_PROCESS_PATH_BOUNDARIES hands it to
 # the lexical installation-path checks, which judge a path under it by its part
 # below it only, so the worktree's own path (a checkout at /work/pi) is never
-# taken for a harness installation; symlink resolution keeps the real path. On Linux both come from /proc (comm and cmdline); elsewhere
-# from the kernel argv through bin/fm-procinfo.py, whose argv[0] is the name
-# ps itself reports there, so a host that denies ps still identifies it.
+# taken for a harness installation; symlink resolution keeps the real path.
+# The first [dir] is also the process's own working directory, so a relative
+# executable or script path (`./bin/agent`) is resolved against it, never
+# against the checker's. On Linux both come from /proc (comm and cmdline);
+# elsewhere from the kernel argv through bin/fm-procinfo.py, whose argv[0] is
+# the name ps itself reports there, so a host that denies ps still identifies
+# it.
 _fm_agent_process_identify() {  # <pid> [dir...]
-  local pid=$1 name word boundary
-  local argv=()
+  local pid=$1 name word boundary i
+  local argv=() judged=()
   FM_AGENT_PROCESS_KIND=
   FM_AGENT_PROCESS_NAME=
   FM_AGENT_PROCESS_ARGV0=
@@ -311,11 +303,21 @@ _fm_agent_process_identify() {  # <pid> [dir...]
   FM_AGENT_PROCESS_ARGV0=${argv[0]}
   FM_AGENT_PROCESS_SCRIPT=$(_fm_agent_process_script_operand "${argv[@]}")
   shift
+  judged=("${argv[@]}")
+  if [ -n "${1:-}" ]; then
+    for i in "${!judged[@]}"; do
+      case "${judged[i]}" in
+        /*|-*) ;;
+        */*) judged[i]="$1/${judged[i]#./}" ;;
+      esac
+    done
+    case "$name" in /*) ;; */*) name="$1/${name#./}" ;; esac
+  fi
   local -a FM_PROCESS_PATH_BOUNDARIES=()
   for boundary in "$@"; do
     [ -z "$boundary" ] || FM_PROCESS_PATH_BOUNDARIES+=("$boundary")
   done
-  FM_AGENT_PROCESS_KIND=$(_fm_agent_process_verdict "$name" "${argv[0]}" "${argv[@]}")
+  FM_AGENT_PROCESS_KIND=$(_fm_agent_process_verdict "$name" "${judged[0]}" "${judged[@]}")
 }
 
 # _fm_agent_process_counts [launch-exe]: after _fm_agent_process_identify,
@@ -354,11 +356,16 @@ _fm_agent_process_script_operand() {  # <argv...>
 # prove a worktree agent-free and succeed, or fail when it can. Under a
 # Cygwin-family userspace native Windows harnesses live outside the process
 # table; inside a private Linux pid namespace (a sandboxed command whose
-# /proc/self/status NSpid has more than one level) host processes are hidden.
-# Neither is reached into: the probe can still name what it sees, never
+# /proc/self/status NSpid has more than one level) host processes are hidden;
+# and a host with neither /proc nor lsof has no working-directory source.
+# Neither boundary is reached into: the probe can still name what it sees, never
 # absence.
 fm_agent_process_view_incomplete() {
   local levels
+  if ! { [ -r /proc/self/cwd ] || [ -L /proc/self/cwd ]; } && ! command -v lsof >/dev/null 2>&1; then
+    printf 'neither /proc nor lsof is available to read process working directories\n'
+    return 0
+  fi
   if fm_win_boundary_applies; then
     printf 'native Windows processes are outside the process table this probe reads, so their absence cannot be proven\n'
     return 0

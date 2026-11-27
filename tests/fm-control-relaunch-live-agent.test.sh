@@ -86,6 +86,15 @@ test_worktree_agent_probe_finds_only_agents_working_there() {
   printf '%s\n' "$out" | cut -f1 | grep -Fqx "$cursor_pid" \
     || fail "the probe must name the Cursor worker ($cursor_pid), got: $out"
   stop_dir_process "$cursor_pid"
+  # The same alias reached relatively (`PATH=./bin` resolves `./bin/agent`)
+  # is resolved against the worker's own directory, not the checker's.
+  start_dir_process "$dir/wt" ./bin/agent 600; cursor_pid=$STARTED_PID
+  wait_dir_process_alive "$cursor_pid" || fail "the relative Cursor alias stand-in must keep running"
+  rc=0; out=$(cd "$dir" && fm_agent_process_live_in_dir "$dir/wt" cursor) || rc=$?
+  expect_code 0 "$rc" "a live Cursor worker run through a relative alias must be found"$'\n'"$out"
+  printf '%s\n' "$out" | cut -f1 | grep -Fqx "$cursor_pid" \
+    || fail "the probe must name the relatively launched Cursor worker ($cursor_pid), got: $out"
+  stop_dir_process "$cursor_pid"
   # A script operand is judged below the worktree too: a UI server at
   # <checkout named ui-tui>/dist/entry.js is not Hermes's TUI.
   mkdir -p "$dir/ui-tui/dist" "$dir/Node Dir"
@@ -328,6 +337,29 @@ test_relaunch_on_an_incomplete_process_view_refuses_before_the_stop() {
     stop_dir_process "$agent_pid"
   fi
   pass "fm-control relaunch: an incomplete process view refuses before the agent is stopped"
+}
+
+test_relaunch_without_a_cwd_provider_refuses_before_the_stop() {
+  local dir out rc path_without_lsof d
+  if [ -e /proc/self/cwd ]; then
+    pass "fm-control relaunch without a working-directory source: skipped - this host reads them from /proc"
+    return 0
+  fi
+  dir=$(new_case nolsof rl89-${RL_RUN})
+  add_ship_task "$dir" rl89-${RL_RUN} claude
+  cp -p "$dir/home/data/rl89-${RL_RUN}/brief.md" "$dir/brief.orig"
+  path_without_lsof=
+  local IFS=:
+  for d in $PATH; do
+    [ -x "$d/lsof" ] || path_without_lsof=${path_without_lsof:+$path_without_lsof:}$d
+  done
+  unset IFS
+  out=$(PATH="$path_without_lsof" run_control "$dir" rl89-${RL_RUN} relaunch --note "no lsof"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch whose replacement could only be refused must refuse first"$'\n'"$out"
+  assert_contains "$out" "neither /proc nor lsof" "the refusal should name the missing working-directory source"
+  ! grep -Fqx /exit "$dir/fake/literal" || fail "the running agent must not be stopped"
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl89-${RL_RUN}/brief.md" || fail "the instructions must be left untouched"
+  pass "fm-control relaunch: a host with no working-directory source refuses before the agent is stopped"
 }
 
 test_relaunch_refuses_a_brief_backup_it_cannot_take() {
@@ -590,6 +622,7 @@ test_worktree_agent_probe_names_an_agent_beside_an_unreadable_process
 test_worktree_agent_probe_counts_only_what_the_task_launched
 test_worktree_agent_probe_survives_a_denied_ps_and_a_partial_listing
 test_relaunch_on_an_incomplete_process_view_refuses_before_the_stop
+test_relaunch_without_a_cwd_provider_refuses_before_the_stop
 test_relaunch_refuses_a_brief_backup_it_cannot_take
 test_relaunch_refuses_a_raw_launch_worker_still_in_the_worktree
 test_relaunch_refuses_an_agent_still_working_in_the_worktree
