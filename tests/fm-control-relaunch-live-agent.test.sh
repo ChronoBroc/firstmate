@@ -485,10 +485,17 @@ test_refusal_note_never_reads_a_foreign_state_directory() {
   assert_not_contains "$out" "pid $agent_pid" "fm-control must never report another home's task record"
   # A relative FM_STATE_OVERRIDE naming the symlink is refused before it is
   # resolved away.
-  out=$(cd "$dir" && FM_STATE_OVERRIDE=home/state run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
-  [ "$rc" -ne 0 ] || fail "a relative state override naming a symlink must refuse"$'\n'"$out"
-  assert_contains "$out" "state directory is not a real directory" "the refusal should name the unsafe state override"
-  assert_not_contains "$out" "pid $agent_pid" "a refusal must never report another home's task record"
+  local spelling
+  for spelling in home/state home/state/ home/state//; do
+    out=$(cd "$dir" && FM_STATE_OVERRIDE=$spelling run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+    [ "$rc" -ne 0 ] || fail "a relative state override '$spelling' naming a symlink must refuse"$'\n'"$out"
+    assert_contains "$out" "state directory is not a real directory" "the refusal should name the unsafe state override '$spelling'"
+    assert_not_contains "$out" "pid $agent_pid" "a refusal must never report another home's task record ($spelling)"
+    out=$(FM_STATE_OVERRIDE="$dir/$spelling" run_control "$dir" rl86-${RL_RUN} exit); rc=$?
+    [ "$rc" -ne 0 ] || fail "fm-control must refuse the state override '$spelling'"$'\n'"$out"
+    assert_contains "$out" "not a real directory" "fm-control should name the unsafe state override '$spelling'"
+    assert_not_contains "$out" "pid $agent_pid" "fm-control must never report another home's task record ($spelling)"
+  done
   rm "$dir/home/state"
   mv "$dir/other-state" "$dir/home/state"
   # A record that names two worktrees is no evidence about which agent is its.
@@ -510,7 +517,10 @@ test_refusal_survivor_reaches_first_line_summaries() {
   }
   # The automatic recovery the session-start and watcher sweeps share
   # (bin/fm-secondmate-liveness-lib.sh), refused because the task set is locked.
-  mkdir -p "$dir/smhome" "$dir/home/data/rl85-${RL_RUN}"
+  fm_git_worktree "$dir/proj" "$dir/smhome" sm-summary
+  mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin" "$dir/home/data/rl85-${RL_RUN}"
+  printf '%s\n' "rl85-${RL_RUN}" > "$dir/smhome/.fm-secondmate-home"
+  printf '# agents\n' > "$dir/smhome/AGENTS.md"
   printf '# secondmate brief\n' > "$dir/home/data/rl85-${RL_RUN}/brief.md"
   printf 'window=fmses:fm-rl85-%s\nkind=secondmate\nharness=claude\nworktree=%s\nhome=%s\n' \
     "$RL_RUN" "$dir/smhome" "$dir/smhome" > "$dir/home/state/rl85-${RL_RUN}.meta"
@@ -529,6 +539,21 @@ test_refusal_survivor_reaches_first_line_summaries() {
   assert_contains "$(printf '%s\n' "$summary" | grep '^bootstrap: ')" "pid $agent_pid (claude)" "the session-start summary must carry the survivor pid"$'\n'"$summary"
   assert_contains "$(printf '%s\n' "$summary" | grep '^bootstrap: ')" "task set is locked" "the session-start summary must keep the refusal reason"
   assert_contains "$(printf '%s\n' "$summary" | grep '^watch: ')" "pid $agent_pid (claude)" "the watcher summary must carry the survivor pid"$'\n'"$summary"
+  # The home probe itself refuses, after a warning that leads the output.
+  mkdir -p "$dir/home/config"
+  printf 'claude default not-an-effort\n' > "$dir/home/config/secondmate-harness"
+  printf '%s\n' "fm-rl85-${RL_RUN}" > "$dir/fake/windows"
+  printf '%s' "$dir/smhome" > "$dir/fake/cwd"
+  printf 'zsh' > "$dir/fake/command"
+  # shellcheck disable=SC2016
+  summary=$(PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_ROOT="$ROOT" STATE="$dir/home/state" HOME="$dir/user-home" FM_FAKE_DIR="$dir/fake" \
+    bash -c '. "$1/bin/fm-ff-lib.sh"; . "$1/bin/fm-secondmate-liveness-lib.sh"
+      FM_SM_LIVE_KILL=0 FM_SM_LIVE_RESUME=0 FM_SM_LIVE_STATE=missing
+      fm_secondmate_liveness_relaunch "$2" "$3" || true
+      printf "bootstrap: %s\n" "$(first_line "$FM_SM_LIVE_OUT")"
+      printf "watch: %s\n" "$(fm_sm_live_first_line "$FM_SM_LIVE_OUT")"' _ "$ROOT" "$dir/home/state/rl85-${RL_RUN}.meta" rl85-${RL_RUN} 2>&1)
+  assert_contains "$(printf '%s\n' "$summary" | grep '^bootstrap: ')" "pid $agent_pid (claude)" "the session-start summary must carry the pid the home probe found"$'\n'"$summary"
+  assert_contains "$(printf '%s\n' "$summary" | grep '^watch: ')" "pid $agent_pid (claude)" "the watcher summary must carry the pid the home probe found"$'\n'"$summary"
   stop_dir_process "$agent_pid"
   pass "refusal survivor: the session-start and watcher first-line summaries carry the pid beside the reason"
 }
@@ -558,6 +583,34 @@ test_relaunch_composer_and_journal_refusals_name_the_survivor() {
   ! grep -Fqx /exit "$dir/fake/literal" || fail "neither refusal may stop the agent"
   stop_dir_process "$agent_pid"
   pass "fm-control relaunch: pending-composer and journal-write refusals name the agent still in the worktree"
+}
+
+test_secondmate_relaunch_checks_the_home_it_launches_in() {
+  local dir agent out rc agent_pid
+  dir=$(new_case smstale rl83-${RL_RUN})
+  add_ship_task "$dir" rl83-${RL_RUN} claude
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "secondmate relaunch home check: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  # The record's worktree names an empty checkout; its home is where the mate runs.
+  fm_git_worktree "$dir/smproj" "$dir/smhome" sm-stale
+  mkdir -p "$dir/smhome/state" "$dir/smhome/data" "$dir/smhome/bin"
+  printf '%s\n' "rl83-${RL_RUN}" > "$dir/smhome/.fm-secondmate-home"
+  printf '# agents\n' > "$dir/smhome/AGENTS.md"
+  sed -i.bak 's/^kind=ship$/kind=secondmate/' "$dir/home/state/rl83-${RL_RUN}.meta"
+  rm -f "$dir/home/state/rl83-${RL_RUN}.meta.bak"
+  printf 'home=%s\n' "$dir/smhome" >> "$dir/home/state/rl83-${RL_RUN}.meta"
+  printf 'zsh' > "$dir/fake/command"
+  start_dir_process "$dir/smhome" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/smhome" 0 || fail "the stand-in agent never appeared in the secondmate home"
+  out=$(run_spawn "$dir" rl83-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a secondmate relaunch beside its live agent must refuse"$'\n'"$out"
+  assert_contains "$out" "pid $agent_pid (claude)" "the refusal must name the agent working in the home the relaunch would launch in"
+  assert_contains "$out" "the secondmate home $dir/smhome" "the refusal should come from the check of the home itself"
+  ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no second secondmate may be launched"
+  stop_dir_process "$agent_pid"
+  pass "fm-spawn --relaunch: a secondmate relaunch checks the home it launches in, not a stale recorded worktree"
 }
 
 test_relaunch_refuses_a_brief_backup_it_cannot_take() {
@@ -837,6 +890,7 @@ test_early_relaunch_refusals_name_an_agent_still_in_the_worktree
 test_refusal_note_never_reads_a_foreign_state_directory
 test_refusal_survivor_reaches_first_line_summaries
 test_relaunch_composer_and_journal_refusals_name_the_survivor
+test_secondmate_relaunch_checks_the_home_it_launches_in
 test_relaunch_refuses_a_brief_backup_it_cannot_take
 test_relaunch_refuses_a_raw_launch_worker_still_in_the_worktree
 test_relaunch_refuses_an_agent_still_working_in_the_worktree

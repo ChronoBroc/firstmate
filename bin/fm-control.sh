@@ -209,7 +209,11 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
   echo "error: state dir '$STATE' is missing; fm-control cannot resolve tasks for FM_HOME '$FM_HOME'" >&2
   exit 1
 }
-[ ! -L "${STATE%/}" ] || {
+control_state_check=$STATE
+while [ "$control_state_check" != / ] && [ "${control_state_check%/}" != "$control_state_check" ]; do
+  control_state_check=${control_state_check%/}
+done
+[ ! -L "$control_state_check" ] || {
   echo "error: state dir '$STATE' is a symlink, not a real directory; fm-control reads task records only from this home's own state" >&2
   exit 1
 }

@@ -395,11 +395,12 @@ fm_agent_process_format_live() {  # <probe-output>
 # state directory is a real directory, the record passes this home's
 # record-ownership check (bin/fm-backlog-transition-lib.sh), and it names its
 # task unambiguously (bin/fm-backend.sh's fm_backend_meta_exact_value): one
-# worktree, at most one harness, an endpoint_task_id equal to <id> when it
+# worktree (a secondmate's at most one home, which is where it runs), at most
+# one harness, an endpoint_task_id equal to <id> when it
 # carries one, and no remote_host (a task on another host); nothing otherwise.
 fm_agent_process_record_note() {  # <state-dir> <id>
   local state=${1:-} id=${2:-} meta="${1:-}/${2:-}.meta" lib_dir=${_FM_AGENT_PROCESS_PROCINFO%/*}
-  local worktree harness='' endpoint_id
+  local worktree harness='' endpoint_id home
   [ -n "$state" ] && [ -n "$id" ] || return 0
   if ! declare -F fm_backlog_record_present >/dev/null 2>&1; then
     . "$lib_dir/fm-tasks-axi-lib.sh" >/dev/null 2>&1 \
@@ -410,6 +411,10 @@ fm_agent_process_record_note() {  # <state-dir> <id>
   fm_backlog_record_present "$meta" "task record" "$state" || return 0
   [ ! -L "$meta" ] || return 0
   worktree=$(fm_backend_meta_exact_value "$meta" worktree) || return 0
+  if [ "$(fm_meta_get "$meta" kind)" = secondmate ] && grep -q '^home=' "$meta" 2>/dev/null; then
+    home=$(fm_backend_meta_exact_value "$meta" home) || return 0
+    worktree=$home
+  fi
   ! grep -q '^remote_host=' "$meta" 2>/dev/null || return 0
   if grep -q '^harness=' "$meta" 2>/dev/null; then
     harness=$(fm_backend_meta_exact_value "$meta" harness) || return 0
@@ -446,6 +451,14 @@ fm_agent_process_live_note() {  # <dir> [launch-exe]
   local out
   [ -n "${1:-}" ] || return 0
   out=$(fm_agent_process_live_in_dir "$1" "${2:-}") || return 0
-  printf ' An agent process is still working in its worktree %s: pid %s.' "$1" "$(fm_agent_process_format_live "$out")"
+  printf ' %s' "$(fm_agent_process_survivor_line "$1" "$out")"
   return 0
+}
+
+# fm_agent_process_survivor_line <dir> <probe-output>: the one survivor line,
+# naming the agent processes fm_agent_process_live_in_dir found in <dir>; a
+# refusal writes it on a line of its own, where fm_agent_process_fold_survivor
+# finds it.
+fm_agent_process_survivor_line() {  # <dir> <probe-output>
+  printf 'An agent process is still working in its worktree %s: pid %s.' "$1" "$(fm_agent_process_format_live "$2")"
 }
