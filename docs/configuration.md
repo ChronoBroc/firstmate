@@ -55,7 +55,7 @@ These variables override individual operational directories for tests and specia
 Before `fm-brief.sh`, `fm-spawn.sh`, or `fm-afk-launch.sh` saves a path or passes it to another process, it handles each applicable `FM_HOME`, `FM_STATE_OVERRIDE`, or `FM_DATA_OVERRIDE` directory as follows:
 
 - Resolve relative directories against the caller's working directory.
-- Preserve accepted absolute spellings unchanged.
+- Preserve accepted absolute spellings unchanged, except that an `FM_STATE_OVERRIDE` containing a `..` component is consumed as the directory it physically resolves to: with `alias` linking to `nested/leaf`, `$FM_HOME/alias/../state` is used as `$FM_HOME/nested/state`, never `$FM_HOME/state`.
 - Reject an unresolvable relative directory and name the offending variable.
 
 `fm-spawn.sh` additionally rejects control bytes in those raw directory inputs before shell or filesystem normalization can change which path the backlog gate checks.

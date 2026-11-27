@@ -2354,7 +2354,7 @@ spawn_refuse_if_live_agent_in() {
   case "$rc" in
     1) return 0 ;;
     0)
-      echo "error: refusing to start an agent for $ID: $what $dir already has a live agent process working in it, pid $(fm_agent_process_format_live "$out"), whatever its recorded endpoint reads from here; stop that agent, or confirm it is not this task's, before launching another" >&2
+      echo "error: refusing to start an agent for $ID: $what $dir already has a live agent process working in it, whatever its recorded endpoint reads from here; stop that agent, or confirm it is not this task's, before launching another" >&2
       fm_agent_process_survivor_line "$dir" "$out" >&2
       printf '\n' >&2
       exit 1

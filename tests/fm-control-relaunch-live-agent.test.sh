@@ -398,6 +398,8 @@ test_refusal_survivor_reaches_first_line_summaries() {
       printf "watch: %s\n" "$(fm_sm_live_first_line "$FM_SM_LIVE_OUT")"' _ "$ROOT" "$dir/home/state/rl85-${RL_RUN}.meta" rl85-${RL_RUN} 2>&1)
   assert_contains "$(printf '%s\n' "$summary" | grep '^bootstrap: ')" "pid $agent_pid (claude)" "the session-start summary must carry the pid the home probe found"$'\n'"$summary"
   assert_contains "$(printf '%s\n' "$summary" | grep '^watch: ')" "pid $agent_pid (claude)" "the watcher summary must carry the pid the home probe found"$'\n'"$summary"
+  [ "$(printf '%s\n' "$summary" | grep '^bootstrap: ' | grep -o "pid $agent_pid" | wc -l | tr -d ' ')" = 1 ] \
+    || fail "the session-start summary must name the survivor pid once"$'\n'"$summary"
   stop_dir_process "$agent_pid"
   pass "refusal survivor: the session-start and watcher first-line summaries carry the pid beside the reason"
 }

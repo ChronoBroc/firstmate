@@ -48,7 +48,7 @@ relaunch_cleanup() {
 trap relaunch_cleanup EXIT
 
 # The same lifecycle-modelling tmux stub as tests/fm-control.test.sh: the
-# harness's exit command stops the agent, and a launch-brief literal starts the
+# harness's exit command, once Enter submits it, stops the agent, and a launch-brief literal starts the
 # harness named in `becomes`.
 make_tmux_stub() {  # <dir>
   local fb="$1/fakebin"
@@ -91,11 +91,11 @@ case "${1:-}" in
       printf '%s\n' "$payload" >> "$D/literal"
       case "$payload" in
         /exit|/quit)
-          if [ -f "$D/stop-pid" ] && kill -0 "$(cat "$D/stop-pid")" 2>/dev/null; then
-            : > "$D/exit-ack"
+          if [ -n "${FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP:-}" ]; then
+            printf 'zsh' > "$D/command"
+            exit 1
           fi
-          printf 'zsh' > "$D/command"
-          [ -z "${FM_FAKE_EXIT_TRANSPORT_FAIL_AFTER_STOP:-}" ] || exit 1
+          : > "$D/exit-pending"
           ;;
         *'encode launch-brief'* | *'Firstmate operational input waiting: read'*)
           # The replacement's arrival records whether the process named in
@@ -113,6 +113,15 @@ case "${1:-}" in
     else
       printf '%s\n' "$payload" >> "$D/keys"
       case "$payload" in
+        Enter)
+          if [ -e "$D/exit-pending" ]; then
+            rm -f "$D/exit-pending"
+            if [ -f "$D/stop-pid" ] && kill -0 "$(cat "$D/stop-pid")" 2>/dev/null; then
+              : > "$D/exit-ack"
+            fi
+            printf 'zsh' > "$D/command"
+          fi
+          ;;
         'export GOTMPDIR='*)
           if [ -n "${FM_FAKE_TRACE_PREPARE:-}" ]; then
             : > "$FM_FAKE_TRACE_PREPARE"
