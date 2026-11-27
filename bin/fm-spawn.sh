@@ -2379,7 +2379,7 @@ spawn_hold_task_set_for_relaunch() {
     exit 1
   }
   if ! fm_lock_try_acquire "$SPAWN_TASK_SET_LOCK"; then
-    echo "deferred: relaunch of $ID waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh)" >&2
+    echo "deferred: relaunch of $ID waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh).$(fm_agent_process_record_note "$STATE/$ID.meta")" >&2
     return 1
   fi
   SPAWN_TASK_SET_LOCK_HELD=1

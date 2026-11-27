@@ -170,7 +170,9 @@ _fm_agent_process_verdict() {  # <name> <argv0> <argv...> -> agent|shell|other
 #
 # Prints and returns:
 #   0  one `<pid>\t<process name>` line per live agent process found; a
-#      verified agent is reported even when another process could not be read.
+#      verified agent is reported even when another process could not be
+#      read, unless [strict] is given (any non-empty word), when such an
+#      undecided process answers 2 instead.
 #   1  nothing: no agent process of this user works in <dir>.
 #   2  one line naming why the probe could not decide, when no agent was
 #      verified: <dir> does not resolve, no working-directory source is usable
@@ -178,8 +180,8 @@ _fm_agent_process_verdict() {  # <name> <argv0> <argv...> -> agent|shell|other
 #      not be read.
 #      Callers that would start an agent in <dir> must treat this as a
 #      refusal, never as 1.
-fm_agent_process_live_in_dir() {  # <dir> [launch-exe]
-  local dir=${1:-} exe=${2:-} dir_real dir_id uid pid self selves found='' undecided='' lsof_out lsof_rc p candidates=''
+fm_agent_process_live_in_dir() {  # <dir> [launch-exe] [strict]
+  local dir=${1:-} exe=${2:-} strict=${3:-} dir_real dir_id uid pid self selves found='' undecided='' lsof_out lsof_rc p candidates=''
   exe=${exe##*/}
   [ "$(fm_agent_process_classify_name "$exe")" != shell ] || exe=
   undecided=$(fm_agent_process_view_incomplete) || undecided=
@@ -250,7 +252,7 @@ fm_agent_process_live_in_dir() {  # <dir> [launch-exe]
     _fm_agent_process_counts "$exe" || continue
     found="$found$pid"$'\t'"${FM_AGENT_PROCESS_NAME##*/}"$'\n'
   done
-  if [ -n "$found" ]; then
+  if [ -n "$found" ] && { [ -z "$strict" ] || [ -z "$undecided" ]; }; then
     printf '%s' "$found"
     return 0
   fi
@@ -402,6 +404,14 @@ fm_agent_process_providers_unusable() {
 # `<pid>\t<name>` lines as `<pid> (<name>)[, ...]`.
 fm_agent_process_format_live() {  # <probe-output>
   printf '%s\n' "$1" | awk -F'\t' 'NF { printf "%s%s (%s)", sep, $1, $2; sep = ", " }'
+}
+
+# fm_agent_process_record_note <meta>: fm_agent_process_live_note for the
+# worktree and launch executable a task record names, only when that record is
+# a regular file and not a symlink; nothing otherwise.
+fm_agent_process_record_note() {  # <meta>
+  [ -f "${1:-}" ] && [ ! -L "$1" ] || return 0
+  fm_agent_process_live_note "$(fm_meta_get "$1" worktree)" "$(fm_meta_get "$1" harness)"
 }
 
 # fm_agent_process_live_note <dir> [launch-exe]: a sentence naming the agent

@@ -371,6 +371,38 @@ test_relaunch_without_a_cwd_provider_refuses_before_the_stop() {
   pass "fm-control relaunch: a host whose working directories or argv cannot be read refuses before the agent is stopped"
 }
 
+test_relaunch_beside_an_unreadable_worktree_process_refuses_before_the_stop() {
+  local dir agent out rc agent_pid other_pid real_python
+  if [ -e /proc/self/cwd ] || ! real_python=$(command -v python3); then
+    pass "fm-control relaunch beside an unreadable process: skipped - this host does not read argv through bin/fm-procinfo.py"
+    return 0
+  fi
+  dir=$(new_case unreadable rl88-${RL_RUN})
+  add_ship_task "$dir" rl88-${RL_RUN} claude
+  cp -p "$dir/home/data/rl88-${RL_RUN}/brief.md" "$dir/brief.orig"
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "fm-control relaunch beside an unreadable process: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  # The endpoint's own agent is verified; another process in the worktree
+  # cannot be identified, as a protected process cannot.
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  printf '%s' "$agent_pid" > "$dir/fake/pane-pid"
+  start_dir_process "$dir/wt" /bin/sleep 600; other_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  printf '#!/bin/sh\n[ "$3" = "%s" ] && exit 1\nexec "%s" "$@"\n' "$other_pid" "$real_python" > "$dir/fakebin/python3"
+  chmod +x "$dir/fakebin/python3"
+  out=$(run_control "$dir" rl88-${RL_RUN} relaunch --note "beside an unreadable process"); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch whose replacement could only be refused must refuse first"$'\n'"$out"
+  assert_contains "$out" "refused before its agent was touched" "the refusal should come before the stop"
+  assert_contains "$out" "$other_pid" "the refusal should name the process it could not identify"
+  ! grep -Fqx /exit "$dir/fake/literal" || fail "the running agent must not be stopped"
+  cmp -s "$dir/brief.orig" "$dir/home/data/rl88-${RL_RUN}/brief.md" || fail "the instructions must be left untouched"
+  stop_dir_process "$agent_pid"
+  stop_dir_process "$other_pid"
+  pass "fm-control relaunch: an unidentifiable worktree process refuses before the agent is stopped"
+}
+
 test_relaunch_refuses_a_brief_backup_it_cannot_take() {
   local dir out rc
   dir=$(new_case unusablebackup rl97-${RL_RUN})
@@ -643,6 +675,7 @@ test_worktree_agent_probe_counts_only_what_the_task_launched
 test_worktree_agent_probe_survives_a_denied_ps_and_a_partial_listing
 test_relaunch_on_an_incomplete_process_view_refuses_before_the_stop
 test_relaunch_without_a_cwd_provider_refuses_before_the_stop
+test_relaunch_beside_an_unreadable_worktree_process_refuses_before_the_stop
 test_relaunch_refuses_a_brief_backup_it_cannot_take
 test_relaunch_refuses_a_raw_launch_worker_still_in_the_worktree
 test_relaunch_refuses_an_agent_still_working_in_the_worktree

@@ -392,7 +392,7 @@ trap control_cleanup EXIT
 if [ "$VERB" = relaunch ] && [ -f "$STATE/.afk-contract" ]; then
   TASK_SET_LOCK=$(fm_task_set_lock_path "$STATE") || die "could not resolve the task-set lock for $STATE"
   if ! fm_lock_try_acquire "$TASK_SET_LOCK"; then
-    echo "deferred: relaunch of $ID waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh)" >&2
+    echo "deferred: relaunch of $ID waits - an away record stands and this home's task set is locked by another launch or teardown, so the spend cap cannot be decided for it now; nothing was touched (spend cap: bin/fm-afk-contract.sh).$(fm_agent_process_record_note "$STATE/$ID.meta")" >&2
     exit 75
   fi
   TASK_SET_LOCK_HELD=1
@@ -1398,7 +1398,8 @@ do_relaunch() {
   require_state_verified_backend relaunch
   fm_control_backend_relaunch_supported "$BACKEND" \
     || die "task $ID runs on the $BACKEND backend, where a thread keeps its conversation and a new turn or provider change continues the same agent, so no fresh replacement can be launched into its endpoint; 'interrupt' ends its turn, and a fresh task needs a teardown and a new dispatch.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
-  if view_gap=$(fm_agent_process_view_incomplete) || view_gap=$(fm_agent_process_providers_unusable); then
+  if view_gap=$(fm_agent_process_view_incomplete) || view_gap=$(fm_agent_process_providers_unusable) \
+     || { view_gap=$(fm_agent_process_live_in_dir "$WT" "$RECORDED_HARNESS" strict); [ "$?" -eq 2 ]; }; then
     die "relaunch of $ID refused before its agent was touched: ${view_gap}, and the replacement's launch would refuse on that after the stop.$(fm_agent_process_live_note "$WT" "$RECORDED_HARNESS")"
   fi
   resolve_relaunch_profile
