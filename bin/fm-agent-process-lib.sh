@@ -209,7 +209,7 @@ fm_agent_process_live_in_dir() {  # <dir> [launch-exe]
         Z|X|'') continue ;;
       esac
       case "$selves" in *" $pid "*) continue ;; esac
-      if ! _fm_agent_process_identify "$pid"; then
+      if ! _fm_agent_process_identify "$pid" "$dir_real" "${dir%/}"; then
         kill -0 "$pid" 2>/dev/null || continue
         [ -n "$undecided" ] || undecided="the working directory and identity of running process $pid could not be read"
         continue
@@ -242,7 +242,7 @@ fm_agent_process_live_in_dir() {  # <dir> [launch-exe]
   fi
   for pid in $candidates; do
     case "$selves" in *" $pid "*) continue ;; esac
-    if ! _fm_agent_process_identify "$pid"; then
+    if ! _fm_agent_process_identify "$pid" "$dir_real" "${dir%/}"; then
       kill -0 "$pid" 2>/dev/null || continue
       [ -n "$undecided" ] || undecided="the identity of running process $pid working in $dir_real could not be read"
       continue
@@ -261,14 +261,17 @@ fm_agent_process_live_in_dir() {  # <dir> [launch-exe]
   return 1
 }
 
-# _fm_agent_process_identify <pid>: classify a live process from its kernel
-# name and its argument vector into FM_AGENT_PROCESS_KIND (agent|shell|other),
-# FM_AGENT_PROCESS_NAME, and FM_AGENT_PROCESS_ARGV0; returns 1 when they could
-# not be read. On Linux both come from /proc (comm and cmdline); elsewhere
+# _fm_agent_process_identify <pid> [dir...]: classify a live process from its
+# kernel name and its argument vector into FM_AGENT_PROCESS_KIND
+# (agent|shell|other), FM_AGENT_PROCESS_NAME, and FM_AGENT_PROCESS_ARGV0;
+# returns 1 when they could not be read. A name or argv[0] under a [dir] (the
+# worktree, by any of its spellings) is judged by its path below it only, so
+# the worktree's own path (a checkout at /work/pi) is never taken for a
+# harness installation. On Linux both come from /proc (comm and cmdline); elsewhere
 # from the kernel argv through bin/fm-procinfo.py, whose argv[0] is the name
 # ps itself reports there, so a host that denies ps still identifies it.
-_fm_agent_process_identify() {  # <pid>
-  local pid=$1 name word
+_fm_agent_process_identify() {  # <pid> [dir...]
+  local pid=$1 name word judged_name judged_argv0 under
   local argv=()
   FM_AGENT_PROCESS_KIND=
   FM_AGENT_PROCESS_NAME=
@@ -292,7 +295,16 @@ _fm_agent_process_identify() {  # <pid>
   FM_AGENT_PROCESS_NAME=$name
   FM_AGENT_PROCESS_ARGV0=${argv[0]}
   FM_AGENT_PROCESS_SCRIPT=$(_fm_agent_process_script_operand "${argv[@]}")
-  FM_AGENT_PROCESS_KIND=$(_fm_agent_process_verdict "$name" "${argv[0]}" "${argv[@]}")
+  judged_name=$name
+  judged_argv0=${argv[0]}
+  shift
+  for under in "$@"; do
+    [ -n "$under" ] || continue
+    judged_name=${judged_name#"$under"/}
+    judged_argv0=${judged_argv0#"$under"/}
+  done
+  argv[0]=$judged_argv0
+  FM_AGENT_PROCESS_KIND=$(_fm_agent_process_verdict "$judged_name" "$judged_argv0" "${argv[@]}")
 }
 
 # _fm_agent_process_counts [launch-exe]: after _fm_agent_process_identify,

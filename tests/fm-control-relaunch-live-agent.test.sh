@@ -26,7 +26,7 @@ set -u
 RL_RUN=rlt$$
 
 test_worktree_agent_probe_finds_only_agents_working_there() {
-  local dir agent out rc agent_pid other_pid sub_pid shell_pid
+  local dir agent out rc agent_pid other_pid sub_pid shell_pid server_pid
   dir="$TMP_ROOT/probe-$RANDOM"
   mkdir -p "$dir/wt/sub"
   agent=$(agent_standin_named "$dir" claude) || {
@@ -51,11 +51,28 @@ test_worktree_agent_probe_finds_only_agents_working_there() {
   expect_code 0 "$rc" "the worktree reached through a link should still hold the agent"$'\n'"$out"
   [ "$(printf '%s\n' "$out" | cut -f1)" = "$agent_pid" ] \
     || fail "the probe must name the agent through the linked path ($agent_pid), got: $out"
-  if [ "$(id -u)" = 0 ] && [ -e /proc/self/cwd ] && mkdir -p "$dir/wt-bind" && mount --bind "$dir/wt" "$dir/wt-bind" 2>/dev/null; then
-    rc=0; out=$(fm_agent_process_live_in_dir "$dir/wt-bind") || rc=$?
-    umount "$dir/wt-bind" 2>/dev/null
-    expect_code 0 "$rc" "the worktree reached through a bind mount should still hold the agent"$'\n'"$out"
+  # A bind mount, where this host permits one, lives only in a private mount
+  # namespace that ends with the probe, so nothing can outlive the test.
+  mkdir -p "$dir/wt-bind"
+  # shellcheck disable=SC2016
+  if [ -e /proc/self/cwd ] && command -v unshare >/dev/null 2>&1 \
+     && unshare -m true 2>/dev/null; then
+    rc=0; out=$(unshare -m bash -c 'mount --bind "$2" "$3" || exit 99; . "$1/bin/fm-agent-process-lib.sh"; fm_agent_process_live_in_dir "$3"' _ "$ROOT" "$dir/wt" "$dir/wt-bind") || rc=$?
+    if [ "$rc" != 99 ]; then
+      expect_code 0 "$rc" "the worktree reached through a bind mount should still hold the agent"$'\n'"$out"
+      [ "$(printf '%s\n' "$out" | cut -f1)" = "$agent_pid" ] \
+        || fail "the probe must name the agent through the bind mount ($agent_pid), got: $out"
+    fi
   fi
+  # A worktree whose own path names a harness (a checkout at .../pi) is no
+  # evidence of one: a project server running from inside it is not an agent.
+  mkdir -p "$dir/pi/.venv/bin"
+  ln -sf "$dir/standin/standin" "$dir/pi/.venv/bin/server"
+  start_dir_process "$dir/pi" "$dir/pi/.venv/bin/server" 600; server_pid=$STARTED_PID
+  wait_dir_process_alive "$server_pid" || fail "the project server stand-in must keep running"
+  rc=0; out=$(fm_agent_process_live_in_dir "$dir/pi") || rc=$?
+  expect_code 1 "$rc" "a project process inside a worktree named pi is not a Pi agent"$'\n'"$out"
+  stop_dir_process "$server_pid"
   # The checking process itself is never a finding, but an agent that is its
   # ancestor and works in the worktree is one.
   ln -s "$(command -v bash)" "$dir/agentbin/claude-checker" || fail "could not name a checker shell like an agent"
