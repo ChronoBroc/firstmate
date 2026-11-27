@@ -217,6 +217,12 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
   echo "error: state dir '$STATE' is a symlink, not a real directory; fm-control reads task records only from this home's own state" >&2
   exit 1
 }
+case "$STATE" in /*) state_spelling=$STATE ;; *) state_spelling=$PWD/$STATE ;; esac
+fm_backlog_home_contained "$state_spelling" "state dir" || {
+  echo "error: $FM_BACKLOG_TRANSITION_ERROR; fm-control reads task records only from this home's own state" >&2
+  exit 1
+}
+unset state_spelling
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
@@ -1348,7 +1354,7 @@ safe_checkpoint() {
     # durable records at startup. The checkpoint proves those records are
     # readable BEFORE the agent stops, so a relaunch can never strand child
     # work behind an unreadable home.
-    marker=$(cat "$WT/.fm-secondmate-home" 2>/dev/null || true)
+    marker=$(fm_agent_process_home_marker "$WT") || marker=
     [ "$marker" = "$ID" ] \
       || die "task $ID's home $WT is not marked as its own seeded secondmate home (marker: ${marker:-none}); refusing to relaunch"
     # Do not walk state/ with find(1): watcher scratch files can vanish

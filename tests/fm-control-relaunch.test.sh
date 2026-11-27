@@ -3079,6 +3079,7 @@ test_herdr_reclaim_of_a_secondmate_names_its_own_owner() {
   }
   dir=$HERDR_CASE_DIR
   printf '%s\n' "kind=secondmate" "home=$dir/wt" >> "$dir/home/state/rl76-${HERDR_RUN}.meta"
+  printf '%s\n' "rl76-${HERDR_RUN}" > "$dir/wt/.fm-secondmate-home"
   if agent=$(agent_standin_named "$dir" claude); then
     start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
     wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the secondmate home"

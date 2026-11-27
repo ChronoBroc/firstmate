@@ -837,6 +837,12 @@ if [ -n "${FM_STATE_OVERRIDE:-}" ]; then
     echo "error: spawn refused: state directory is not a real directory at $FM_STATE_OVERRIDE" >&2
     exit 1
   }
+  case "$FM_STATE_OVERRIDE" in /*) state_spelling=$FM_STATE_OVERRIDE ;; *) state_spelling=$PWD/$FM_STATE_OVERRIDE ;; esac
+  { [ ! -e "$state_spelling" ] && [ ! -L "$state_spelling" ]; } || fm_backlog_home_contained "$state_spelling" "state directory" || {
+    echo "error: spawn refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
+    exit 1
+  }
+  unset state_spelling
   FM_STATE_OVERRIDE=$(resolve_directory_input FM_STATE_OVERRIDE "$FM_STATE_OVERRIDE") || exit 1
 fi
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
@@ -4233,7 +4239,7 @@ validate_firstmate_home_for_spawn() {
     echo "error: firstmate home $home is not a seeded secondmate home" >&2
     return 1
   fi
-  marker_id=$(cat "$abs_home/$SUB_HOME_MARKER" 2>/dev/null || true)
+  marker_id=$(fm_agent_process_home_marker "$abs_home") || marker_id=
   if [ "$marker_id" != "$id" ]; then
     echo "error: firstmate home $home is marked for secondmate ${marker_id:-unknown}, expected $id" >&2
     return 1

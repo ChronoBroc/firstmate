@@ -677,9 +677,36 @@ fm_backlog_canonical_existing() {
   ' "$1" 2>/dev/null
 }
 
+# fm_backlog_home_contained <path> <label>: a <path> spelled inside FM_HOME
+# must resolve inside FM_HOME; a path spelled elsewhere is an explicit external
+# choice and passes.
+fm_backlog_home_contained() {  # <path> <label>
+  local path=$1 label=$2 path_resolved home_resolved
+  [ -n "${FM_HOME:-}" ] || return 0
+  case "$path" in
+    "$FM_HOME"|"$FM_HOME"/*) ;;
+    *) return 0 ;;
+  esac
+  home_resolved=$(fm_backlog_canonical_existing "$FM_HOME") || {
+    FM_BACKLOG_TRANSITION_ERROR="$label home directory cannot be resolved at $FM_HOME"
+    return 1
+  }
+  path_resolved=$(fm_backlog_canonical_existing "$path") || {
+    FM_BACKLOG_TRANSITION_ERROR="$label cannot be resolved at $path"
+    return 1
+  }
+  case "$path_resolved" in
+    "$home_resolved"|"$home_resolved"/*) ;;
+    *)
+      FM_BACKLOG_TRANSITION_ERROR="$label resolves outside this home at $path"
+      return 1
+      ;;
+  esac
+}
+
 fm_backlog_record_parent_authorized() {  # <path> <label> <root> [parent-only]
   local path=$1 label=$2 root=$3 parent_only=${4:-} parent base parent_resolved expected_path
-  local path_resolved root_resolved root_prefix home_resolved final_matches=1
+  local path_resolved root_resolved root_prefix final_matches=1
   parent=${path%/*}
   [ "$parent" != "$path" ] || parent=.
   base=${path##*/}
@@ -691,23 +718,7 @@ fm_backlog_record_parent_authorized() {  # <path> <label> <root> [parent-only]
     FM_BACKLOG_TRANSITION_ERROR="$label authorized directory is not a directory at $root"
     return 1
   }
-  if [ -n "${FM_HOME:-}" ]; then
-    case "$root" in
-      "$FM_HOME"|"$FM_HOME"/*)
-        home_resolved=$(fm_backlog_canonical_existing "$FM_HOME") || {
-          FM_BACKLOG_TRANSITION_ERROR="$label home directory cannot be resolved at $FM_HOME"
-          return 1
-        }
-        case "$root_resolved" in
-          "$home_resolved"|"$home_resolved"/*) ;;
-          *)
-            FM_BACKLOG_TRANSITION_ERROR="$label authorized directory resolves outside this home at $root"
-            return 1
-            ;;
-        esac
-        ;;
-    esac
-  fi
+  fm_backlog_home_contained "$root" "$label authorized directory" || return 1
   parent_resolved=$(fm_backlog_canonical_existing "$parent") || {
     FM_BACKLOG_TRANSITION_ERROR="$label parent directory cannot be resolved at $path"
     return 1

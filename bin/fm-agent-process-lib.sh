@@ -184,6 +184,7 @@ fm_agent_process_live_in_dir() {  # <dir> [launch-exe] [strict]
   local dir=${1:-} exe=${2:-} strict=${3:-} dir_real dir_id uid pid self selves found='' undecided='' lsof_out lsof_rc p candidates=''
   exe=${exe##*/}
   [ "$(fm_agent_process_classify_name "$exe")" != shell ] || exe=
+  [ -n "$dir" ] || { printf 'no directory was named to probe\n'; return 2; }
   undecided=$(fm_agent_process_view_incomplete) || undecided=
   dir_real=$(cd "$dir" 2>/dev/null && pwd -P) || {
     printf 'the directory %s does not resolve\n' "${dir:-<empty>}"
@@ -423,19 +424,30 @@ fm_agent_process_record_note() {  # <state-dir> <id>
 }
 
 # fm_agent_process_task_dir <meta> <id>: the directory task <id>'s agent runs
-# in - its one recorded worktree, or for a secondmate that records a home, that
-# home, only while the home's .fm-secondmate-home marker is a regular file
-# naming <id> - or fail when the record cannot name it unambiguously.
+# in - its one recorded worktree, or for a secondmate its home (the recorded
+# home, else the legacy worktree row), only while that home's marker
+# (fm_agent_process_home_marker) names <id> - or fail when the record cannot
+# name it unambiguously.
 fm_agent_process_task_dir() {  # <meta> <id>
   local meta=$1 id=$2 dir marker
   dir=$(fm_backend_meta_exact_value "$meta" worktree) || return 1
-  if [ "$(fm_meta_get "$meta" kind)" = secondmate ] && grep -q '^home=' "$meta" 2>/dev/null; then
-    dir=$(fm_backend_meta_exact_value "$meta" home) || return 1
-    [ -f "$dir/.fm-secondmate-home" ] && [ ! -L "$dir/.fm-secondmate-home" ] || return 1
-    marker=$(cat "$dir/.fm-secondmate-home" 2>/dev/null) || return 1
+  if [ "$(fm_meta_get "$meta" kind)" = secondmate ]; then
+    if grep -q '^home=' "$meta" 2>/dev/null; then
+      dir=$(fm_backend_meta_exact_value "$meta" home) || return 1
+    fi
+    marker=$(fm_agent_process_home_marker "$dir") || return 1
     [ "$marker" = "$id" ] || return 1
   fi
   printf '%s\n' "$dir"
+}
+
+# fm_agent_process_home_marker <home>: the secondmate id <home>'s
+# .fm-secondmate-home marker names, read only from a regular file that is not
+# a symlink; fails otherwise.
+fm_agent_process_home_marker() {  # <home>
+  local marker="${1:-}/.fm-secondmate-home"
+  [ -n "${1:-}" ] && [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+  cat "$marker" 2>/dev/null
 }
 
 # fm_agent_process_fold_survivor <text>: <text> - a command's combined output -

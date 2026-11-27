@@ -228,6 +228,20 @@ test_refusal_note_never_reads_a_foreign_state_directory() {
   done
   rm "$dir/home/state"
   mv "$dir/other-state" "$dir/home/state"
+  # A real state directory reached through a link to another home is that
+  # home's state, however the override spells it.
+  mkdir "$dir/foreign"
+  cp -R "$dir/home/state" "$dir/foreign/state"
+  ln -s "$dir/foreign" "$dir/home/other"
+  out=$(cd "$dir" && FM_STATE_OVERRIDE=home/other/state run_spawn "$dir" rl86-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a state override through a linked home must refuse"$'\n'"$out"
+  assert_contains "$out" "resolves outside this home" "the refusal should name the escaping state override"
+  assert_not_contains "$out" "pid $agent_pid" "a refusal must never report a linked home's task record"
+  out=$(FM_STATE_OVERRIDE="$dir/home/other/state" run_control "$dir" rl86-${RL_RUN} exit); rc=$?
+  [ "$rc" -ne 0 ] || fail "fm-control must refuse a state override through a linked home"$'\n'"$out"
+  assert_contains "$out" "resolves outside this home" "fm-control should name the escaping state override"
+  assert_not_contains "$out" "pid $agent_pid" "fm-control must never report a linked home's task record"
+  rm "$dir/home/other"
   # A record that names two worktrees is no evidence about which agent is its.
   printf 'worktree=%s\n' "$dir/wt" >> "$dir/home/state/rl86-${RL_RUN}.meta"
   printf 'zsh' > "$dir/fake/command"
@@ -350,6 +364,27 @@ test_secondmate_relaunch_checks_the_home_it_launches_in() {
   [ "$rc" -ne 0 ] || fail "a relaunch into a home marked for another mate must refuse"$'\n'"$out"
   assert_contains "$out" "marked for secondmate some-other-mate" "the refusal should name the mismatched marker"
   assert_not_contains "$out" "pid $agent_pid" "a mismatched home's agent must never be attributed to this task"
+  printf 'vim' > "$dir/fake/command"
+  out=$(run_control "$dir" rl83-${RL_RUN} exit); rc=$?
+  [ "$rc" -ne 0 ] || fail "exit must refuse when the secondmate's home is marked for another mate"$'\n'"$out"
+  assert_not_contains "$out" "pid $agent_pid" "fm-control must never attribute a mismatched home's agent"
+  # A legacy record names the home in its worktree row; the marker still rules.
+  sed -i.bak -e '/^home=/d' -e "s|^worktree=.*|worktree=$dir/smhome|" "$dir/home/state/rl83-${RL_RUN}.meta"
+  rm -f "$dir/home/state/rl83-${RL_RUN}.meta.bak"
+  out=$(run_control "$dir" rl83-${RL_RUN} exit); rc=$?
+  [ "$rc" -ne 0 ] || fail "exit must refuse a legacy record whose home is marked for another mate"$'\n'"$out"
+  assert_not_contains "$out" "pid $agent_pid" "fm-control must never attribute a legacy record's mismatched home"
+  printf 'zsh' > "$dir/fake/command"
+  out=$(run_spawn "$dir" rl83-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a legacy relaunch into a home marked for another mate must refuse"$'\n'"$out"
+  assert_contains "$out" "marked for secondmate some-other-mate" "the legacy refusal should name the mismatched marker"
+  assert_not_contains "$out" "pid $agent_pid" "a legacy record's mismatched home must never be attributed"
+  printf '%s\n' "rl83-${RL_RUN}" > "$dir/smhome/marker-target"
+  rm "$dir/smhome/.fm-secondmate-home"
+  ln -s "$dir/smhome/marker-target" "$dir/smhome/.fm-secondmate-home"
+  out=$(run_spawn "$dir" rl83-${RL_RUN} --relaunch --harness claude); rc=$?
+  [ "$rc" -ne 0 ] || fail "a home whose marker is a symlink must refuse"$'\n'"$out"
+  assert_not_contains "$out" "pid $agent_pid" "a symlinked marker must never attribute the home's agent"
   ! grep -Fq "Firstmate operational input waiting: read" "$dir/fake/literal" || fail "no second secondmate may be launched"
   stop_dir_process "$agent_pid"
   pass "fm-spawn --relaunch: a secondmate relaunch checks the home it launches in, not a stale recorded worktree"
