@@ -392,14 +392,14 @@ if ! fm_task_id_creation_valid "$RAW_ID"; then
   die "'$RAW_ID' is not a valid task id"
 fi
 ID=$RAW_ID
+CONTROL_LOCK="$STATE/.control-$ID.lock"
+trap control_cleanup EXIT
 # Supervision lease guard: lifecycle control is overlap territory between the
 # two Pi supervision actors; refuse while the OTHER actor holds this task's
 # live lease (contract: bin/fm-lease-lib.sh; no-op in homes without leases).
 # shellcheck source=bin/fm-lease-lib.sh
 . "$SCRIPT_DIR/fm-lease-lib.sh"
 fm_lease_guard "$ID" "lifecycle control (fm-control)"
-CONTROL_LOCK="$STATE/.control-$ID.lock"
-trap control_cleanup EXIT
 if [ "$VERB" = relaunch ] && [ -f "$STATE/.afk-contract" ]; then
   TASK_SET_LOCK=$(fm_task_set_lock_path "$STATE") || die "could not resolve the task-set lock for $STATE"
   if ! fm_lock_try_acquire "$TASK_SET_LOCK"; then

@@ -2158,6 +2158,31 @@ test_concurrent_relaunch_is_refused() {
   pass "fm-control relaunch: two control actions on one task serialize instead of interleaving"
 }
 
+test_lease_refused_relaunch_names_an_agent_still_in_the_worktree() {
+  local dir out rc agent agent_pid holder_pid
+  dir=$(new_case leased rl18)
+  add_ship_task "$dir" rl18 claude
+  agent=$(agent_standin_named "$dir" claude) || {
+    pass "fm-control relaunch under the other actor's lease: skipped - no stand-in survives a rename on this host"
+    return 0
+  }
+  start_dir_process "$dir/wt" "$agent" 600; agent_pid=$STARTED_PID
+  wait_probe_rc "$dir/wt" 0 || fail "the stand-in agent never appeared in the worktree"
+  # A live lease held by the branch actor (bin/fm-lease-lib.sh's staleness
+  # contract: its pid is alive and is the home's session-lock holder).
+  start_dir_process "$dir" /bin/sleep 600; holder_pid=$STARTED_PID
+  printf '%s\n' "$holder_pid" > "$dir/home/state/.lock"
+  printf 'branch\t%s\t%s\n' "$holder_pid" "$(date +%s)" > "$dir/home/state/.lease-rl18"
+  out=$(FM_SUPERVISION_ACTOR=main run_control "$dir" rl18 relaunch --note "leased elsewhere"); rc=$?
+  expect_code 6 "$rc" "the lease refusal keeps its exit status"$'\n'"$out"
+  assert_contains "$out" "is leased to the branch supervision actor" "the lease refusal should still be reported"
+  assert_contains "$out" "pid $agent_pid (claude)" "the lease refusal must also name the agent still in the worktree"
+  ! grep -Fqx /exit "$dir/fake/literal" || fail "a lease-refused relaunch must not stop the agent"
+  stop_dir_process "$agent_pid"
+  stop_dir_process "$holder_pid"
+  pass "fm-control relaunch: a lease refusal keeps its status and names the agent still in the worktree"
+}
+
 # shellcheck disable=SC2031
 test_direct_spawn_relaunch_participates_in_the_lifecycle_lock() {
   local dir out rc lock holder i=0 agent agent_pid=
@@ -3534,6 +3559,7 @@ test_secondmate_relaunch_refuses_an_unmarked_home
 test_secondmate_checkpoint_refuses_unreadable_child_state
 test_secondmate_checkpoint_ignores_a_vanished_scratch_find_walk
 test_concurrent_relaunch_is_refused
+test_lease_refused_relaunch_names_an_agent_still_in_the_worktree
 test_direct_spawn_relaunch_participates_in_the_lifecycle_lock
 test_promotion_participates_in_the_lifecycle_lock_before_metadata_resolution
 test_spawn_relaunch_refuses_a_live_agent
